@@ -27,6 +27,12 @@ test("GoalBuddy plugin metadata tracks the package release", () => {
   assert.equal(plugin.skills, "./skills/");
 });
 
+test("npm package keeps README assets without shipping site and release artwork", () => {
+  assert.ok(pkg.files.includes("internal/assets/goalbuddy-live-board.jpg"));
+  assert.ok(pkg.files.includes("internal/assets/goalbuddy-readme-hero.png"));
+  assert.ok(!pkg.files.includes("internal/assets"));
+});
+
 test("Claude plugin metadata stays aligned with package release", () => {
   assert.equal(claudePlugin.name, pkg.name);
   assert.equal(claudePlugin.version, pkg.version);

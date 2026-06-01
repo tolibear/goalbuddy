@@ -52,6 +52,11 @@ npm run pack:dry-run
 node internal/cli/check-publish-version.mjs
 ```
 
+The npm package intentionally ships only the README-referenced files from
+`internal/assets/`. Release and site artwork stays in the repository for GitHub
+and website rendering, but should not be re-added to `package.json` unless the
+package README or runtime starts depending on it.
+
 3. Commit and push the version change.
 4. Create and publish a GitHub release whose tag matches the package version, for example `v0.2.11`.
 5. Confirm the GitHub Actions workflow `Publish npm package` completed.
