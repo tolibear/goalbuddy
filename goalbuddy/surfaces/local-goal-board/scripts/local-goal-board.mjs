@@ -33,6 +33,7 @@ const SETTINGS_OPTIONS = {
 const DEFAULT_BIND_HOST = "127.0.0.1";
 const DEFAULT_PUBLIC_HOST = "goalbuddy.localhost";
 const DEFAULT_PORT = 41737;
+const LOCAL_MUTATION_HOSTS = new Set(["127.0.0.1", "localhost", "goalbuddy.localhost", "::1", "[::1]"]);
 
 if (isDirectRun()) {
   main().catch((error) => {
@@ -193,8 +194,9 @@ export async function startBoardServer(options = {}) {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
       if (request.method === "POST" && url.pathname === "/api/boards") {
+        validateMutationRequest(request, url, { host, publicHost });
         const payload = await readJsonRequest(request);
-        sendJson(response, addBoard(payload.goalDir || ""));
+        sendJson(response, addBoard(readBoardRegistrationPayload(payload).goalDir));
         return;
       }
       if (url.pathname === "/" || url.pathname === "/boards") {
@@ -202,6 +204,11 @@ export async function startBoardServer(options = {}) {
         return;
       }
       if (url.pathname === "/api/boards") {
+        if (request.method !== "GET") {
+          response.writeHead(405, { "Allow": "GET, POST" });
+          response.end("Method not allowed");
+          return;
+        }
         sendJson(response, { boards: [...boards.values()].map((board) => boardSummary(board, baseUrl)) });
         return;
       }
@@ -211,8 +218,9 @@ export async function startBoardServer(options = {}) {
           return;
         }
         if (request.method === "PUT") {
+          validateMutationRequest(request, url, { host, publicHost });
           const payload = await readJsonRequest(request);
-          sendJson(response, { version: SETTINGS_VERSION, settings: writeBoardSettings(payload.settings || payload) });
+          sendJson(response, { version: SETTINGS_VERSION, settings: writeBoardSettings(readSettingsPayload(payload)) });
           return;
         }
         response.writeHead(405, { "Allow": "GET, PUT" });
@@ -439,6 +447,89 @@ async function readJsonRequest(request) {
   return JSON.parse(body || "{}");
 }
 
+function validateMutationRequest(request, url, { host, publicHost }) {
+  if (!isJsonRequest(request)) {
+    throw httpError(415, "Mutation requests must use Content-Type: application/json.");
+  }
+
+  const hostHeader = request.headers.host || "";
+  if (!isAllowedMutationHost(hostHeader, { host, publicHost })) {
+    throw httpError(403, "Mutation requests must target the local GoalBuddy hub host.");
+  }
+
+  const origin = request.headers.origin || "";
+  if (origin && !isAllowedMutationOrigin(origin, url, { host, publicHost })) {
+    throw httpError(403, "Mutation requests must come from the local GoalBuddy board origin.");
+  }
+}
+
+function isJsonRequest(request) {
+  const contentType = request.headers["content-type"] || "";
+  return /^application\/json(?:\s*;|$)/i.test(contentType);
+}
+
+function isAllowedMutationHost(hostHeader, { host, publicHost }) {
+  const hostname = hostNameFromHeader(hostHeader);
+  if (!hostname) return false;
+  return allowedMutationHostnames({ host, publicHost }).has(hostname);
+}
+
+function isAllowedMutationOrigin(origin, url, { host, publicHost }) {
+  let originUrl;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (originUrl.protocol !== url.protocol) return false;
+  if (originUrl.port !== url.port) return false;
+  return allowedMutationHostnames({ host, publicHost }).has(originUrl.hostname);
+}
+
+function allowedMutationHostnames({ host, publicHost }) {
+  return new Set([
+    ...LOCAL_MUTATION_HOSTS,
+    normalizeHostName(host),
+    normalizeHostName(publicHost),
+  ].filter(Boolean));
+}
+
+function hostNameFromHeader(hostHeader) {
+  try {
+    return new URL(`http://${hostHeader}`).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeHostName(hostname) {
+  return String(hostname || "").replace(/^\[|\]$/g, "");
+}
+
+function readBoardRegistrationPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.goalDir !== "string" || !payload.goalDir.trim()) {
+    throw httpError(400, "Board registration payload must be a JSON object with a non-empty goalDir string.");
+  }
+  return { goalDir: payload.goalDir };
+}
+
+function readSettingsPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw httpError(400, "Settings payload must be a JSON object.");
+  }
+  const settings = Object.hasOwn(payload, "settings") ? payload.settings : payload;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    throw httpError(400, "Settings payload must include a JSON settings object.");
+  }
+  return settings;
+}
+
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 function watchGoal(goalDir, onChange) {
   const watchers = [];
   const schedule = debounce(onChange, 80);
@@ -522,7 +613,7 @@ function sendJson(response, payload) {
 }
 
 function sendError(response, error) {
-  response.writeHead(400, {
+  response.writeHead(error.statusCode || 400, {
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
   });

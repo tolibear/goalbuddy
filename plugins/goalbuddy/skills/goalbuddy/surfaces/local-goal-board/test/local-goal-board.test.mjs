@@ -363,6 +363,20 @@ test("serves global local board settings with defensive normalization", async ()
         motion: "allow",
         lastBoardPath: "",
       });
+
+      const hostileResponse = await fetch(`${server.hubUrl}api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Origin": "http://evil.example" },
+        body: JSON.stringify({ settings: { theme: "light" } }),
+      });
+      assert.equal(hostileResponse.status, 403);
+
+      const malformedResponse = await fetch(`${server.hubUrl}api/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: [] }),
+      });
+      assert.equal(malformedResponse.status, 400);
     } finally {
       await server.close();
     }
@@ -587,6 +601,71 @@ test("serves multiple local boards from one shared hub URL", async () => {
     } else {
       process.env.GOALBUDDY_LOCAL_BOARD_SETTINGS_PATH = previousSettingsPath;
     }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("hardens local board hub registration mutations", async () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-local-board-hub-hardening-"));
+  const firstGoalDir = join(root, "first-goal");
+  const secondGoalDir = join(root, "second-goal");
+  const thirdGoalDir = join(root, "third-goal");
+  try {
+    mkdirSync(join(firstGoalDir, "notes"), { recursive: true });
+    mkdirSync(join(secondGoalDir, "notes"), { recursive: true });
+    mkdirSync(join(thirdGoalDir, "notes"), { recursive: true });
+    writeFileSync(join(firstGoalDir, "state.yaml"), stateYaml("active", { title: "First Goal", slug: "first-goal" }));
+    writeFileSync(join(secondGoalDir, "state.yaml"), stateYaml("blocked", { title: "Second Goal", slug: "second-goal" }));
+    writeFileSync(join(thirdGoalDir, "state.yaml"), stateYaml("active", { title: "Third Goal", slug: "third-goal" }));
+
+    const server = await startBoardServer({ goalDir: firstGoalDir, host: "127.0.0.1", port: 0 });
+    try {
+      const sameOriginResponse = await fetch(server.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Origin": new URL(server.url).origin },
+        body: JSON.stringify({ goalDir: secondGoalDir }),
+      });
+      assert.equal(sameOriginResponse.status, 200);
+      assert.equal((await sameOriginResponse.json()).title, "Second Goal");
+
+      const noOriginResponse = await fetch(server.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalDir: thirdGoalDir }),
+      });
+      assert.equal(noOriginResponse.status, 200);
+      assert.equal((await noOriginResponse.json()).title, "Third Goal");
+
+      const hostileOriginResponse = await fetch(server.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Origin": "http://evil.example" },
+        body: JSON.stringify({ goalDir: thirdGoalDir }),
+      });
+      assert.equal(hostileOriginResponse.status, 403);
+
+      const nonJsonResponse = await fetch(server.apiUrl, {
+        method: "POST",
+        body: JSON.stringify({ goalDir: thirdGoalDir }),
+      });
+      assert.equal(nonJsonResponse.status, 415);
+
+      const malformedResponse = await fetch(server.apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalDir: 42 }),
+      });
+      assert.equal(malformedResponse.status, 400);
+
+      const wrongMethodResponse = await fetch(server.apiUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goalDir: thirdGoalDir }),
+      });
+      assert.equal(wrongMethodResponse.status, 405);
+    } finally {
+      await server.close();
+    }
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
