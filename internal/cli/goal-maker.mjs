@@ -251,6 +251,8 @@ Usage:
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
 Targets: by default, install/update prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the command.
+Install writes GoalBuddy-owned plugin, skill, and agent files into the selected runtime homes.
+Global npm installs run ${canonicalCliName} with the current environment; set GOALBUDDY_SKIP_POSTINSTALL=1 to install the package only and run ${canonicalCliName} later.
 
 Default:
   ${canonicalCliName}                  Installs and enables Codex, then installs Claude Code skill + agents (skill surfaces /goal-prep).

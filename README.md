@@ -28,6 +28,8 @@ Run one command:
 npx goalbuddy
 ```
 
+This installs GoalBuddy-owned runtime files for both Codex and Claude Code by default. Use `npx goalbuddy --target codex` or `npx goalbuddy --target claude` to install only one runtime.
+
 Restart Codex or Claude Code.
 
 Then prepare a goal:
@@ -143,6 +145,16 @@ npx goalbuddy update
 ```
 
 That updates both Codex and Claude Code.
+
+## npm Postinstall
+
+Global npm installs run the same setup automatically, so `npm install -g goalbuddy` installs the package and then runs `goalbuddy` with the current environment. By default, that prepares the Codex and Claude Code runtime files. To install the package without touching those runtime homes, set:
+
+```bash
+GOALBUDDY_SKIP_POSTINSTALL=1 npm install -g goalbuddy
+```
+
+Then run `goalbuddy` later when you are ready. If automatic setup cannot complete because Codex or Claude Code is unavailable, rerun `goalbuddy`, `goalbuddy --target codex`, or `goalbuddy --target claude` after the runtime is installed.
 
 ## Live Boards
 

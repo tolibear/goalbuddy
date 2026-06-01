@@ -39,6 +39,8 @@ After the trusted publisher works, use npm package settings to require 2FA and d
 
 Starting in `0.3.0`, the installer is target-aware: `npx goalbuddy` installs into both `~/.codex/` and `~/.claude/`, and `goalbuddy update` refreshes both by default. Use `--target codex` or `--target claude` to narrow a command. Both targets share the same `goalbuddy/` skill payload and are exercised by the test suite under `internal/test/`.
 
+Global npm installs intentionally run `goalbuddy` with the current environment during `postinstall`, so `npm install -g goalbuddy` can write GoalBuddy-owned plugin, skill, and agent files under the selected runtime homes. Set `GOALBUDDY_SKIP_POSTINSTALL=1` when testing package installation only or when runtime setup should be deferred; users can rerun `goalbuddy` later.
+
 ## Release Flow
 
 1. Update `package.json` version.

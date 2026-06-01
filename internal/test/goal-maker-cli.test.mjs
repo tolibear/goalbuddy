@@ -1,15 +1,29 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join, parse, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
+const postinstallCli = resolve("internal/cli/postinstall.mjs");
 const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 
 function runGoalMaker(args, options = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: options.cwd || process.cwd(),
+    encoding: "utf8",
+    env: testEnv(options.env || process.env),
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function runPostinstall(options = {}) {
+  const result = spawnSync(process.execPath, [postinstallCli], {
     cwd: options.cwd || process.cwd(),
     encoding: "utf8",
     env: testEnv(options.env || process.env),
@@ -89,6 +103,28 @@ function fakeCodexEnv(root, options = {}) {
     ...process.env,
     PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
   };
+}
+
+function isolatedPostinstallEnv(root, options = {}) {
+  const env = {
+    ...fakeCodexEnv(root),
+    HOME: root,
+    USERPROFILE: root,
+    npm_config_global: "true",
+  };
+  const parsed = parse(root);
+  if (parsed.root && parsed.root.endsWith("\\")) {
+    env.HOMEDRIVE = parsed.root.slice(0, -1);
+    env.HOMEPATH = root.slice(env.HOMEDRIVE.length) || "\\";
+  } else {
+    delete env.HOMEDRIVE;
+    delete env.HOMEPATH;
+  }
+  delete env.CODEX_HOME;
+  delete env.CLAUDE_HOME;
+  if (options.skipPostinstall) env.GOALBUDDY_SKIP_POSTINSTALL = "1";
+  else delete env.GOALBUDDY_SKIP_POSTINSTALL;
+  return env;
 }
 
 test("doctor fails when a required bundled agent is missing", () => {
@@ -1095,6 +1131,41 @@ test("default command installs Codex and Claude Code when both homes are provide
     assert.equal(existsSync(join(claudeHome, "skills", "goalbuddy", "SKILL.md")), true);
     assert.equal(existsSync(join(claudeHome, "agents", "goal-worker.md")), true);
     assert.equal(existsSync(join(claudeHome, "commands", "goal-prep.md")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("global postinstall makes automatic setup explicit and installs into temp homes", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const env = isolatedPostinstallEnv(root);
+
+    const install = runPostinstall({ env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    assert.match(install.stderr, /GoalBuddy global install detected; running `goalbuddy` setup now\./);
+    assert.match(install.stderr, /GOALBUDDY_SKIP_POSTINSTALL=1/);
+
+    assert.equal(existsSync(join(root, ".codex", "config.toml")), true);
+    assert.equal(existsSync(join(root, ".codex", "agents", "goal_worker.toml")), true);
+    assert.equal(existsSync(join(root, ".claude", "skills", "goalbuddy", "SKILL.md")), true);
+    assert.equal(existsSync(join(root, ".claude", "agents", "goal-worker.md")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("global postinstall skip flag leaves runtime homes untouched", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const env = isolatedPostinstallEnv(root, { skipPostinstall: true });
+
+    const install = runPostinstall({ env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    assert.match(install.stderr, /GoalBuddy postinstall skipped because GOALBUDDY_SKIP_POSTINSTALL is set\./);
+    assert.match(install.stderr, /Run `goalbuddy` later/);
+    assert.equal(existsSync(join(root, ".codex")), false);
+    assert.equal(existsSync(join(root, ".claude")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
