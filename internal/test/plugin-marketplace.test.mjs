@@ -28,9 +28,16 @@ test("GoalBuddy plugin metadata tracks the package release", () => {
 });
 
 test("npm package keeps README assets without shipping site and release artwork", () => {
-  assert.ok(pkg.files.includes("internal/assets/goalbuddy-live-board.jpg"));
-  assert.ok(pkg.files.includes("internal/assets/goalbuddy-readme-hero.png"));
-  assert.ok(!pkg.files.includes("internal/assets"));
+  const allowedAssetFiles = new Set([
+    "internal/assets/goalbuddy-live-board.jpg",
+    "internal/assets/goalbuddy-readme-hero.png",
+  ]);
+  const normalizedFiles = pkg.files.map((file) => file.replace(/\\/g, "/").replace(/\/+$/, ""));
+  const packagedAssetEntries = normalizedFiles.filter((file) => (
+    file === "internal/assets" || file.startsWith("internal/assets/")
+  ));
+
+  assert.deepEqual(new Set(packagedAssetEntries), allowedAssetFiles);
 });
 
 test("Claude plugin metadata stays aligned with package release", () => {
