@@ -1,12 +1,24 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const canonicalSkill = readFileSync("goalbuddy/SKILL.md", "utf8");
 const pluginSkill = readFileSync("plugins/goalbuddy/skills/goalbuddy/SKILL.md", "utf8");
+const canonicalGoalBuddyRoot = "goalbuddy";
+const pluginGoalBuddyRoot = "plugins/goalbuddy/skills/goalbuddy";
 
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
@@ -23,6 +35,19 @@ function fakeCodexBin(root) {
   ].join("\n"));
   chmodSync(path, 0o755);
   return bin;
+}
+
+function listFiles(root, base = root) {
+  const files = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listFiles(path, base));
+    } else if (entry.isFile()) {
+      files.push(relative(base, path));
+    }
+  }
+  return files.sort();
 }
 
 test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
@@ -68,6 +93,26 @@ test("slice policy is simple and mirrored across templates and agent payloads", 
   assert.match(canonicalWorker, /model_reasoning_effort = "medium"/);
   assert.match(canonicalWorker, /complete the whole assigned slice/i);
   assert.match(canonicalJudge, /largest safe useful slice/i);
+});
+
+test("canonical local board surface is the source of truth for the plugin mirror", () => {
+  const surfacePath = "surfaces/local-goal-board";
+  const canonicalSurface = join(canonicalGoalBuddyRoot, surfacePath);
+  const pluginSurface = join(pluginGoalBuddyRoot, surfacePath);
+  const canonicalFiles = listFiles(canonicalSurface);
+  const pluginFiles = listFiles(pluginSurface);
+
+  assert.deepEqual(pluginFiles, canonicalFiles);
+
+  for (const file of canonicalFiles) {
+    const canonicalPath = join(canonicalSurface, file);
+    const pluginPath = join(pluginSurface, file);
+    const canonicalStat = statSync(canonicalPath);
+    const pluginStat = statSync(pluginPath);
+
+    assert.equal(pluginStat.size, canonicalStat.size, `${file} size drifted`);
+    assert.deepEqual(readFileSync(pluginPath), readFileSync(canonicalPath), `${file} content drifted`);
+  }
 });
 
 test("Codex install keeps Goal Prep in the plugin and removes compatibility skill folders", () => {

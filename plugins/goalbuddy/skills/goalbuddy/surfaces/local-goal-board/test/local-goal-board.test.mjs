@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createBoardPayload, writeBoardApp } from "../scripts/lib/goal-board.mjs";
+import { buildColumns, createBoardPayload, writeBoardApp } from "../scripts/lib/goal-board.mjs";
 import { parseArgs, startBoardServer } from "../scripts/local-goal-board.mjs";
 
 test("normalizes a dense goal into local board columns", () => {
@@ -23,6 +23,18 @@ test("normalizes a dense goal into local board columns", () => {
   assert.equal(scout.receipt.summary, "T001 completed during the progressive board motion demo.");
 });
 
+test("orders completed cards newest first while preserving queued order", () => {
+  const columns = buildColumns([
+    { id: "T001", column: "completed", status: "done" },
+    { id: "T002", column: "todo", status: "queued" },
+    { id: "T003", column: "completed", status: "done" },
+    { id: "T004", column: "todo", status: "queued" },
+  ]);
+
+  assert.deepEqual(columns.find((column) => column.id === "todo").tasks.map((task) => task.id), ["T002", "T004"]);
+  assert.deepEqual(columns.find((column) => column.id === "completed").tasks.map((task) => task.id), ["T003", "T001"]);
+});
+
 test("loads depth-1 subgoal boards into parent task payloads", () => {
   const payload = createBoardPayload(resolve("goalbuddy/surfaces/local-goal-board/examples/subgoal-parent"));
   const parentTask = payload.tasks.find((task) => task.id === "T004");
@@ -37,10 +49,10 @@ test("loads depth-1 subgoal boards into parent task payloads", () => {
   assert.equal(parentTask.subgoal.board.tasks.find((task) => task.id === "T002").subgoal, null);
 });
 
-test("uses compact card titles while preserving full objectives", () => {
-  const root = mkdtempSync(join(tmpdir(), "goalbuddy-compact-titles-"));
+test("uses readable card titles while preserving full objectives", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-readable-titles-"));
   try {
-    const goalDir = join(root, "compact-titles");
+    const goalDir = join(root, "readable-titles");
     mkdirSync(join(goalDir, "notes"), { recursive: true });
     writeFileSync(join(goalDir, "state.yaml"), `version: 2
 goal:
@@ -70,6 +82,13 @@ tasks:
     status: queued
     objective: "This objective can stay much more detailed because it belongs in the modal, not on the card face."
     receipt: null
+  - id: T004
+    title: "Run installed-Cursor runtime proof for a named model request through the local BYOK bridge"
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Run installed-Cursor runtime proof for a named model request through the local BYOK bridge."
+    receipt: null
 `);
 
     const payload = createBoardPayload(goalDir);
@@ -77,6 +96,10 @@ tasks:
     assert.equal(payload.tasks.find((task) => task.id === "T001").objective.includes("admin_seed_metrics.enrichment_qa"), true);
     assert.equal(payload.tasks.find((task) => task.id === "T002").title, "Implement /contacts/con_aaron_keller route");
     assert.equal(payload.tasks.find((task) => task.id === "T003").title, "Human-friendly release title");
+    assert.equal(
+      payload.tasks.find((task) => task.id === "T004").title,
+      "Run installed-Cursor runtime proof for a named model request through the local BYOK bridge",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -229,44 +252,52 @@ tasks:
 });
 
 test("writes a minimal GoalBuddy web app into the goal directory", () => {
-  const appDir = writeBoardApp(resolve("goalbuddy/surfaces/local-goal-board/examples/sample-goal"));
-  const html = readFileSync(join(appDir, "index.html"), "utf8");
-  const css = readFileSync(join(appDir, "styles.css"), "utf8");
-  const js = readFileSync(join(appDir, "app.js"), "utf8");
-  const logo = readFileSync(join(appDir, "goalbuddy-mark.png"));
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-write-board-app-"));
+  try {
+    const goalDir = join(root, "sample-goal");
+    cpSync(resolve("goalbuddy/surfaces/local-goal-board/examples/sample-goal"), goalDir, { recursive: true });
+    const appDir = writeBoardApp(goalDir);
+    const html = readFileSync(join(appDir, "index.html"), "utf8");
+    const css = readFileSync(join(appDir, "styles.css"), "utf8");
+    const js = readFileSync(join(appDir, "app.js"), "utf8");
+    const logo = readFileSync(join(appDir, "goalbuddy-mark.png"));
 
-  assert.match(html, /goalbuddy-mark\.png/);
-  assert.match(html, /class="topbar-primary"/);
-  assert.match(html, /class="board-switcher is-empty"/);
-  assert.match(html, /class="github-stars"/);
-  assert.match(html, /id="settings-button"/);
-  assert.match(html, /id="settings-popover"/);
-  assert.match(css, /--canvas: #f7f6f3/);
-  assert.match(css, /\.topbar-primary/);
-  assert.match(css, /\.board-switcher\.is-empty \{\n  display: none;/);
-  assert.match(css, /active-card-orbit/);
-  assert.match(css, /:root\[data-motion="reduce"\] \.task-card\.is-active::before/);
-  assert.match(css, /:root\[data-theme="dark"\]/);
-  assert.match(css, /:root\[data-density="compact"\] \.task-card/);
-  assert.match(css, /:root\[data-completed-visibility="collapse"\]/);
-  assert.match(css, /\.subgoal-board/);
-  assert.match(css, /\.board-error/);
-  assert.match(js, /new EventSource\("\.\/events"\)/);
-  assert.match(js, /fetch\("\.\.\/api\/boards"/);
-  assert.match(js, /fetch\("\.\.\/api\/settings"/);
-  assert.match(js, /fetch\("https:\/\/api\.github\.com\/repos\/tolibear\/goalbuddy"/);
-  assert.match(js, /goalbuddy\.localBoardSettings\.v1/);
-  assert.match(js, /document\.documentElement\.dataset\.theme/);
-  assert.match(js, /rememberCurrentBoard/);
-  assert.match(js, /settingsButtonEl\.setAttribute\("aria-label"/);
-  assert.match(js, /animateCardMoves/);
-  assert.match(js, /card\.animate/);
-  assert.match(js, /highlightMovingCards/);
-  assert.match(js, /renderSubgoal/);
-  assert.match(js, /renderBoardError/);
-  assert.match(js, /boardOptionLabel/);
-  assert.match(js, /duration: changedColumn \? 980 : 520/);
-  assert.equal(logo.subarray(1, 4).toString("ascii"), "PNG");
+    assert.match(html, /goalbuddy-mark\.png/);
+    assert.match(html, /class="topbar-primary"/);
+    assert.match(html, /class="board-switcher is-empty"/);
+    assert.match(html, /class="github-stars"/);
+    assert.match(html, /id="settings-button"/);
+    assert.match(html, /id="settings-popover"/);
+    assert.match(css, /--canvas: #f7f6f3/);
+    assert.match(css, /\.topbar-primary/);
+    assert.match(css, /\.board-switcher\.is-empty \{\n  display: none;/);
+    assert.match(css, /active-card-orbit/);
+    assert.match(css, /:root\[data-motion="reduce"\] \.task-card\.is-active::before/);
+    assert.match(css, /:root\[data-theme="dark"\]/);
+    assert.match(css, /:root\[data-density="compact"\] \.task-card/);
+    assert.match(css, /:root\[data-completed-visibility="collapse"\]/);
+    assert.match(css, /-webkit-line-clamp: 5/);
+    assert.match(css, /\.subgoal-board/);
+    assert.match(css, /\.board-error/);
+    assert.match(js, /new EventSource\("\.\/events"\)/);
+    assert.match(js, /fetch\("\.\.\/api\/boards"/);
+    assert.match(js, /fetch\("\.\.\/api\/settings"/);
+    assert.match(js, /fetch\("https:\/\/api\.github\.com\/repos\/tolibear\/goalbuddy"/);
+    assert.match(js, /goalbuddy\.localBoardSettings\.v1/);
+    assert.match(js, /document\.documentElement\.dataset\.theme/);
+    assert.match(js, /rememberCurrentBoard/);
+    assert.match(js, /settingsButtonEl\.setAttribute\("aria-label"/);
+    assert.match(js, /animateCardMoves/);
+    assert.match(js, /card\.animate/);
+    assert.match(js, /highlightMovingCards/);
+    assert.match(js, /renderSubgoal/);
+    assert.match(js, /renderBoardError/);
+    assert.match(js, /boardOptionLabel/);
+    assert.match(js, /duration: changedColumn \? 980 : 520/);
+    assert.equal(logo.subarray(1, 4).toString("ascii"), "PNG");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("serves global local board settings with defensive normalization", async () => {
@@ -395,11 +426,13 @@ test("runs when installed under a symlinked temp path", () => {
   try {
     cpSync("goalbuddy/surfaces/local-goal-board/scripts", join(root, "scripts"), { recursive: true });
     cpSync("goalbuddy/surfaces/local-goal-board/assets", join(root, "assets"), { recursive: true });
+    const goalDir = join(root, "sample-goal");
+    cpSync(resolve("goalbuddy/surfaces/local-goal-board/examples/sample-goal"), goalDir, { recursive: true });
 
     const result = spawnSync(process.execPath, [
       join(root, "scripts", "local-goal-board.mjs"),
       "--goal",
-      resolve("goalbuddy/surfaces/local-goal-board/examples/sample-goal"),
+      goalDir,
       "--once",
       "--json",
     ], { encoding: "utf8" });
