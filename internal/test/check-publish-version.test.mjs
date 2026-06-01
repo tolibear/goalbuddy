@@ -20,6 +20,17 @@ function runCheck(publishedVersions) {
   });
 }
 
+function runCheckWithoutToSorted(publishedVersions) {
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", `delete Array.prototype.toSorted; await import("./${script}");`], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GOALBUDDY_PUBLISHED_VERSIONS: publishedVersions,
+      GOAL_MAKER_PUBLISHED_VERSIONS: "",
+    },
+  });
+}
+
 test("publish version check passes when package version is newer than npm", () => {
   const result = runCheck(JSON.stringify([olderVersion, previousVersion]));
 
@@ -39,6 +50,13 @@ test("publish version check rejects package versions behind the registry", () =>
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, new RegExp(`must be greater than the latest published version ${escapeRegex(nextVersion)}`));
+});
+
+test("publish version check does not require Node 20 array sorting APIs", () => {
+  const result = runCheckWithoutToSorted(JSON.stringify([previousVersion, olderVersion]));
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, new RegExp(`goalbuddy@${escapeRegex(currentVersion)} > published ${escapeRegex(previousVersion)}`));
 });
 
 function offsetPatchVersion(version, offset) {

@@ -7,12 +7,38 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  release-gate:
+    name: Release gate on Node 18
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "18"
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Verify package on supported runtime floor
+        run: |
+          npm run check
+          npm run pack:dry-run
+          node internal/cli/check-publish-version.mjs
+
   publish:
     name: Publish to npm
+    needs: release-gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v6

@@ -66,6 +66,8 @@ npx goalbuddy doctor --target claude
 
 npm trusted publishing requires a GitHub-hosted runner, Node `22.14.0` or newer, npm `11.5.1` or newer, and `id-token: write` workflow permission. The release workflow uses Node 24 and grants the OIDC permission required by npm.
 
+The same workflow runs the release gate on Node 18 before publishing because `package.json` declares `engines.node >=18`. Keep publish/version checks compatible with that runtime floor even though trusted publishing itself runs on newer Node.
+
 When publishing through trusted publishing from this public repo to the public `goalbuddy` package, npm should generate provenance automatically. The workflow intentionally runs `npm publish` without `NODE_AUTH_TOKEN`; npm exchanges the GitHub OIDC identity for a short-lived publish credential.
 
 ## Compatibility Package

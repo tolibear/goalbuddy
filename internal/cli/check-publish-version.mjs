@@ -15,7 +15,7 @@ if (!publishedVersions.length) {
 }
 
 const normalizedPublishedVersions = publishedVersions.map(normalizeVersion);
-const latestPublishedVersion = normalizedPublishedVersions.toSorted(compareVersions).at(-1);
+const latestPublishedVersion = normalizedPublishedVersions.slice().sort(compareVersions).at(-1);
 
 if (normalizedPublishedVersions.includes(currentVersion)) {
   fail(`${pkg.name}@${currentVersion} has already been published. Bump package.json before publishing.`);
