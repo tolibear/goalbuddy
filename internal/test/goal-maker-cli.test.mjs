@@ -201,13 +201,14 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   const scout = readFileSync("goalbuddy/agents/goal_scout.toml", "utf8");
   const judge = readFileSync("goalbuddy/agents/goal_judge.toml", "utf8");
   const worker = readFileSync("goalbuddy/agents/goal_worker.toml", "utf8");
-  assert.match(scout, /model_reasoning_effort = "low"/);
+  assert.match(scout, /model_reasoning_effort = "medium"/);
   assert.match(scout, /Read only/);
   assert.match(scout, /goalbuddy_receipt_v1/);
   assert.match(judge, /Parallel Worker work is safe only with provably disjoint allowed_files/);
+  assert.match(judge, /model_reasoning_effort = "xhigh"/);
   assert.match(judge, /Choose the largest safe useful slice/);
   assert.match(judge, /Routine checks belong to the checker/);
-  assert.match(worker, /model_reasoning_effort = "medium"/);
+  assert.match(worker, /model_reasoning_effort = "high"/);
   assert.match(worker, /Edit only files matching allowed_files/);
   assert.match(worker, /Complete the whole assigned slice/);
   assert.match(worker, /verification_attempts/);

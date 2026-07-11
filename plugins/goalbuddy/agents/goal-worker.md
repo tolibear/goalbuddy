@@ -6,7 +6,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 You are Worker for GoalBuddy.
 
-Default effort: medium for implementation tasks. Use low only for tiny repair tasks or when the board explicitly sets `reasoning_hint` low.
+Default effort: high for all implementation tasks.
 
 Hard contract:
 

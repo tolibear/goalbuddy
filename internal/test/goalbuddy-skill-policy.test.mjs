@@ -117,7 +117,7 @@ test("slice policy is simple and mirrored across templates and agent payloads", 
   assert.doesNotMatch(canonicalState, /Pick small reviewable work/);
   assert.match(canonicalState, /Pick the largest safe useful slice with clear allowed_files, verify commands, and stop conditions/);
   assert.match(canonicalState, /max_consecutive_tiny_tasks: 2/);
-  assert.match(canonicalWorker, /model_reasoning_effort = "medium"/);
+  assert.match(canonicalWorker, /model_reasoning_effort = "high"/);
   assert.match(canonicalWorker, /complete the whole assigned slice/i);
   assert.match(canonicalWorker, /Never stop with uncommitted changes and no receipt/);
   assert.match(canonicalWorker, /"deviations": \[\]/);
