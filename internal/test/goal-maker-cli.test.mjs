@@ -253,6 +253,17 @@ test("check-update reports newer published GoalBuddy versions", () => {
   assert.match(human.stdout, /Update with: \/plugin update goalbuddy@goalbuddy/);
 });
 
+test("check-update honors a user-owned update command", () => {
+  const env = {
+    GOALBUDDY_TEST_NPM_LATEST_VERSION: "99.0.0",
+    GOALBUDDY_UPDATE_COMMAND: "git -C /tmp/goalbuddy fetch origin main",
+  };
+
+  const result = runGoalMaker(["check-update", "--json"], { env });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(result.stdout).update_command, env.GOALBUDDY_UPDATE_COMMAND);
+});
+
 test("check-update avoids guessing an unknown install channel", () => {
   const env = {
     GOALBUDDY_TEST_NPM_LATEST_VERSION: "99.0.0",

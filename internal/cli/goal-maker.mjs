@@ -855,6 +855,7 @@ function updateReport() {
 
 function detectUpdateCommand() {
   if (process.env.GOALBUDDY_TEST_UPDATE_COMMAND) return process.env.GOALBUDDY_TEST_UPDATE_COMMAND;
+  if (process.env.GOALBUDDY_UPDATE_COMMAND) return process.env.GOALBUDDY_UPDATE_COMMAND;
   if (process.env.CLAUDE_PLUGIN_ROOT || normalizedPath(__dirname).includes("/.claude/")) return `/plugin update ${pluginName}@${pluginName}`;
 
   const userAgent = process.env.npm_config_user_agent || "";

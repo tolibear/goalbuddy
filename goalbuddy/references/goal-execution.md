@@ -140,7 +140,7 @@ receipt:
   summary: "invoice.paid now routes through eventRouter.dispatch; regression test added."
 ```
 
-A `done` Worker receipt must list only passing commands. The bundled checker rejects a done Worker whose `commands` include a non-`pass` status. If the task's own `verify` did not pass, the task is not done: mark it `blocked` and keep the failing command visible in the blocked receipt — do not move truthful failure evidence into prose to make a `done` receipt validate.
+A `done` Worker receipt must list only passing commands and must include every command from the task's `verify` list verbatim. Extra passing diagnostic commands are allowed, but they do not replace a declared verification command. The bundled checker rejects a done Worker whose `commands` omit a declared verification command or include a non-`pass` status. If the task's own `verify` did not pass, the task is not done: mark it `blocked` and keep the failing command visible in the blocked receipt — do not move truthful failure evidence into prose to make a `done` receipt validate.
 
 Blocked Worker receipt:
 

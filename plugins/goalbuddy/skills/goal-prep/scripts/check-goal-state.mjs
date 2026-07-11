@@ -186,6 +186,7 @@ function taskReceipt(task) {
     raw,
     has: (key) => new RegExp(`^\\s{6}${key}:`, "m").test(raw),
     list: (key) => receiptList(raw, key),
+    commands: () => receiptCommands(raw),
     commandStatuses: () => receiptCommandStatuses(raw),
     scalar: (key) => {
       const match = raw.match(new RegExp(`^\\s{6}${key}:\\s*(.*?)\\s*$`, "m"));
@@ -234,9 +235,34 @@ function receiptList(raw, key) {
 }
 
 function receiptCommandStatuses(raw) {
-  return [...raw.matchAll(/^\s{10}status:\s*(.*?)\s*$/gm)]
-    .map((match) => clean(match[1]))
+  return receiptCommands(raw)
+    .map((command) => command.status)
     .filter((value) => value !== null);
+}
+
+function receiptCommands(raw) {
+  const lines = raw.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^\s{6}commands:\s*$/.test(line));
+  if (start === -1) return [];
+
+  const commands = [];
+  let current = null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s{6}\S/.test(line)) break;
+
+    const item = line.match(/^\s{8}-\s+cmd:\s*(.*?)\s*$/);
+    if (item) {
+      current = { cmd: clean(item[1]), status: null };
+      commands.push(current);
+      continue;
+    }
+
+    const status = line.match(/^\s{10}status:\s*(.*?)\s*$/);
+    if (status && current) current.status = clean(status[1]);
+  }
+
+  return commands.filter((command) => command.cmd !== null);
 }
 
 function rootEntryErrors() {
@@ -428,12 +454,23 @@ for (const task of tasks) {
       }
     }
     const commandStatuses = task.receipt.commandStatuses();
+    const receiptCommands = task.receipt.commands();
     if (task.receipt.has("commands") && commandStatuses.length === 0) {
       errors.push(`Worker receipt for ${task.id} commands must include status fields`);
     }
     for (const status of commandStatuses) {
       if (status !== "pass") {
         errors.push(`Worker receipt for ${task.id} has non-passing command status: ${status}`);
+      }
+    }
+    const passingCommands = new Set(
+      receiptCommands
+        .filter((command) => command.status === "pass")
+        .map((command) => command.cmd),
+    );
+    for (const command of task.verify) {
+      if (!passingCommands.has(command)) {
+        errors.push(`Worker receipt for ${task.id} missing passing verification command: ${command}`);
       }
     }
     if (task.receipt.scalar("needs_judge") === true) {
