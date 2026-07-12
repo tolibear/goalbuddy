@@ -1321,7 +1321,7 @@ async function resume() {
     const validation = runResumeChecker(goalDir);
     const checker = validation.checker;
     if (!checker.ok) {
-      printResumeFailure(goalDir, checker);
+      printResumeFailure(goalDir, checker, { stateText: validation.stateText });
       process.exitCode = 1;
       return;
     }
@@ -1340,22 +1340,10 @@ async function resume() {
         printResumeProjection(projection);
       }
     } catch (error) {
-      const failure = {
-        ok: false,
-        schema_version: 1,
-        board: {
-          path: displayGoalPath(goalDir),
-          state_path: join(goalDir, "state.yaml"),
-        },
-        checker,
-        errors: [error.message],
-        recovery: {
-          main_agent_action: "inspect_board",
-          reason: "The board passed the checker but the continuation projection could not be rendered.",
-        },
-      };
-      if (hasFlag("--json")) printJson(failure);
-      else console.error(`GoalBuddy resume failed: ${error.message}`);
+      printResumeFailure(goalDir, checker, {
+        stateText: validation.stateText,
+        projectionError: error.message,
+      });
       process.exitCode = 1;
     }
     return;
@@ -1449,18 +1437,41 @@ function runResumeChecker(goalDir) {
   };
 }
 
-function printResumeFailure(goalDir, checker) {
+function printResumeFailure(goalDir, checker, { stateText = null, projectionError = "" } = {}) {
+  const stateDigest = stateText === null ? null : sha256(stateText);
+  const digestStatus = stateDigest === null
+    ? "unavailable"
+    : checker.ok
+      ? "checker_validated"
+      : "observed_unvalidated";
+  const errors = projectionError ? [projectionError] : checker.errors;
   const failure = {
     ok: false,
     schema_version: 1,
     board: {
       path: displayGoalPath(goalDir),
       state_path: checker.state_path || join(goalDir, "state.yaml"),
+      goal_path: join(goalDir, "goal.md"),
+      state_digest: stateDigest,
+      state_digest_status: digestStatus,
     },
     checker,
+    errors,
     recovery: {
-      main_agent_action: "inspect_board",
-      reason: "GoalBuddy resume is fail-closed because the authoritative board did not pass validation.",
+      mode: "full_board_review",
+      audit_required: true,
+      main_agent_action: "inspect_full_board",
+      continuation_allowed: false,
+      reason: projectionError
+        ? "The board passed the checker, but a strict compact projection could not be rendered. Full-board review is required."
+        : "The authoritative board did not pass validation. Full-board review is required before any continuation decision.",
+      instructions: [
+        "Do not continue, dispatch, or apply a receipt from this response.",
+        "Read the complete goal.md and state.yaml and reconcile the active task, latest transition, verification, owner gates, worktrees, and possible Worker liveness.",
+        "Give the Ledger Auditor this board path and state digest when available; a checker or projection failure must remain a PM escalation.",
+        "Repair and rerun resume when an error affects live state or the continuation point.",
+        "If every error is confined to immutable completed-task history on a current version: 2 board, preserve that history. The PM may continue only after direct full-board review proves the live continuation exact; never fabricate or rewrite historical receipts merely to make the checker green.",
+      ],
     },
   };
 
@@ -1469,9 +1480,10 @@ function printResumeFailure(goalDir, checker) {
     return;
   }
 
-  console.error(`GoalBuddy resume blocked: ${failure.board.state_path}`);
-  for (const error of checker.errors) console.error(`  - ${error}`);
-  console.error("Inspect and repair the authoritative board before continuing.");
+  console.error(`GoalBuddy resume requires full-board review: ${failure.board.state_path}`);
+  if (stateDigest) console.error(`State digest (${digestStatus}): ${stateDigest}`);
+  for (const error of errors) console.error(`  - ${error}`);
+  console.error("Do not continue from compact state. Inspect the complete board and independent evidence.");
 }
 
 function createResumeProjection(goalDir, parseGoalStateText, normalizeGoalBoard, checker, stateText) {
@@ -1479,7 +1491,7 @@ function createResumeProjection(goalDir, parseGoalStateText, normalizeGoalBoard,
   const statePath = join(root, "state.yaml");
   const goalPath = join(root, "goal.md");
   if (stateText === null) throw new Error("Validated state text is unavailable.");
-  const document = parseGoalStateText(stateText);
+  const document = parseGoalStateText(stateText, { allowFallback: false });
   const board = normalizeGoalBoard(document, root);
   const rawTasks = Array.isArray(document.tasks) ? document.tasks : [];
   const normalizedTasks = new Map(board.tasks.map((task) => [task.id, task]));
@@ -1523,6 +1535,7 @@ function createResumeProjection(goalDir, parseGoalStateText, normalizeGoalBoard,
       path,
       state_path: statePath,
       state_digest: sha256(stateText),
+      state_digest_status: "checker_validated",
       goal_path: goalPath,
       title: resumeText(goal.title || board.title),
       slug: resumeText(goal.slug || board.slug),
@@ -1560,7 +1573,6 @@ function createResumeProjection(goalDir, parseGoalStateText, normalizeGoalBoard,
       approval_gates: approvalGates,
       blocked_tasks: blockedTasks,
       queued_tasks: queuedTasks,
-      parse_warning: resumeText(document.__parseWarning),
     },
     recovery: {
       audit_required: true,

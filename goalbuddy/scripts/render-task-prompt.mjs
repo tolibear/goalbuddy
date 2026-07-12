@@ -100,7 +100,7 @@ export function parseArgs(args) {
 
 export function loadBoard(boardPath) {
   if (!existsSync(boardPath)) throw new Error(`state file not found: ${boardPath}`);
-  const document = parseGoalStateText(readFileSync(boardPath, "utf8"));
+  const document = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
   if (!document || Number(document.version) !== 2) {
     throw new Error(`unsupported GoalBuddy state version in ${boardPath}: expected top-level "version: 2". Start from templates/state.yaml bundled with the goal-prep skill.`);
   }

@@ -5,7 +5,7 @@ import { request as httpRequest } from "node:http";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildColumns, createBoardPayload, writeBoardApp } from "../scripts/lib/goal-board.mjs";
+import { buildColumns, createBoardPayload, parseGoalStateText, writeBoardApp } from "../scripts/lib/goal-board.mjs";
 import { parseArgs, startBoardServer } from "../scripts/local-goal-board.mjs";
 
 test("normalizes a dense goal into local board columns", () => {
@@ -831,6 +831,30 @@ tasks:
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("lets safety-critical callers disable the best-effort parser", () => {
+  const state = `version: 2
+goal:
+  title: "Strict projection"
+  slug: "strict-projection"
+  status: active
+active_task: T001
+tasks:
+  - id: T001
+    type: scout
+    assignee: Scout
+    status: active
+    objective: |
+      Block scalars are valid for the board UI but not for a strict projection.
+    receipt: null
+`;
+
+  assert.match(parseGoalStateText(state).__parseWarning, /fallback/i);
+  assert.throws(
+    () => parseGoalStateText(state, { allowFallback: false }),
+    /Block scalar YAML is not supported/,
+  );
 });
 
 test("recovers odd-indentation boards through the fallback parser", () => {

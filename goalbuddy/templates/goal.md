@@ -95,7 +95,7 @@ If this charter and `state.yaml` disagree, `state.yaml` wins for task status, ac
 On every `/goal` continuation:
 
 1. Read this charter, and follow the GoalBuddy execution contract (`references/goal-execution.md` in the goal-prep skill) when available.
-2. At a genuine recovery boundary, run `goalbuddy resume docs/goals/<slug> --json` and invoke the read-only Goal Ledger Auditor (`goal_ledger` in Codex or `goal-ledger` in Claude Code) with the board path and projected `state_digest`. Continue only on `congruent` with the same digest; otherwise perform the execution contract's mandatory PM review. Do not redispatch a possibly in-flight Worker merely because the board says `active`.
+2. At a genuine recovery boundary, run `goalbuddy resume docs/goals/<slug> --json` and invoke the read-only Goal Ledger Auditor (`goal_ledger` in Codex or `goal-ledger` in Claude Code) with the board path, response digest, and checker status. Continue automatically only from an `ok: true` projection with Ledger `congruent` on the same digest. Any failure requires the execution contract's full-board PM review; preserve immutable completed-task history on a current v2 board when the live continuation is independently proven instead of rewriting old receipts. Do not redispatch a possibly in-flight Worker merely because the board says `active`.
 3. During an uninterrupted same-session task transition, use the board state the PM just validated and updated; do not run another recovery audit.
 4. Run the bundled GoalBuddy update checker when available and mention a newer version without blocking.
 5. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.

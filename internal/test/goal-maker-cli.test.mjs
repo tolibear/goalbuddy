@@ -1374,7 +1374,7 @@ test("ledger audit contract is parseable and aligned across both harnesses", () 
   const tomlSchema = ledgerAuditContractSchema("goalbuddy/agents/goal_ledger.toml");
   const mdSchema = ledgerAuditContractSchema("plugins/goalbuddy/agents/goal-ledger.md");
   assert.deepEqual(mdSchema, tomlSchema);
-  assert.equal(tomlSchema.state_digest, "<validated state.yaml SHA-256>");
+  assert.equal(tomlSchema.state_digest, "<state.yaml SHA-256 from the resume response | null>");
   assert.equal(tomlSchema.verdict, "congruent | discrepant | uncertain");
   assert.equal(tomlSchema.main_agent_action, "continue | escalate");
 });
@@ -1589,6 +1589,7 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.checker.ok, true);
     assert.equal(scopedReport.board.slug, "one");
     assert.match(scopedReport.board.state_digest, /^[a-f0-9]{64}$/);
+    assert.equal(scopedReport.board.state_digest_status, "checker_validated");
     assert.equal(scopedReport.board.intake.original_request, "Make the widget work.");
     assert.equal(scopedReport.board.intake.interpreted_outcome, "The widget works and the test proves it.");
     assert.equal(scopedReport.board.active_task.id, "T002");
@@ -1644,8 +1645,46 @@ test("resume scoped to an invalid board fails closed with checker evidence", () 
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
     assert.equal(report.checker.ok, false);
-    assert.equal(report.recovery.main_agent_action, "inspect_board");
+    assert.match(report.board.state_digest, /^[a-f0-9]{64}$/);
+    assert.equal(report.board.state_digest_status, "observed_unvalidated");
+    assert.equal(report.recovery.mode, "full_board_review");
+    assert.equal(report.recovery.main_agent_action, "inspect_full_board");
+    assert.equal(report.recovery.continuation_allowed, false);
     assert.match(report.checker.errors.join("\n"), /active_task/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume rejects a checker-green board when only the lossy parser can render it", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-strict-projection-"));
+  try {
+    const goalDir = writeResumeGoal(root, "strict-projection", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    writeFileSync(
+      statePath,
+      readFileSync(statePath, "utf8").replace(
+        '      summary: "Recent transition selected the bounded widget task."',
+        "      summary: |\n        Recent transition selected the bounded widget task.",
+      ),
+    );
+
+    const result = runGoalMaker(["resume", "docs/goals/strict-projection", "--json"], { cwd: root });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.checker.ok, true);
+    assert.match(report.board.state_digest, /^[a-f0-9]{64}$/);
+    assert.equal(report.board.state_digest_status, "checker_validated");
+    assert.equal(report.recovery.mode, "full_board_review");
+    assert.equal(report.recovery.continuation_allowed, false);
+    assert.match(report.errors.join("\n"), /Block scalar YAML is not supported/);
+    assert.equal(report.board.active_task, undefined);
+    assert.equal(report.board.approval_gates, undefined);
+
+    const prompt = runGoalMaker(["prompt", "docs/goals/strict-projection", "--json"], { cwd: root });
+    assert.equal(prompt.status, 1, prompt.stderr || prompt.stdout);
+    assert.match(prompt.stderr, /Block scalar YAML is not supported/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

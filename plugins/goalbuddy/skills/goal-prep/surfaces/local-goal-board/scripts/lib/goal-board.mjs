@@ -337,7 +337,7 @@ function normalizeTaskStatus(value) {
   return status;
 }
 
-export function parseGoalStateText(text) {
+export function parseGoalStateText(text, { allowFallback = true } = {}) {
   try {
     const lines = tokenizeYaml(text);
     if (!lines.length) throw new GoalBoardError("Goal state is empty.");
@@ -347,7 +347,7 @@ export function parseGoalStateText(text) {
     }
     return value;
   } catch (error) {
-    if (error instanceof GoalBoardError && canRecoverBoardSubset(error)) {
+    if (allowFallback && error instanceof GoalBoardError && canRecoverBoardSubset(error)) {
       const document = parseGoalBoardSubset(text);
       document.__parseWarning = `Strict parse failed (${error.message}) Showing a best-effort fallback view; fields the fallback parser cannot read are omitted. Fix state.yaml formatting to see the full board.`;
       return document;

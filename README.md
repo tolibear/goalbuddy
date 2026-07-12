@@ -60,13 +60,13 @@ npx goalbuddy resume
 
 `resume` lists every live board in the repo with its status, active task, and the exact `/goal Follow docs/goals/<slug>/goal.md.` command to continue, which is identical in both harnesses. Receipts can record which harness performed each task, so the board's history survives the handoff intact.
 
-When a specific board actually resumes, GoalBuddy validates it and renders a bounded continuation projection:
+When a specific board actually resumes, GoalBuddy validates it and uses the strict parser to render a bounded continuation projection:
 
 ```bash
 npx goalbuddy resume docs/goals/<slug> --json
 ```
 
-The PM then invokes GoalBuddy's read-only Ledger Auditor (`goal_ledger` in Codex, `goal-ledger` in Claude Code) with the projection's board digest. Ledger independently reruns resume, reads the complete board, and reconciles it with repository, worktree, receipt, verification, approval-gate, and visible Worker evidence. Continuation is allowed only on `congruent` with the same pre/post digest; uncertainty, a changed board, or disagreement escalates to direct PM review. The projection is not a second ledger, and an active task is never treated as proof that its Worker is still alive.
+The PM then invokes GoalBuddy's read-only Ledger Auditor (`goal_ledger` in Codex, `goal-ledger` in Claude Code) with the response's board digest. Ledger independently reruns resume, reads the complete board, and reconciles it with repository, worktree, receipt, verification, approval-gate, and visible Worker evidence. A successful projection permits continuation only on `congruent` with the same pre/post digest. Checker or strict-parser failure returns no partial projection and no continuation authority; it routes the PM to full-board review. Current `version: 2` boards whose errors are confined to immutable completed-task history may remain untouched, but only the PM may make that compatibility decision after direct review. The projection is not a second ledger, and an active task is never treated as proof that its Worker is still alive.
 
 Boards can also mix vendors within a single run — a Claude judge and a Codex worker on the same board:
 

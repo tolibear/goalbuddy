@@ -38,17 +38,17 @@ A genuine recovery boundary is any cold start, new session, post-compaction reco
 
 At every genuine recovery boundary:
 
-1. Run the checker-validated continuation projection for the specific board:
+1. Run the checker-validated continuation command for the specific board:
 
    ```bash
    goalbuddy resume docs/goals/<slug> --json
    ```
 
-   `goalbuddy resume` with no board remains discovery-only. The explicit-board form validates `state.yaml` first and fails closed; its projection is a read model, not a second source of truth.
-2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path and the projection's `board.state_digest`. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
-3. Ledger independently reruns the explicit resume command, reads the complete charter and board, and compares them with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Its pre/post board digests must match the PM's projection; a changed board is `uncertain` and requires a fresh recovery audit.
-4. Continue from the PM's projected active task only when Ledger returns `verdict: congruent`, the same `state_digest`, and `main_agent_action: continue`.
-5. Treat `discrepant`, `uncertain`, malformed output, timeout, or unavailable Ledger as a mandatory PM escalation. The PM must inspect the full board and named external evidence directly, resolve the truth conservatively, rerun the checker, and only then continue. The fallback preserves availability; it does not waive the audit.
+   `goalbuddy resume` with no board remains discovery-only. The explicit-board form validates `state.yaml` first and uses the strict parser. An `ok: true` projection is a read model, not a second source of truth. An `ok: false` response contains no partial projection and grants no continuation authority; its stable digest, when available, only binds the full-board review.
+2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path, response digest, and whether the checker passed. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
+3. Ledger independently reruns the explicit resume command, reads the complete charter and board, and compares them with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Its pre/post board digests must match the PM's response; a changed board is `uncertain` and requires a fresh recovery audit. Ledger never returns `congruent` when resume failed.
+4. Continue automatically from the projected active task only when resume returned `ok: true` and Ledger returns `verdict: congruent`, the same `state_digest`, and `main_agent_action: continue`.
+5. Treat checker failure, projection failure, `discrepant`, `uncertain`, malformed output, timeout, or unavailable Ledger as a mandatory full-board PM review. Errors affecting the live task, current transition, gate, verification, or Worker liveness must be repaired before continuation. If every error is confined to immutable completed-task history on a current `version: 2` board, do not rewrite or fabricate history merely to make the checker green: the PM may continue only after directly proving the exact live continuation against the complete board and independent evidence. This compatibility path is never automatic and does not apply to v1, missing or changing state, an inconsistent live tail, an unresolved gate, or uncertain Worker liveness.
 6. Never infer Worker liveness from `status: active`. If an unfinished Worker might still be running and liveness is not proven, do not redispatch it. Ledger returns `uncertain`, and the PM checks the current harness/session or worktree before choosing recovery.
 
 Ledger never edits state, applies receipts, chooses tasks, dispatches work, or becomes a task/receipt actor. Do not add Ledger status to `state.yaml`; install health belongs to `goalbuddy doctor`, while board truth stays in the existing schema.
