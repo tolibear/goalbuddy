@@ -1,6 +1,6 @@
 ---
 name: goal-prep
-description: Goal Prep for GoalBuddy. Use for broad, long-running, stalled, vague, detailed, planned, or unhealthy Codex or Claude Code work that needs a structured /goal intake, autonomous task discovery, role-tagged Scout/Judge/Worker delegation, one active task, durable receipts, and a PM-owned rolling board that maximizes the chance of a successful goal run.
+description: Goal Prep for GoalBuddy. Use for broad, long-running, stalled, vague, detailed, planned, or unhealthy Codex or Claude Code work that needs a structured /goal intake, autonomous task discovery, role-tagged Scout/Judge/Worker delegation, first-class board keeping, one active task, durable receipts, and a PM-owned rolling board that maximizes the chance of a successful goal run.
 ---
 
 # Goal Prep
@@ -32,7 +32,7 @@ There are two different modes:
 
 This boundary is strict. `$goal-prep` is not a lightweight `/goal`; it is a board compiler.
 
-This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; exactly one active task unless disjoint write scopes are proven; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
+This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; exactly one active task unless disjoint write scopes are proven; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; the PM owns semantic board decisions while the Board Keeper performs normal execution-time board inspection and mutation; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
 
 During a `$goal-prep` turn, do not perform the user's requested work, even if the work looks read-only, preparatory, or obviously useful. Do not refresh or load named skills, inspect implementation files, browse reference repos, research design inspiration, generate design plans, generate images/assets, run app-specific checks, or edit product files. Put those actions into Scout, Judge, Worker, or PM tasks for the later `/goal` run.
 
@@ -295,7 +295,7 @@ stop_if: []
 
 Task ids must match the `T###` shape (for example `T001`, `T999`). The bundled checker rejects other formats such as `T001b`; a sibling or follow-up task gets the next free number.
 
-The PM owns the board. Scout, Judge, and Worker return receipts; they do not select the next active task or mark the goal complete. Receipt shapes and all other runtime rules live in `references/goal-execution.md`.
+The PM owns board meaning. Scout, Judge, and Worker return receipts; they do not select the next active task or mark the goal complete. During `/goal` execution, the Board Keeper applies the PM's exact board decisions and returns a compact mutation receipt so the full board stays out of PM context. Receipt shapes and all other runtime rules live in `references/goal-execution.md`.
 
 ## Seed Boards
 
@@ -357,7 +357,7 @@ If the goal is audit, keep the active task read-only. Queue execution only if th
 
 ## Agents
 
-Scout, Worker, and Judge task templates are bundled with GoalBuddy. A separate Ledger Auditor is bundled for recovery-only reconciliation. They may also be installed as user or project agent configs, but a board must not claim Scout/Worker/Judge `installed` unless the preparer verified the matching task-agent files.
+Scout, Worker, and Judge task templates are bundled with GoalBuddy. Two control-plane agents are also bundled: a low-reasoning Board Keeper for execution-time board inspection and mutation, and a separate read-only Ledger Auditor for recovery-only reconciliation. They may also be installed as user or project agent configs, but a board must not claim Scout/Worker/Judge `installed` unless the preparer verified the matching task-agent files.
 
 Use these `state.yaml` values:
 
@@ -368,7 +368,7 @@ Use these `state.yaml` values:
 | `missing` | Neither an installed config nor the bundled template was verified. | `/goal` can proceed through PM fallback. If dedicated agents are required before `/goal`, run the GoalBuddy CLI through the user's install channel with `install`. |
 | `unknown` | Agent availability could not be checked. | `/goal` can proceed through PM fallback. To check before `/goal`, run the GoalBuddy CLI through the user's install channel with `doctor`. |
 
-Non-`installed` states are warnings, not false failures, because the main `/goal` PM can perform Scout/Judge/Worker-shaped tasks directly when dedicated agents are unavailable.
+Non-`installed` task-agent states are warnings, not false failures, because the main `/goal` PM can perform Scout/Judge/Worker-shaped tasks directly when those dedicated task agents are unavailable. Keeper and Ledger are required control-plane install surfaces verified by `goalbuddy doctor`; they are not represented in this board mapping.
 
 | Agent | Thinking level | Write access | Use for |
 |---|---:|---:|---|
@@ -376,11 +376,13 @@ Non-`installed` states are warnings, not false failures, because the main `/goal
 | Worker | high | yes, bounded | one coherent bounded useful slice |
 | Judge | xhigh | no | phase/risk/final review, ambiguity, scope, completion skepticism |
 
-Ledger is not represented in `state.yaml` agent availability or task cards. At a genuine recovery boundary, `/goal` runs the bundled `scripts/resume-board.mjs` entrypoint, then invokes `goal_ledger` (Codex, Sol medium) or `goal-ledger` (Claude Code, Opus high) with the board path, resume-response digest, checker status, and returned `commands.resume` command. Ledger independently reruns that same bundled entrypoint and compares the complete board with independent repo/worktree/receipt/verification/gate/Worker evidence; it never depends on a globally installed GoalBuddy CLI. It returns `goalbuddy_ledger_audit_v1`, never a task receipt, and never mutates the board. Only `congruent` with matching pre/post digests after an `ok: true` projection permits automatic continuation. Checker or strict-parser failure routes to full-board PM review without rewriting immutable completed-task history merely for checker conformance. The exact recovery contract lives in `references/goal-execution.md`.
+Keeper and Ledger are not represented in `state.yaml` agent availability or task cards. During execution, invoke `goal_keeper` (Codex, Sol low) or `goal-keeper` (Claude Code, Opus low) for every board inspection or mutation beyond the compact PM projection. Give it an exact `goalbuddy_keeper_request_v1`, the current board digest, authorized control files, expected before/after facts, and the bundled checker command. It returns `goalbuddy_keeper_receipt_v1` and makes no semantic decisions.
+
+At a genuine recovery boundary, `/goal` runs the bundled `scripts/resume-board.mjs` entrypoint, then invokes `goal_ledger` (Codex, Sol medium) or `goal-ledger` (Claude Code, Opus high) with the board path, resume-response digest, checker status, and returned `commands.resume` command. Ledger independently reruns that same bundled entrypoint and compares the complete board with independent repo/worktree/receipt/verification/gate/Worker evidence; it never depends on a globally installed GoalBuddy CLI. It returns `goalbuddy_ledger_audit_v1`, never a task receipt, and never mutates the board. Only `congruent` with matching pre/post digests after an `ok: true` projection permits automatic continuation. Checker or strict-parser failure routes to full-board PM review without rewriting immutable completed-task history merely for checker conformance. The exact Keeper and recovery contracts live in `references/goal-execution.md`.
 
 A task's `assignee` determines the agent. The task card is the order. The receipt is the return format.
 
-Only the main `/goal` PM may choose the active task, update the board, mark tasks done, or mark the goal complete. The PM thinking policy and the execution quality commands (including the subagent dispatch rules) live in `references/goal-execution.md`.
+Only the main `/goal` PM may choose the active task, decide board changes, decide that a task is done, or decide that the goal is complete. Only the Board Keeper normally reads or writes the full execution board, applying those exact decisions mechanically. The PM thinking policy and the execution quality commands (including the subagent dispatch rules) live in `references/goal-execution.md`.
 
 ## Default `/goal` Shape
 

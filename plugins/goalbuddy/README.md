@@ -9,7 +9,7 @@ Version 0.3.9 keeps the Goalmaxxed core and hardens marketplace installs, local 
 - `.codex-plugin/plugin.json`: Codex plugin manifest and Codex UI copy.
 - `.claude-plugin/plugin.json`: Claude Code plugin manifest.
 - `skills/goalbuddy/`: the installable GoalBuddy skill payload (shared by both platforms).
-- `agents/`: Claude Code task-agent definitions (`goal-scout.md`, `goal-judge.md`, `goal-worker.md`) plus the recovery-only `goal-ledger.md` auditor.
+- `agents/`: Claude Code task-agent definitions (`goal-scout.md`, `goal-judge.md`, `goal-worker.md`) plus the execution-time `goal-keeper.md` and recovery-only `goal-ledger.md` control-plane agents.
 - `skills/goalbuddy/SKILL.md`: canonical `$goal-prep` / `/goal-prep` entry point.
 - `assets/goalbuddy-icon.svg`: lightweight plugin icon.
 
@@ -29,7 +29,7 @@ npx goalbuddy check-update
 npx goalbuddy
 ```
 
-This installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill, Scout/Judge/Worker task agents, and Ledger recovery auditor into `~/.claude/`. The skill surfaces `/goal-prep` in Claude Code.
+This installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill, Scout/Judge/Worker task agents, Board Keeper, and Ledger recovery auditor into `~/.claude/`. The skill surfaces `/goal-prep` in Claude Code.
 
 ## Install One Target
 
@@ -38,7 +38,7 @@ npx goalbuddy --target codex
 npx goalbuddy --target claude
 ```
 
-This installs the GoalBuddy skill, the three Scout/Judge/Worker task agents, and the recovery-only Ledger Auditor into `~/.claude/`. Restart Claude Code, then run:
+This installs the GoalBuddy skill, the three Scout/Judge/Worker task agents, the low-reasoning Board Keeper, and the recovery-only Ledger Auditor into `~/.claude/`. Restart Claude Code, then run:
 
 ```text
 /goal-prep

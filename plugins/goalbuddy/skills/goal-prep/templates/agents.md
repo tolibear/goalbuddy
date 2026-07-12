@@ -1,17 +1,18 @@
 # GoalBuddy Agents
 
-Use three task agents plus one recovery-only Ledger Auditor. The main `/goal` thread remains PM and owns the board.
+Use three task agents plus two control-plane agents: a low-reasoning Board Keeper and a recovery-only Ledger Auditor. The main `/goal` thread remains PM and owns board meaning.
 
 | Agent | model_reasoning_effort | sandbox_mode | Purpose |
 |---|---:|---|---|
 | goal_scout | medium | read-only | Targeted evidence mapping and candidate facts |
 | goal_worker | high | workspace-write | One coherent bounded implementation/recovery slice |
 | goal_judge | xhigh | read-only | Strategic review, escalation, completion skepticism |
+| goal_keeper | low | workspace-write | Exact PM-authorized board inspection, mutation, and validation |
 | goal_ledger | medium | read-only | Recovery-only board/projection/repository reconciliation |
 
 ## PM Thinking Policy
 
-The main `/goal` thread is the PM. It owns board truth, chooses active tasks, and decides when receipts are sufficient.
+The main `/goal` thread is the PM. It owns board meaning, chooses active tasks, and decides when receipts are sufficient. Keeper applies those decisions mechanically and returns the validated board digest.
 
 | Goal mode | PM thinking |
 |---|---:|
@@ -43,9 +44,11 @@ cp .codex/skills/goalbuddy/agents/goal_*.toml .codex/agents/
 
 Rules:
 
-- Only the PM loop chooses active tasks, marks tasks done, or completes the goal.
+- Only the PM loop chooses active tasks, decides tasks are done, or decides the goal is complete; Keeper applies those exact decisions.
 - Keep at most one write-capable Worker active unless disjoint write scopes are explicit in `state.yaml`.
+- Keep at most one Keeper on a board. Use it for every execution-time full-board inspection or mutation, and reuse it within one uninterrupted session with the prior `after_digest`.
 - Worker defaults to high reasoning for implementation tasks and should complete the whole assigned slice.
 - Scout and Judge are read-only and safe to parallelize when their board inputs are clear.
 - Judge is xhigh thinking and should choose the largest safe useful slice, not the narrowest helper.
+- Keeper is not a task agent. It is Sol low in Codex, applies only exact PM-authorized control-file operations, runs the checker, and emits `goalbuddy_keeper_receipt_v1`.
 - Ledger is not a task agent. Run it only at genuine recovery boundaries; it never edits state, chooses work, or emits a task receipt.

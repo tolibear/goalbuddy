@@ -20,6 +20,7 @@ test("does not treat --force as the destination directory", () => {
     assert.ok(installed.includes("goal_scout.toml"), installed.join(", "));
     assert.ok(installed.includes("goal_worker.toml"));
     assert.ok(installed.includes("goal_judge.toml"));
+    assert.ok(installed.includes("goal_keeper.toml"));
     assert.ok(installed.includes("goal_ledger.toml"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -38,6 +39,7 @@ test("defaults to CODEX_HOME agents dir instead of cwd", () => {
     assert.equal(existsSync(join(root, ".codex")), false);
     const installed = readdirSync(join(root, "codex-home", "agents"));
     assert.ok(installed.includes("goal_scout.toml"));
+    assert.ok(installed.includes("goal_keeper.toml"));
     assert.ok(installed.includes("goal_ledger.toml"));
   } finally {
     rmSync(root, { recursive: true, force: true });

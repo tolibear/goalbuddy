@@ -31,6 +31,7 @@ const defaultCodexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const defaultClaudeHome = process.env.CLAUDE_HOME || join(homedir(), ".claude");
 const requiredAgentFiles = [
   "goal_judge.toml",
+  "goal_keeper.toml",
   "goal_ledger.toml",
   "goal_scout.toml",
   "goal_worker.toml",
@@ -38,6 +39,7 @@ const requiredAgentFiles = [
 const requiredClaudeAgentFiles = [
   "goal-scout.md",
   "goal-judge.md",
+  "goal-keeper.md",
   "goal-ledger.md",
   "goal-worker.md",
 ];

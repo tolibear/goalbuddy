@@ -34,7 +34,7 @@ Any receipt may include an optional `harness` field (for example `codex` or `cla
 
 ### Recovery Audit
 
-A genuine recovery boundary is any cold start, new session, post-compaction recovery, cross-harness handoff, or return after interrupted closeout, verification, or Worker execution. It is not an ordinary transition immediately after the current PM has recorded a task receipt and activated its successor in the same uninterrupted context.
+A genuine recovery boundary is any cold start, new session, post-compaction recovery, cross-harness handoff, or return after interrupted closeout, verification, or Worker execution. It is not an ordinary transition immediately after the current PM received a validated Keeper receipt for the closeout and successor activation in the same uninterrupted context.
 
 At every genuine recovery boundary:
 
@@ -53,6 +53,25 @@ At every genuine recovery boundary:
 
 Ledger never edits state, applies receipts, chooses tasks, dispatches work, or becomes a task/receipt actor. Do not add Ledger status to `state.yaml`; install health belongs to `goalbuddy doctor`, while board truth stays in the existing schema.
 
+### Board Keeper
+
+The PM owns every semantic board decision; the Board Keeper owns the mechanical board operation. During `/goal` execution, use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation of `state.yaml`, receipts, task cards, goal/task status, `active_task`, verification state, owner gates, GoalBuddy notes, or charter control text. Board preparation may create the initial files directly; this Keeper boundary begins when `/goal` execution starts.
+
+The PM should normally see only the compact resume projection, task prompt, agent receipt, and Keeper receipt. A board file already loaded into PM context remains in the cached conversation prefix on later turns, so targeted shell reads by the PM are not the default substitute for Keeper. Direct PM full-board review is the exceptional recovery path required by a failed or ambiguous Ledger audit, not routine bookkeeping.
+
+For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
+
+- the exact `board_path`, operation, and authorized GoalBuddy control files;
+- the current `state.yaml` digest from resume or the previous Keeper `after_digest`;
+- exact PM-approved instructions and expected before/after facts;
+- the exact bundled checker command.
+
+Keeper reads the board in its isolated context, applies no judgment, prefers the bundled atomic receipt applier for receipt/status/successor transitions, validates the result, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
+
+Keeper is control-plane, not a task agent: it receives no task card, never returns `goalbuddy_receipt_v1`, never chooses a task or successor, and never edits product files. Do not add Keeper status to `state.yaml`. Run at most one Keeper against a board. Digest drift, ambiguous instructions, unavailable validation, concurrent board activity, unauthorized paths, or a failed checker blocks the operation with no accepted mutation.
+
+Keeper and Ledger are required installed control-plane roles. If Keeper is unavailable, malformed, or times out, do not silently fall back to routine PM full-board reads or direct edits. Preserve the last validated digest, run `goalbuddy doctor` through the installed channel, repair the install, and retry or escalate to the operator. Ledger remains independently read-only so the recovery auditor can never mutate the evidence it verifies.
+
 ### Mixed Fleets
 
 A single board may also mix harnesses within one run: the PM stays where it is and dispatches an individual task to a different vendor's agent — for example a Codex worker on a Claude Code board, or a Claude judge on a Codex board — using the bundled dispatcher:
@@ -65,7 +84,7 @@ Rules for external dispatch:
 
 - Dispatch to an external harness only when the user asked for a specific harness or model, or the task card carries an optional `harness:` field naming one. Never dispatch externally by default — it spends the user's quota on another vendor.
 - The dispatcher renders the task prompt, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and mechanically verifies write scope with git: worker changes must match `allowed_files`, and read-only roles must change nothing.
-- The dispatcher never edits `state.yaml`. The PM records the reported receipt verbatim — including its `harness` stamp — exactly as with any subagent receipt.
+- The dispatcher never edits `state.yaml`. The PM gives the reported receipt — including its `harness` stamp — to Keeper for exact recording, just as with any subagent receipt.
 - Do not mark a dispatched task `done` unless the dispatch report's scope check is clean and the receipt's verify commands pass. A scope violation means inspect the working tree, decide what to keep, and record a blocked receipt with the facts.
 - If the target CLI is missing, unauthenticated, or times out, fall back to the normal path: PM fallback or the required GoalBuddy agent, per the dispatch rules above.
 
@@ -96,7 +115,7 @@ A task is the only work that may happen.
 - Scout tasks are read-only and produce findings.
 - Judge tasks are read-only and produce decisions or constraints.
 - Worker tasks may write only inside `allowed_files`.
-- PM tasks may update control files and board state.
+- PM tasks may decide control-file and board-state changes; Keeper applies them.
 
 No implementation without an active Worker or PM task that explicitly allows it.
 
@@ -106,7 +125,7 @@ At most one write-capable Worker may be active. Do not run parallel Workers unle
 
 A receipt is compact proof that the task happened and what it changed, learned, decided, blocked, or spawned.
 
-Scout, Judge, and Worker subagents return a `goalbuddy_receipt_v1` JSON object. The PM records it by copying its fields verbatim into the task's `receipt:` mapping in `state.yaml`, dropping only null or empty fields. Do not rename fields or invent new ones. The YAML examples below show minimum shapes, not a different schema.
+Scout, Judge, and Worker subagents return a `goalbuddy_receipt_v1` JSON object. The PM decides the resulting task status and successor, then gives Keeper the receipt verbatim. Keeper copies its fields into the task's `receipt:` mapping in `state.yaml`, dropping only null or empty fields. Do not rename fields or invent new ones. The YAML examples below show minimum shapes, not a different schema.
 
 Scout receipt:
 
@@ -185,7 +204,7 @@ Recording a receipt by hand takes three separate precise edits (task status, rec
 node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --activate T###
 ```
 
-It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report, and stays PM-invoked: it is a tool the PM uses to edit the board it owns.
+It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Keeper invokes it from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
 
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 
@@ -231,7 +250,7 @@ Exception: if an exact human approval phrase is the only remaining blocker and n
 
 ## Board Health Stewardship
 
-The PM owns board health. Do not auto-spawn a separate always-on steward by default. The recovery-only Ledger Auditor is a bounded congruence check at genuine recovery boundaries, not a steward, implementation actor, or polling loop.
+The PM owns board-health decisions; Keeper performs the inspection and repair. Keeper is on demand or warm within one uninterrupted session, not an always-on poller or implementation actor. The recovery-only Ledger Auditor remains a separate bounded congruence check at genuine recovery boundaries.
 
 When the board looks stale, misleading, offline, Not Found, or inconsistent, run the bundled checker:
 
@@ -292,7 +311,7 @@ If the checker and your judgment disagree, choose the more conservative state.
 
 ## PM Thinking Policy
 
-The main `/goal` thread is the PM. It owns board truth, chooses active tasks, decides when Scout/Judge/Worker receipts are sufficient, and records completion.
+The main `/goal` thread is the PM. It owns board meaning, chooses active tasks, decides when Scout/Judge/Worker receipts are sufficient, and decides completion. Keeper records those exact decisions and returns the validated board digest.
 
 Recommended PM thinking:
 
@@ -321,6 +340,8 @@ Use `node <skill-path>/scripts/render-task-prompt.mjs docs/goals/<slug>` to rend
 When dispatching Codex subagents from a GoalBuddy prompt, the `required_spawn_agent_type` is mandatory. Use that exact `spawn_agent` `agent_type` (`goal_scout`, `goal_worker`, or `goal_judge`). Do not substitute generic `scout`, `worker`, or `judge` agents; if the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or ask the operator to run the GoalBuddy CLI through their install channel with `agents` or `install`. After one `wait_agent` timeout with no visible allowed-file changes, stop waiting, record the timeout, and recover deterministically instead of waiting forever.
 
 `goal_ledger` / `goal-ledger` is separate from task prompt dispatch. Invoke it only through the Recovery Audit contract; it never receives a task card, returns a `goalbuddy_receipt_v1`, or changes board status.
+
+`goal_keeper` / `goal-keeper` is also separate from task prompt dispatch. Invoke or reuse it through the Board Keeper contract for board inspection and exact PM-authorized mutations. Keep its request compact; the installed agent definition already contains the mutation and validation procedure.
 
 Use `node <skill-path>/scripts/parallel-plan.mjs docs/goals/<slug>` when the user explicitly asks for parallel agent work. It is read-only: it recommends safe Scout/Judge handoffs and Worker handoffs only when write scopes are known and disjoint. It does not mutate `state.yaml`, create sub-goals, apply receipts, or spawn agents.
 

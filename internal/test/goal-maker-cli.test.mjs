@@ -50,6 +50,13 @@ function ledgerAuditContractSchema(agentPath) {
   return JSON.parse(match[1]);
 }
 
+function keeperReceiptContractSchema(agentPath) {
+  const text = readFileSync(agentPath, "utf8");
+  const match = text.match(/\{\s*"goalbuddy_keeper_receipt_v1":\s*(\{[\s\S]*?\n\s*\})\s*\n\}/);
+  assert.ok(match, `missing goalbuddy_keeper_receipt_v1 contract in ${agentPath}`);
+  return JSON.parse(match[1]);
+}
+
 function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -149,7 +156,7 @@ test("doctor distinguishes fully removed and residual-agent Codex states", () =>
     const residualReport = JSON.parse(residual.stdout);
     assert.equal(residualReport.runtime_state, "residual-agents-only");
     assert.deepEqual(residualReport.residual_agents, ["goal_worker.toml"]);
-    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_ledger.toml", "goal_scout.toml"]);
+    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_keeper.toml", "goal_ledger.toml", "goal_scout.toml"]);
     assert.match(residualReport.errors.join("\n"), /Residual GoalBuddy Codex agents remain/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -208,6 +215,7 @@ test("doctor reports native goal runtime readiness and supports strict goal-read
 test("bundled agent contracts stay strict and receipt-shaped", () => {
   const scout = readFileSync("goalbuddy/agents/goal_scout.toml", "utf8");
   const judge = readFileSync("goalbuddy/agents/goal_judge.toml", "utf8");
+  const keeper = readFileSync("goalbuddy/agents/goal_keeper.toml", "utf8");
   const ledger = readFileSync("goalbuddy/agents/goal_ledger.toml", "utf8");
   const worker = readFileSync("goalbuddy/agents/goal_worker.toml", "utf8");
   assert.match(scout, /model_reasoning_effort = "medium"/);
@@ -217,6 +225,11 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(judge, /model_reasoning_effort = "xhigh"/);
   assert.match(judge, /Choose the largest safe useful slice/);
   assert.match(judge, /Routine checks belong to the checker/);
+  assert.match(keeper, /model = "gpt-5\.6-sol"/);
+  assert.match(keeper, /model_reasoning_effort = "low"/);
+  assert.match(keeper, /sandbox_mode = "workspace-write"/);
+  assert.match(keeper, /goalbuddy_keeper_receipt_v1/);
+  assert.match(keeper, /Run `checker_command` after every mutation/);
   assert.match(ledger, /model = "gpt-5\.6-sol"/);
   assert.match(ledger, /model_reasoning_effort = "medium"/);
   assert.match(ledger, /sandbox_mode = "read-only"/);
@@ -230,6 +243,7 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
 
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_scout.toml", "utf8"), scout);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_judge.toml", "utf8"), judge);
+  assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_keeper.toml", "utf8"), keeper);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_ledger.toml", "utf8"), ledger);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_worker.toml", "utf8"), worker);
 });
@@ -956,7 +970,7 @@ test("reset removes only GoalBuddy-owned Codex runtime surfaces", () => {
 
     const agentsRoot = join(codexHome, "agents");
     mkdirSync(agentsRoot, { recursive: true });
-    for (const file of ["goal_judge.toml", "goal_ledger.toml", "goal_scout.toml", "other.toml"]) {
+    for (const file of ["goal_judge.toml", "goal_keeper.toml", "goal_ledger.toml", "goal_scout.toml", "other.toml"]) {
       writeFileSync(join(agentsRoot, file), `${file}\n`);
     }
     mkdirSync(join(agentsRoot, "goal_worker.toml"), { recursive: true });
@@ -977,7 +991,7 @@ test("reset removes only GoalBuddy-owned Codex runtime surfaces", () => {
       "[marketplaces.goalbuddy]",
     ]);
     assert.match(report.removed_plugin_cache_paths[0], pathSuffixPattern("plugins", "cache", "goalbuddy"));
-    assert.equal(report.removed_agents.length, 4);
+    assert.equal(report.removed_agents.length, 5);
     assert.equal(report.removed_legacy_skill_paths.length, 2);
 
     const config = readFileSync(configPath, "utf8");
@@ -1067,7 +1081,7 @@ test("plugin install output points to Goal Prep and the local goal surface", () 
 
     const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome], { env });
     assert.equal(install.status, 0, install.stderr || install.stdout);
-    assert.match(install.stdout, /Agents: 4 installed/);
+    assert.match(install.stdout, /Agents: 5 installed/);
     assert.match(install.stdout, /\$goal-prep/);
     assert.match(install.stdout, /Goal surface/);
     assert.match(install.stdout, /npx goalbuddy board docs\/goals\/<slug>/);
@@ -1146,9 +1160,10 @@ test("default command installs the native Codex plugin", () => {
     const report = JSON.parse(install.stdout);
     assert.equal(report.installed, true);
     assert.equal(report.plugin, "goalbuddy@goalbuddy");
-    assert.equal(report.agents.length, 4);
+    assert.equal(report.agents.length, 5);
     assert.equal(existsSync(join(codexHome, "skills", "goalbuddy", "SKILL.md")), false);
     assert.equal(existsSync(join(codexHome, "agents", "goal_worker.toml")), true);
+    assert.equal(existsSync(join(codexHome, "agents", "goal_keeper.toml")), true);
     assert.equal(existsSync(join(codexHome, "agents", "goal_ledger.toml")), true);
 
     const config = readFileSync(join(codexHome, "config.toml"), "utf8");
@@ -1176,6 +1191,7 @@ test("default command installs Codex and Claude Code when both homes are provide
     assert.equal(existsSync(join(codexHome, "config.toml")), true);
     assert.equal(existsSync(join(claudeHome, "skills", "goal-prep", "SKILL.md")), true);
     assert.equal(existsSync(join(claudeHome, "agents", "goal-worker.md")), true);
+    assert.equal(existsSync(join(claudeHome, "agents", "goal-keeper.md")), true);
     assert.equal(existsSync(join(claudeHome, "agents", "goal-ledger.md")), true);
     assert.equal(existsSync(join(claudeHome, "commands", "goal-prep.md")), false);
   } finally {
@@ -1236,7 +1252,7 @@ test("install reports Codex plugin state in json mode", () => {
     assert.equal(report.installed, true);
     assert.equal(report.plugin, "goalbuddy@goalbuddy");
     assert.match(report.cache_path, pathSuffixPattern("plugins", "cache", "goalbuddy", "goalbuddy", packageVersion));
-    assert.equal(report.agents.length, 4);
+    assert.equal(report.agents.length, 5);
     assert.equal(existsSync(join(codexHome, "skills", "goalbuddy")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1378,6 +1394,15 @@ test("ledger audit contract is parseable and aligned across both harnesses", () 
   assert.equal(tomlSchema.state_digest, "<state.yaml SHA-256 from the resume response | null>");
   assert.equal(tomlSchema.verdict, "congruent | discrepant | uncertain");
   assert.equal(tomlSchema.main_agent_action, "continue | escalate");
+});
+
+test("keeper receipt contract is parseable and aligned across both harnesses", () => {
+  const tomlSchema = keeperReceiptContractSchema("goalbuddy/agents/goal_keeper.toml");
+  const mdSchema = keeperReceiptContractSchema("plugins/goalbuddy/agents/goal-keeper.md");
+  assert.deepEqual(mdSchema, tomlSchema);
+  assert.equal(tomlSchema.result, "done | no_change | blocked");
+  assert.equal(tomlSchema.checker_status, "pass | fail | not_run");
+  assert.equal(tomlSchema.expected_after_confirmed, false);
 });
 
 test("installs the Claude skill as goal-prep and migrates the legacy directory", () => {

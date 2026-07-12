@@ -68,13 +68,15 @@ npx goalbuddy resume docs/goals/<slug> --json
 
 The PM then invokes GoalBuddy's read-only Ledger Auditor (`goal_ledger` in Codex, `goal-ledger` in Claude Code) with the response's board digest. Ledger independently reruns resume, reads the complete board, and reconciles it with repository, worktree, receipt, verification, approval-gate, and visible Worker evidence. A successful projection permits continuation only on `congruent` with the same pre/post digest. Checker or strict-parser failure returns no partial projection and no continuation authority; it routes the PM to full-board review. Current `version: 2` boards whose errors are confined to immutable completed-task history may remain untouched, but only the PM may make that compatibility decision after direct review. The projection is not a second ledger, and an active task is never treated as proof that its Worker is still alive.
 
+After recovery, GoalBuddy's Board Keeper (`goal_keeper` in Codex, `goal-keeper` in Claude Code) handles full-board inspection and every normal execution-time board mutation. The PM sends only an exact semantic decision and the current digest; Keeper reads the large board in its isolated context, applies the receipt/status/task/gate change, runs the existing checker, and returns a compact `goalbuddy_keeper_receipt_v1`. Keeper uses Sol low in Codex and Opus low in Claude Code. It never selects work or edits product files, and the separately read-only Ledger remains the independent recovery check.
+
 Boards can also mix vendors within a single run — a Claude judge and a Codex worker on the same board:
 
 ```bash
 npx goalbuddy dispatch docs/goals/<slug> --to codex
 ```
 
-`dispatch` renders the active task's prompt, runs the target CLI headless (`codex` or `claude-code`), extracts the returned receipt, and verifies write scope mechanically with git: worker changes must stay inside the task's `allowed_files`, and read-only roles must change nothing. The dispatcher never edits the board — the PM records the receipt, stamped with the harness that earned it.
+`dispatch` renders the active task's prompt, runs the target CLI headless (`codex` or `claude-code`), extracts the returned receipt, and verifies write scope mechanically with git: worker changes must stay inside the task's `allowed_files`, and read-only roles must change nothing. The dispatcher never edits the board — the PM gives the stamped receipt and exact successor decision to Keeper for validated recording.
 
 ## Codex Install Model
 
@@ -83,6 +85,7 @@ For Codex, the canonical install is the native plugin plus bundled agents:
 ```text
 ~/.codex/plugins/cache/goalbuddy/goalbuddy/<version>/
 ~/.codex/agents/goal_judge.toml
+~/.codex/agents/goal_keeper.toml
 ~/.codex/agents/goal_ledger.toml
 ~/.codex/agents/goal_scout.toml
 ~/.codex/agents/goal_worker.toml
@@ -170,7 +173,7 @@ Use subgoals for bounded child work that belongs to a parent task. Use multiple 
 
 GoalBuddy can prepare safe parallel work; it does not run a parallel org chart or install arbitrary extension packs.
 
-Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy task agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. `goal_ledger` is separate: it runs only at genuine recovery boundaries and never receives a board task. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
+Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy task agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. `goal_keeper` and `goal_ledger` are separate control-plane roles: Keeper handles exact board operations during execution, while Ledger runs only at genuine recovery boundaries. Neither receives a board task. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
 
 ## Update
 

@@ -68,13 +68,17 @@ If an exact human approval phrase is the only remaining blocker and no safe loca
 
 ## Board Health
 
-The PM owns board health. If the board looks stale, misleading, offline, or inconsistent, run the bundled checker:
+The PM owns board-health decisions. The Board Keeper performs full-board inspection, repair, and checker execution from the PM's exact request:
 
 ```bash
 node <skill-path>/scripts/check-goal-state.mjs docs/goals/<slug>
 ```
 
-If the local board is running, compare `state.yaml` to the live board API. Repair only GoalBuddy control files unless an active Worker or PM task explicitly allows product-file edits.
+If the local board is running, Keeper compares `state.yaml` to the live board API. Keeper repairs only exact PM-authorized GoalBuddy control files and never edits product files.
+
+## Board Mutation Delegation
+
+During `/goal` execution, the PM owns meaning but does not routinely full-read or directly edit the board. Use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation. Send one compact `goalbuddy_keeper_request_v1` with the current digest, exact operation, authorized control files, expected before/after facts, and bundled checker command. Reuse one Keeper within an uninterrupted session; its `after_digest` chains into the next operation. Full-board PM review is reserved for the execution contract's explicit recovery escalation.
 
 ## Canonical Board
 
@@ -96,13 +100,13 @@ On every `/goal` continuation:
 
 1. Read this charter, and follow the GoalBuddy execution contract (`references/goal-execution.md` in the goal-prep skill) when available.
 2. At a genuine recovery boundary, run `node <skill-path>/scripts/resume-board.mjs docs/goals/<slug> --json` and invoke the read-only Goal Ledger Auditor (`goal_ledger` in Codex or `goal-ledger` in Claude Code) with the board path, response digest, checker status, and returned `commands.resume` command. Continue automatically only from an `ok: true` projection with Ledger `congruent` on the same digest. Any failure requires the execution contract's full-board PM review; preserve immutable completed-task history on a current v2 board when the live continuation is independently proven instead of rewriting old receipts. Do not redispatch a possibly in-flight Worker merely because the board says `active`.
-3. During an uninterrupted same-session task transition, use the board state the PM just validated and updated; do not run another recovery audit.
+3. Start a fresh Keeper from the Ledger-approved digest. During uninterrupted transitions, reuse it and chain each validated `after_digest`; do not rerun recovery or load the full board into PM context.
 4. Run the bundled GoalBuddy update checker when available and mention a newer version without blocking.
 5. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.
 6. Work only on the active board task.
 7. Assign Scout, Judge, Worker, or PM according to the task.
-8. Write a compact task receipt.
-9. Update the board.
+8. Write or accept a compact task receipt and decide the exact resulting status, gates, and successor.
+9. Give that exact mutation to Keeper; continue only from its passing checker receipt and new digest.
 10. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
 11. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
 12. Review at phase, risk, rejected-verification, ambiguity, or final-completion boundaries; do not review every small Worker by habit.

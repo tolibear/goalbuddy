@@ -51,7 +51,7 @@ Invariants:
 
 - Task ids match `T` followed by exactly three digits (`T001`, `T999`). The validator rejects other shapes such as `T001b`; a sibling or follow-up task takes the next free number.
 - Exactly one task is `active` at a time unless parallel write scopes are provably disjoint.
-- Scout and Judge tasks are read-only. Worker tasks write only inside `allowed_files`. Only the coordinating PM mutates the board itself.
+- Scout and Judge tasks are read-only. Worker tasks write only inside `allowed_files`. The coordinating PM owns every board decision; the control-plane Board Keeper applies exact authorized mutations.
 
 ## Receipt envelope
 
@@ -61,7 +61,7 @@ Agents performing a task return a single JSON object:
 { "goalbuddy_receipt_v1": { "result": "done | blocked", "task_id": "<T###>", "board_path": "<path to state.yaml>", "...role fields...": "see below" } }
 ```
 
-The PM records a receipt by copying its fields verbatim into the task card's `receipt:` mapping as YAML, dropping only null or empty fields. Fields are never renamed and never invented beyond the shapes below.
+The PM decides the resulting status and successor, then gives the receipt to Board Keeper. Keeper copies its fields verbatim into the task card's `receipt:` mapping as YAML, dropping only null or empty fields. Fields are never renamed and never invented beyond the shapes below.
 
 ## Receipt shapes by role
 

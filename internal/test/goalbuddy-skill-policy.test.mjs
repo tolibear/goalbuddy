@@ -71,7 +71,7 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /waiting_for_user_approval: true/);
     assert.match(text, /required_reply: "<exact phrase>"/);
     assert.match(text, /Board Health Stewardship/);
-    assert.match(text, /Do not auto-spawn a separate always-on steward by default/);
+    assert.match(text, /Keeper is on demand or warm within one uninterrupted session, not an always-on poller/);
     assert.match(text, /node <skill-path>\/scripts\/check-goal-state\.mjs docs\/goals\/<slug>/);
     assert.match(text, /Repair only GoalBuddy control files/);
     assert.match(text, /Never edit product implementation files during board-health work/);
@@ -91,6 +91,11 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /node <skill-path>\/scripts\/dispatch-task\.mjs docs\/goals\/<slug> --to codex/);
     assert.match(text, /Never dispatch externally by default/);
     assert.match(text, /The dispatcher never edits `state\.yaml`/);
+    assert.match(text, /### Board Keeper/);
+    assert.match(text, /goalbuddy_keeper_request_v1/);
+    assert.match(text, /goalbuddy_keeper_receipt_v1/);
+    assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
+    assert.match(text, /Ledger remains independently read-only/);
   }
 });
 
@@ -146,6 +151,26 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.match(claudeLedger, /model: claude-opus-4-8/);
   assert.match(claudeLedger, /effort: high/);
   assert.match(claudeLedger, /goalbuddy_ledger_audit_v1/);
+});
+
+test("board keeper is a low-reasoning control-plane writer rather than a task actor", () => {
+  const canonicalKeeper = readFileSync("goalbuddy/agents/goal_keeper.toml", "utf8");
+  const pluginKeeper = readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_keeper.toml", "utf8");
+  const claudeKeeper = readFileSync("plugins/goalbuddy/agents/goal-keeper.md", "utf8");
+
+  assert.equal(pluginKeeper, canonicalKeeper);
+  assert.match(canonicalKeeper, /model = "gpt-5\.6-sol"/);
+  assert.match(canonicalKeeper, /model_reasoning_effort = "low"/);
+  assert.match(canonicalKeeper, /sandbox_mode = "workspace-write"/);
+  assert.match(canonicalKeeper, /goalbuddy_keeper_request_v1/);
+  assert.match(canonicalKeeper, /goalbuddy_keeper_receipt_v1/);
+  assert.match(canonicalKeeper, /The PM owns meaning/);
+  assert.match(canonicalKeeper, /Never stage, commit, push/);
+  assert.match(canonicalKeeper, /Run `checker_command` after every mutation/);
+  assert.match(canonicalKeeper, /Never paste the board/);
+  assert.match(claudeKeeper, /model: claude-opus-4-8/);
+  assert.match(claudeKeeper, /effort: low/);
+  assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
 });
 
 test("Codex install keeps Goal Prep in the plugin and removes compatibility skill folders", () => {
