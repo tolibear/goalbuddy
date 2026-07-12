@@ -121,6 +121,7 @@ test("doctor fails when a required bundled agent is missing", () => {
 
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.capabilities.atomic_amendment_transition, true);
+    assert.equal(report.capabilities.atomic_placeholder_hydration_transition, true);
     assert.equal(report.codex_install_model, "plugin");
     assert.equal(report.plugin.skill_installed, true);
     assert.equal(report.plugin.enabled, true);
@@ -1475,6 +1476,7 @@ test("installs the Claude skill as goal-prep and migrates the legacy directory",
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.legacy_skill_present, false);
     assert.equal(report.capabilities.atomic_amendment_transition, true);
+    assert.equal(report.capabilities.atomic_placeholder_hydration_transition, true);
     assert.match(report.skill_path, pathSuffixPattern("skills", "goal-prep", "SKILL.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });

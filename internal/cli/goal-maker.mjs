@@ -304,7 +304,7 @@ Usage:
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
-  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file>] [--status done|blocked] [--activate T###|none] [--json]
+  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--json]
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
@@ -813,6 +813,7 @@ function installedRuntimeCapabilities(root) {
   const keeperText = existsSync(keeperAgent) ? readFileSync(keeperAgent, "utf8") : "";
   return {
     atomic_amendment_transition: receiptText.includes("--add-tasks") && keeperText.includes("apply_amendment"),
+    atomic_placeholder_hydration_transition: receiptText.includes("--hydrate-task") && keeperText.includes("apply_hydration"),
   };
 }
 

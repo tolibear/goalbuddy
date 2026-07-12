@@ -2,13 +2,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
 
-function makeBoard() {
+function makeBoard({ placeholder = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-apply-receipt-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
@@ -46,6 +47,23 @@ tasks:
     status: queued
     objective: "Audit the outcome."
     receipt: null
+${placeholder ? `  - id: T042
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Provisional worker; Judge package required before activation."
+    inputs:
+      - T001 receipt
+    constraints:
+      - "Keep the operation local."
+    allowed_files: []
+    verify: []
+    stop_if: []
+    expected_output:
+      - "Exact implementation receipt"
+    receipt: null
+` : ""}
 `);
   return { root, goalDir };
 }
@@ -63,7 +81,7 @@ const DONE_RECEIPT = {
   harness: "codex",
 };
 
-function runApply(root, args, receipt, taskCards = null) {
+function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hydrateSha256 = null) {
   const receiptPath = join(root, "receipt.json");
   writeFileSync(receiptPath, JSON.stringify(receipt));
   const taskArgs = [];
@@ -71,6 +89,12 @@ function runApply(root, args, receipt, taskCards = null) {
     const taskCardsPath = join(root, "task-cards.json");
     writeFileSync(taskCardsPath, JSON.stringify(taskCards));
     taskArgs.push("--add-tasks", taskCardsPath);
+  }
+  if (hydrateCard !== null) {
+    const taskCardPath = join(root, "task-card.json");
+    const rawTaskCard = JSON.stringify(hydrateCard);
+    writeFileSync(taskCardPath, rawTaskCard);
+    taskArgs.push("--task-card", taskCardPath, "--task-card-sha256", hydrateSha256 ?? createHash("sha256").update(rawTaskCard).digest("hex"));
   }
   return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, ...taskArgs, "--json", ...args], {
     cwd: root,
@@ -107,6 +131,25 @@ const AMENDMENT_TASKS = [
     receipt: null,
   },
 ];
+
+const HYDRATED_T042 = {
+  id: "T042",
+  type: "worker",
+  assignee: "Worker",
+  status: "queued",
+  reasoning_hint: "high",
+  objective: "Run the exact approved local pilot packet.",
+  inputs: ["T001 receipt", "Judge decision"],
+  constraints: ["Keep the operation local.", "Use the hash-bound packet."],
+  allowed_files: ["src/pilot.mjs"],
+  verify: ["npm test", "npm run lint", "git diff --check"],
+  stop_if: ["Need files outside allowed_files."],
+  expected_output: ["Exact implementation receipt"],
+  approval_phrase: "Approve T042 exactly as hash-bound in the card.",
+  approval_phrases: ["Approve T042 exactly as hash-bound in the card."],
+  boundary_classification: "local-only; no external effects",
+  receipt: null,
+};
 
 test("apply-receipt records a done receipt and activates the next task atomically", () => {
   const { root, goalDir } = makeBoard();
@@ -146,6 +189,102 @@ test("apply-receipt adds exact amendment tasks, closes the current task, and act
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt hydrates an existing Worker placeholder from one exact task card and activates it atomically", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], DONE_RECEIPT, null, HYDRATED_T042);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.hydrated_task_id, "T042");
+    assert.equal(report.hydration_source, "task_card");
+    assert.equal(report.hydration_sha256, createHash("sha256").update(JSON.stringify(HYDRATED_T042)).digest("hex"));
+    assert.deepEqual(report.added_task_ids, []);
+
+    const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    assert.match(state, /active_task: T042/);
+    assert.match(state, /- id: T042[\s\S]*status: active/);
+    assert.match(state, /objective: "Run the exact approved local pilot packet\."/);
+    assert.match(state, /allowed_files:\n      - src\/pilot\.mjs/);
+    assert.match(state, /constraints:\n      - "Keep the operation local\."\n      - "Use the hash-bound packet\."/);
+    assert.match(state, /approval_phrase: "Approve T042 exactly as hash-bound in the card\."/);
+    assert.match(state, /approval_phrases:\n      - "Approve T042 exactly as hash-bound in the card\."/);
+    assert.match(state, /boundary_classification: "local-only; no external effects"/);
+    assert.doesNotMatch(state, /Provisional worker/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt hydrates a placeholder from the exact Judge worker_package", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    const workerPackage = {
+      objective: "Run the receipt-selected Worker package.",
+      allowed_files: ["src/pilot.mjs"],
+      verify: ["npm test", "npm run lint", "git diff --check"],
+      stop_if: ["Need files outside allowed_files."],
+    };
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], { ...DONE_RECEIPT, worker_package: workerPackage });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.hydration_source, "receipt_worker_package");
+    assert.match(report.hydration_sha256, /^[a-f0-9]{64}$/);
+    const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    assert.match(state, /objective: "Run the receipt-selected Worker package\."/);
+    assert.match(state, /verify:\n      - npm test\n      - npm run lint\n      - git diff --check/);
+    assert.match(state, /constraints:\n      - "Keep the operation local\."/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt rejects task-card id mismatch and populated non-placeholder Workers without writing", () => {
+  for (const testCase of [
+    { name: "id mismatch", board: { placeholder: true }, card: { ...HYDRATED_T042, id: "T043" }, pattern: /does not match --hydrate-task T042/ },
+    { name: "non-placeholder", board: {}, card: { ...HYDRATED_T042, id: "T001", status: "active" }, hydrate: "T001", pattern: /not a queued receipt-free Worker placeholder/ },
+    { name: "unsupported field", board: { placeholder: true }, card: { ...HYDRATED_T042, arbitrary_board_edit: true }, pattern: /unsupported fields: arbitrary_board_edit/ },
+  ]) {
+    const { root, goalDir } = makeBoard(testCase.board);
+    try {
+      const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+      const hydrate = testCase.hydrate ?? "T042";
+      const result = runApply(root, ["--task", "T001", "--hydrate-task", hydrate, "--activate", hydrate], DONE_RECEIPT, null, testCase.card);
+      assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
+      assert.match(result.stderr, testCase.pattern);
+      assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("apply-receipt rejects a task card whose bytes do not match the approved SHA-256", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], DONE_RECEIPT, null, HYDRATED_T042, "0".repeat(64));
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /SHA-256 mismatch/);
+    assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt restores the original board when hydrated content fails the checker", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const invalidReceipt = { ...DONE_RECEIPT, commands: [{ cmd: "npm test", status: "fail" }] };
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], invalidReceipt, null, HYDRATED_T042);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(JSON.parse(result.stdout).reverted, true);
+    assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

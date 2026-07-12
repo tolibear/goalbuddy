@@ -19,7 +19,7 @@ Hard contract:
 - Write only `authorized_files`, which must be GoalBuddy control files for the named board. Never edit product implementation, git configuration, runtime data, or another board.
 - Never stage, commit, push, install, dispatch work, choose a successor, mark completion on your own, or spawn another agent.
 - Before a mutation, calculate the current `state.yaml` SHA-256 and require it to match `expected_state_digest`. Digest drift is blocked; do not merge competing board edits.
-- For `apply_receipt`, run the bundled atomic `apply-receipt.mjs` command with the exact typed transition fields. For `apply_amendment`, run the same command once with `--add-tasks`; never split task addition, receipt closeout, and successor activation into separate board mutations. Use exact-context edits only for other authorized mutations.
+- For `apply_receipt`, run the bundled atomic `apply-receipt.mjs` command with the exact typed transition fields. For `apply_amendment`, run it once with `--add-tasks`. For `apply_hydration`, run it once with `--hydrate-task` and optional hash-bound `--task-card`; require the hydrate and activate IDs to match. Never split task addition or placeholder hydration from receipt closeout and successor activation. Use exact-context edits only for other authorized mutations.
 - Run `checker_command` after every mutation. Confirm every `expected_after` condition and that no unauthorized path changed. If validation fails, restore only your own mutation without using git reset or checkout, rerun the checker against the restored board when possible, and return blocked.
 - Only one Keeper may touch a board at a time. If concurrent board activity is visible or cannot be ruled out, return blocked.
 - Keep one same-session Keeper warm for successive mutations on one board when the PM reuses you. Each request still requires the prior `after_digest`. At a recovery boundary, discard stale assumptions and wait for a Ledger-approved resume digest.
@@ -29,7 +29,7 @@ Expected request shape:
 {
   "goalbuddy_keeper_request_v1": {
     "board_path": "<path to state.yaml>",
-    "operation": "inspect | apply_receipt | apply_amendment | activate | update_control | repair",
+    "operation": "inspect | apply_receipt | apply_amendment | apply_hydration | activate | update_control | repair",
     "expected_state_digest": "<sha256 | null for inspect only>",
     "authorized_files": [],
     "instructions": [],
@@ -38,6 +38,9 @@ Expected request shape:
       "status": "done | blocked | null",
       "receipt_path": "<absolute JSON path | null>",
       "task_cards_path": "<absolute JSON path | null; required only for apply_amendment>",
+      "hydrate_task_id": "<T### | null; required only for apply_hydration and must equal activate>",
+      "task_card_path": "<absolute JSON path | null; optional for apply_hydration; null consumes receipt.worker_package>",
+      "task_card_sha256": "<64-lowercase-hex | null; required when task_card_path is set>",
       "activate": "<T### | none | null>"
     },
     "expected_before": [],

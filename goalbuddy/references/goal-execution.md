@@ -66,7 +66,7 @@ For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
 - exact PM-approved instructions and expected before/after facts;
 - the exact bundled checker command.
 
-For `apply_receipt`, also provide typed `transition` fields: `task_id`, `status`, `receipt_path`, and `activate`; set `task_cards_path` to `null`. For a Judge decision that introduces exact successor cards, use `apply_amendment` and provide the same fields plus `task_cards_path`, which points to a JSON array of complete PM-approved task objects. Do not embed a long task payload in prose and do not send a separate `add_task` request. Keeper must perform the amendment with one `apply-receipt.mjs --add-tasks` invocation so task addition, closeout, activation, checker validation, and rollback share one atomic boundary.
+For `apply_receipt`, also provide typed `transition` fields: `task_id`, `status`, `receipt_path`, and `activate`; set task-card fields to `null`. For a Judge decision that introduces exact successor cards, use `apply_amendment` and provide the same fields plus `task_cards_path`, which points to a JSON array of complete PM-approved task objects. When the selected successor is an existing queued Worker placeholder, use `apply_hydration`: set `hydrate_task_id` to that same successor and either set `task_card_path` plus its exact `task_card_sha256` or leave both null to consume the receipt's exact `worker_package`. Do not embed a long task payload in prose and do not send separate `add_task`, task-edit, receipt, or activation requests. Keeper must perform either typed transition with one `apply-receipt.mjs` invocation so package materialization, closeout, activation, checker validation, and rollback share one atomic boundary.
 
 Keeper reads the board in its isolated context, applies no judgment, prefers the bundled atomic receipt applier for receipt/status/successor transitions, validates the result, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
 
@@ -215,6 +215,14 @@ node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --rece
 ```
 
 The command rejects malformed, duplicate, or pre-existing task IDs before writing. The normal checker remains the final authority; any invalid resulting board is restored byte-for-byte. A successful retry therefore cannot duplicate cards, and a failed attempt does not leave a half-applied amendment.
+
+When a Judge instead selects an already-existing queued Worker placeholder, hydrate and activate that exact task in the same transition:
+
+```bash
+node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --hydrate-task T042 --task-card t042-task-card.json --task-card-sha256 <64-lowercase-hex> --activate T042
+```
+
+Omit `--task-card` and `--task-card-sha256` only when the receipt itself carries the exact four-field `worker_package`. A complete task card may additionally preserve standard package controls such as inputs, constraints, expected output, exact approval phrase(s), and boundary classification. Hydration is deliberately narrow: the target must already be a queued, receipt-free Worker with empty `allowed_files`, `verify`, and `stop_if`; its ID must match both `--hydrate-task` and `--activate`; a complete card must preserve identity, assignee, lifecycle status, and null receipt. Hash mismatches, unknown card fields, populated Workers, ID mismatches, mixed add-and-hydrate requests, malformed packages, and checker failures are rejected without an accepted mutation. The report returns the exact hydration source and SHA-256 used.
 
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 
