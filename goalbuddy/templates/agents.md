@@ -1,12 +1,13 @@
 # GoalBuddy Agents
 
-Use three generic agents. The main `/goal` thread remains PM and owns the board.
+Use three task agents plus one recovery-only Ledger Auditor. The main `/goal` thread remains PM and owns the board.
 
 | Agent | model_reasoning_effort | sandbox_mode | Purpose |
 |---|---:|---|---|
-| goal_scout | low | read-only | Targeted evidence mapping and candidate facts |
-| goal_worker | medium | workspace-write | One coherent bounded implementation/recovery slice |
-| goal_judge | high | read-only | Strategic review, escalation, completion skepticism |
+| goal_scout | medium | read-only | Targeted evidence mapping and candidate facts |
+| goal_worker | high | workspace-write | One coherent bounded implementation/recovery slice |
+| goal_judge | xhigh | read-only | Strategic review, escalation, completion skepticism |
+| goal_ledger | medium | read-only | Recovery-only board/projection/repository reconciliation |
 
 ## PM Thinking Policy
 
@@ -44,6 +45,7 @@ Rules:
 
 - Only the PM loop chooses active tasks, marks tasks done, or completes the goal.
 - Keep at most one write-capable Worker active unless disjoint write scopes are explicit in `state.yaml`.
-- Worker defaults to medium reasoning for implementation tasks and should complete the whole assigned slice.
+- Worker defaults to high reasoning for implementation tasks and should complete the whole assigned slice.
 - Scout and Judge are read-only and safe to parallelize when their board inputs are clear.
-- Judge is high thinking and should choose the largest safe useful slice, not the narrowest helper.
+- Judge is xhigh thinking and should choose the largest safe useful slice, not the narrowest helper.
+- Ledger is not a task agent. Run it only at genuine recovery boundaries; it never edits state, chooses work, or emits a task receipt.

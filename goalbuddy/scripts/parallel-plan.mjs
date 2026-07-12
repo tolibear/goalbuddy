@@ -149,8 +149,9 @@ function normalizeRole(value) {
 function reasoningHint(task, role) {
   const hint = String(task.reasoning_hint || "").toLowerCase();
   if (["low", "medium", "high", "xhigh"].includes(hint)) return hint;
-  if (role === "judge") return "high";
-  return "low";
+  if (role === "judge") return "xhigh";
+  if (role === "worker") return "high";
+  return "medium";
 }
 
 function quote(value) {

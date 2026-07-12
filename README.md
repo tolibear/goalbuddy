@@ -60,6 +60,14 @@ npx goalbuddy resume
 
 `resume` lists every live board in the repo with its status, active task, and the exact `/goal Follow docs/goals/<slug>/goal.md.` command to continue, which is identical in both harnesses. Receipts can record which harness performed each task, so the board's history survives the handoff intact.
 
+When a specific board actually resumes, GoalBuddy validates it and renders a bounded continuation projection:
+
+```bash
+npx goalbuddy resume docs/goals/<slug> --json
+```
+
+The PM then invokes GoalBuddy's read-only Ledger Auditor (`goal_ledger` in Codex, `goal-ledger` in Claude Code) with the projection's board digest. Ledger independently reruns resume, reads the complete board, and reconciles it with repository, worktree, receipt, verification, approval-gate, and visible Worker evidence. Continuation is allowed only on `congruent` with the same pre/post digest; uncertainty, a changed board, or disagreement escalates to direct PM review. The projection is not a second ledger, and an active task is never treated as proof that its Worker is still alive.
+
 Boards can also mix vendors within a single run — a Claude judge and a Codex worker on the same board:
 
 ```bash
@@ -75,6 +83,7 @@ For Codex, the canonical install is the native plugin plus bundled agents:
 ```text
 ~/.codex/plugins/cache/goalbuddy/goalbuddy/<version>/
 ~/.codex/agents/goal_judge.toml
+~/.codex/agents/goal_ledger.toml
 ~/.codex/agents/goal_scout.toml
 ~/.codex/agents/goal_worker.toml
 ```
@@ -134,6 +143,8 @@ Judge chooses the largest safe useful slice.
 
 Worker completes the whole assigned slice and leaves a receipt.
 
+Ledger audits board congruence only when a run genuinely resumes; it is not a task actor or always-on steward.
+
 `/goal` keeps the loop honest until a final Judge/PM audit maps receipts and verification back to the oracle and records the full outcome complete.
 
 ## Slice Sizing
@@ -147,6 +158,7 @@ GoalBuddy should not optimize for tiny safe tasks. It should optimize for the la
 GoalBuddy keeps the model small:
 
 - `state.yaml` is the source of truth.
+- `goalbuddy resume <board> --json` is a validated recovery projection, not another state file.
 - A board is a view of one `state.yaml`.
 - The local hub is a switchboard for many boards.
 - A subgoal is one depth-1 `state.yaml` linked from a parent task.
@@ -158,7 +170,7 @@ Use subgoals for bounded child work that belongs to a parent task. Use multiple 
 
 GoalBuddy can prepare safe parallel work; it does not run a parallel org chart or install arbitrary extension packs.
 
-Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
+Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy task agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. `goal_ledger` is separate: it runs only at genuine recovery boundaries and never receives a board task. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
 
 ## Update
 
@@ -168,7 +180,7 @@ When a new GoalBuddy version ships:
 npx goalbuddy update
 ```
 
-That updates both Codex and Claude Code.
+That updates both Codex and Claude Code. If Codex already points its GoalBuddy marketplace at a local checkout, update preserves that source; pass `--source` only when you intentionally want to change it.
 
 ## Live Boards
 

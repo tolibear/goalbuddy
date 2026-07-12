@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Recovery resumes now fail closed and receive an independent ledger audit.** `goalbuddy resume <specific-board> --json` validates the authoritative board before emitting a compact continuation projection with the exact active scope, recent transition proof, verification, owner gates, blocked/queued inventory, and explicit unknown Worker liveness. Codex and Claude Code installs now include a dedicated read-only Ledger Auditor (`goal_ledger`: GPT-5.6 Sol medium; `goal-ledger`: Opus 4.8 high) that reads the complete board and reconciles it against repository, worktree, receipt, verification, gate, and visible Worker evidence at genuine recovery boundaries. Only `congruent` permits continuation; discrepancy, uncertainty, timeout, or unavailability escalates to direct PM review. Ordinary same-session task transitions do not run the audit, no secondary state is persisted, and Codex Goal Compiler remains outside runtime recovery.
+- **Updates preserve the configured Codex marketplace source.** Unless `--source` is explicitly supplied, install/update now reuses the existing `[marketplaces.goalbuddy]` source instead of silently replacing a local checkout with the GitHub marketplace.
+
 ## 0.4.0 — Cross-Harness Goals (2026-07-06)
 
 - **Goals now move between Codex and Claude Code.** The board has always been repo-native (`state.yaml` is the only truth), and 0.4.0 makes the handoff real: start a goal in one harness and resume it in the other with the same `/goal Follow docs/goals/<slug>/goal.md.` command. The new `goalbuddy resume` command discovers live boards in a repo and prints each goal's status, active task, and exact run command; the execution contract now states the handoff rule (resume from recorded state, never from chat history); and receipts may carry an optional `harness` field so a board's history shows which runtime performed each task.

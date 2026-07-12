@@ -95,16 +95,17 @@ If this charter and `state.yaml` disagree, `state.yaml` wins for task status, ac
 On every `/goal` continuation:
 
 1. Read this charter, and follow the GoalBuddy execution contract (`references/goal-execution.md` in the goal-prep skill) when available.
-2. Read `state.yaml`.
-3. Run the bundled GoalBuddy update checker when available and mention a newer version without blocking.
-4. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.
-5. Work only on the active board task.
-6. Assign Scout, Judge, Worker, or PM according to the task.
-7. Write a compact task receipt.
-8. Update the board.
-9. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
-10. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
-11. Review at phase, risk, rejected-verification, ambiguity, or final-completion boundaries; do not review every small Worker by habit.
-12. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
+2. At a genuine recovery boundary, run `goalbuddy resume docs/goals/<slug> --json` and invoke the read-only Goal Ledger Auditor (`goal_ledger` in Codex or `goal-ledger` in Claude Code) with the board path and projected `state_digest`. Continue only on `congruent` with the same digest; otherwise perform the execution contract's mandatory PM review. Do not redispatch a possibly in-flight Worker merely because the board says `active`.
+3. During an uninterrupted same-session task transition, use the board state the PM just validated and updated; do not run another recovery audit.
+4. Run the bundled GoalBuddy update checker when available and mention a newer version without blocking.
+5. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.
+6. Work only on the active board task.
+7. Assign Scout, Judge, Worker, or PM according to the task.
+8. Write a compact task receipt.
+9. Update the board.
+10. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
+11. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
+12. Review at phase, risk, rejected-verification, ambiguity, or final-completion boundaries; do not review every small Worker by habit.
+13. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
 
 Issue and PR handoffs are supporting artifacts. `state.yaml` remains authoritative, and every external artifact decision must be recorded in a task receipt.

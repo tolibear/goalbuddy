@@ -125,6 +125,26 @@ test("slice policy is simple and mirrored across templates and agent payloads", 
   assert.match(canonicalJudge, /copy the plan section's own file list into allowed_files verbatim/);
 });
 
+test("recovery ledger is a read-only reconciler rather than a task actor", () => {
+  const canonicalLedger = readFileSync("goalbuddy/agents/goal_ledger.toml", "utf8");
+  const pluginLedger = readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_ledger.toml", "utf8");
+  const claudeLedger = readFileSync("plugins/goalbuddy/agents/goal-ledger.md", "utf8");
+
+  assert.equal(pluginLedger, canonicalLedger);
+  assert.match(canonicalLedger, /model = "gpt-5\.6-sol"/);
+  assert.match(canonicalLedger, /model_reasoning_effort = "medium"/);
+  assert.match(canonicalLedger, /sandbox_mode = "read-only"/);
+  assert.match(canonicalLedger, /Never edit the board/);
+  assert.match(canonicalLedger, /Never.*dispatch a task/);
+  assert.match(canonicalLedger, /goalbuddy_ledger_audit_v1/);
+  assert.match(canonicalLedger, /state_digest/);
+  assert.match(canonicalLedger, /SHA-256 before and after/);
+  assert.match(canonicalLedger, /main_agent_action.*continue.*congruent/s);
+  assert.match(claudeLedger, /model: claude-opus-4-8/);
+  assert.match(claudeLedger, /effort: high/);
+  assert.match(claudeLedger, /goalbuddy_ledger_audit_v1/);
+});
+
 test("Codex install keeps Goal Prep in the plugin and removes compatibility skill folders", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-policy-"));
   try {

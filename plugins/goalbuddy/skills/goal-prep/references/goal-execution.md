@@ -28,9 +28,30 @@ The target is not literal certainty. It is the highest practical likelihood of a
 
 ## Boards Move Between Harnesses
 
-A board may arrive mid-run from a different harness: a goal started in Codex can be resumed in Claude Code and vice versa. The handoff contract is simple because `state.yaml` is the only truth. On resume, read the charter and the board and continue from the recorded state — never reconstruct progress from chat history, and never re-plan work that already has a done receipt. Receipts written by another harness are as authoritative as your own.
+A board may arrive mid-run from a different harness: a goal started in Codex can be resumed in Claude Code and vice versa. `state.yaml` is the only durable board truth, but a durable record can still be stale, malformed, mid-closeout, or inconsistent with repository reality. On recovery, never reconstruct progress from chat history, and never blindly trust an active-task label as proof that continuation or redispatch is safe. Receipts written by another harness are as authoritative as your own once the recovery audit below finds the board congruent.
 
 Any receipt may include an optional `harness` field (for example `codex` or `claude-code`) naming the runtime that performed the task, so the board's history shows who did what across a handoff. When you know which harness you are, stamp it.
+
+### Recovery Audit
+
+A genuine recovery boundary is any cold start, new session, post-compaction recovery, cross-harness handoff, or return after interrupted closeout, verification, or Worker execution. It is not an ordinary transition immediately after the current PM has recorded a task receipt and activated its successor in the same uninterrupted context.
+
+At every genuine recovery boundary:
+
+1. Run the checker-validated continuation projection for the specific board:
+
+   ```bash
+   goalbuddy resume docs/goals/<slug> --json
+   ```
+
+   `goalbuddy resume` with no board remains discovery-only. The explicit-board form validates `state.yaml` first and fails closed; its projection is a read model, not a second source of truth.
+2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path and the projection's `board.state_digest`. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
+3. Ledger independently reruns the explicit resume command, reads the complete charter and board, and compares them with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Its pre/post board digests must match the PM's projection; a changed board is `uncertain` and requires a fresh recovery audit.
+4. Continue from the PM's projected active task only when Ledger returns `verdict: congruent`, the same `state_digest`, and `main_agent_action: continue`.
+5. Treat `discrepant`, `uncertain`, malformed output, timeout, or unavailable Ledger as a mandatory PM escalation. The PM must inspect the full board and named external evidence directly, resolve the truth conservatively, rerun the checker, and only then continue. The fallback preserves availability; it does not waive the audit.
+6. Never infer Worker liveness from `status: active`. If an unfinished Worker might still be running and liveness is not proven, do not redispatch it. Ledger returns `uncertain`, and the PM checks the current harness/session or worktree before choosing recovery.
+
+Ledger never edits state, applies receipts, chooses tasks, dispatches work, or becomes a task/receipt actor. Do not add Ledger status to `state.yaml`; install health belongs to `goalbuddy doctor`, while board truth stays in the existing schema.
 
 ### Mixed Fleets
 
@@ -210,7 +231,7 @@ Exception: if an exact human approval phrase is the only remaining blocker and n
 
 ## Board Health Stewardship
 
-The PM owns board health. Do not auto-spawn a separate always-on steward by default.
+The PM owns board health. Do not auto-spawn a separate always-on steward by default. The recovery-only Ledger Auditor is a bounded congruence check at genuine recovery boundaries, not a steward, implementation actor, or polling loop.
 
 When the board looks stale, misleading, offline, Not Found, or inconsistent, run the bundled checker:
 
@@ -298,6 +319,8 @@ Treat `reasoning_hint` as PM guidance. It does not override task scope, write pe
 Use `node <skill-path>/scripts/render-task-prompt.mjs docs/goals/<slug>` to render a compact prompt for the active task. The prompt includes only task-specific material, safe agent metadata, continuation warnings, and the expected receipt shape. It should not include broad chat history or dump the whole state file.
 
 When dispatching Codex subagents from a GoalBuddy prompt, the `required_spawn_agent_type` is mandatory. Use that exact `spawn_agent` `agent_type` (`goal_scout`, `goal_worker`, or `goal_judge`). Do not substitute generic `scout`, `worker`, or `judge` agents; if the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or ask the operator to run the GoalBuddy CLI through their install channel with `agents` or `install`. After one `wait_agent` timeout with no visible allowed-file changes, stop waiting, record the timeout, and recover deterministically instead of waiting forever.
+
+`goal_ledger` / `goal-ledger` is separate from task prompt dispatch. Invoke it only through the Recovery Audit contract; it never receives a task card, returns a `goalbuddy_receipt_v1`, or changes board status.
 
 Use `node <skill-path>/scripts/parallel-plan.mjs docs/goals/<slug>` when the user explicitly asks for parallel agent work. It is read-only: it recommends safe Scout/Judge handoffs and Worker handoffs only when write scopes are known and disjoint. It does not mutate `state.yaml`, create sub-goals, apply receipts, or spawn agents.
 

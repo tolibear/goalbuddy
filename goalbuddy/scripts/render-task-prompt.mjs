@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const ROLE_DEFAULTS = {
-  scout: { agent: "goal_scout", reasoning: "low", sandbox: "read-only" },
-  judge: { agent: "goal_judge", reasoning: "high", sandbox: "read-only" },
-  worker: { agent: "goal_worker", reasoning: "medium", sandbox: "workspace-write" },
+  scout: { agent: "goal_scout", reasoning: "medium", sandbox: "read-only" },
+  judge: { agent: "goal_judge", reasoning: "xhigh", sandbox: "read-only" },
+  worker: { agent: "goal_worker", reasoning: "high", sandbox: "workspace-write" },
   pm: { agent: "PM", reasoning: "medium", sandbox: "workspace-write" },
 };
 

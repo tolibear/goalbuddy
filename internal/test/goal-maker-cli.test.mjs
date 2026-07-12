@@ -42,6 +42,13 @@ function receiptContractSchema(agentPath) {
   return JSON.parse(match[1]);
 }
 
+function ledgerAuditContractSchema(agentPath) {
+  const text = readFileSync(agentPath, "utf8");
+  const match = text.match(/\{\s*"goalbuddy_ledger_audit_v1":\s*(\{[\s\S]*?\n\s*\})\s*\n\}/);
+  assert.ok(match, `missing goalbuddy_ledger_audit_v1 contract in ${agentPath}`);
+  return JSON.parse(match[1]);
+}
+
 function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -141,7 +148,7 @@ test("doctor distinguishes fully removed and residual-agent Codex states", () =>
     const residualReport = JSON.parse(residual.stdout);
     assert.equal(residualReport.runtime_state, "residual-agents-only");
     assert.deepEqual(residualReport.residual_agents, ["goal_worker.toml"]);
-    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_scout.toml"]);
+    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_ledger.toml", "goal_scout.toml"]);
     assert.match(residualReport.errors.join("\n"), /Residual GoalBuddy Codex agents remain/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -200,6 +207,7 @@ test("doctor reports native goal runtime readiness and supports strict goal-read
 test("bundled agent contracts stay strict and receipt-shaped", () => {
   const scout = readFileSync("goalbuddy/agents/goal_scout.toml", "utf8");
   const judge = readFileSync("goalbuddy/agents/goal_judge.toml", "utf8");
+  const ledger = readFileSync("goalbuddy/agents/goal_ledger.toml", "utf8");
   const worker = readFileSync("goalbuddy/agents/goal_worker.toml", "utf8");
   assert.match(scout, /model_reasoning_effort = "medium"/);
   assert.match(scout, /Read only/);
@@ -208,6 +216,12 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(judge, /model_reasoning_effort = "xhigh"/);
   assert.match(judge, /Choose the largest safe useful slice/);
   assert.match(judge, /Routine checks belong to the checker/);
+  assert.match(ledger, /model = "gpt-5\.6-sol"/);
+  assert.match(ledger, /model_reasoning_effort = "medium"/);
+  assert.match(ledger, /sandbox_mode = "read-only"/);
+  assert.match(ledger, /Independently read the complete `goal\.md` and `state\.yaml`/);
+  assert.match(ledger, /goalbuddy_ledger_audit_v1/);
+  assert.match(ledger, /never `congruent`/);
   assert.match(worker, /model_reasoning_effort = "high"/);
   assert.match(worker, /Edit only files matching allowed_files/);
   assert.match(worker, /Complete the whole assigned slice/);
@@ -215,6 +229,7 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
 
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_scout.toml", "utf8"), scout);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_judge.toml", "utf8"), judge);
+  assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_ledger.toml", "utf8"), ledger);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_worker.toml", "utf8"), worker);
 });
 
@@ -338,6 +353,7 @@ checks:
     const report = JSON.parse(result.stdout);
     assert.equal(report.metadata.recommended_agent, "goal_worker");
     assert.equal(report.metadata.required_spawn_agent_type, "goal_worker");
+    assert.equal(report.metadata.recommended_reasoning, "high");
     assert.equal(report.metadata.sandbox, "workspace-write");
     assert.deepEqual(report.metadata.goal_oracle, {
       signal: "Prompt includes the active task contract without dumping old receipts.",
@@ -441,18 +457,21 @@ test("prompt receipt schemas mirror bundled agent receipt contracts", () => {
         type: "scout",
         agent: "goal_scout",
         assignee: "Scout",
+        reasoning: "medium",
         extra: "",
       },
       {
         type: "judge",
         agent: "goal_judge",
         assignee: "Judge",
+        reasoning: "xhigh",
         extra: "",
       },
       {
         type: "worker",
         agent: "goal_worker",
         assignee: "Worker",
+        reasoning: "high",
         extra: [
           "    allowed_files:",
           "      - goalbuddy/scripts/**",
@@ -502,6 +521,7 @@ checks:
       const report = JSON.parse(result.stdout);
       const expectedSchema = receiptContractSchema(`goalbuddy/agents/${item.agent}.toml`);
       assert.deepEqual(report.receipt_schema, expectedSchema, item.agent);
+      assert.equal(report.metadata.recommended_reasoning, item.reasoning, item.agent);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -935,7 +955,7 @@ test("reset removes only GoalBuddy-owned Codex runtime surfaces", () => {
 
     const agentsRoot = join(codexHome, "agents");
     mkdirSync(agentsRoot, { recursive: true });
-    for (const file of ["goal_judge.toml", "goal_scout.toml", "other.toml"]) {
+    for (const file of ["goal_judge.toml", "goal_ledger.toml", "goal_scout.toml", "other.toml"]) {
       writeFileSync(join(agentsRoot, file), `${file}\n`);
     }
     mkdirSync(join(agentsRoot, "goal_worker.toml"), { recursive: true });
@@ -956,7 +976,7 @@ test("reset removes only GoalBuddy-owned Codex runtime surfaces", () => {
       "[marketplaces.goalbuddy]",
     ]);
     assert.match(report.removed_plugin_cache_paths[0], pathSuffixPattern("plugins", "cache", "goalbuddy"));
-    assert.equal(report.removed_agents.length, 3);
+    assert.equal(report.removed_agents.length, 4);
     assert.equal(report.removed_legacy_skill_paths.length, 2);
 
     const config = readFileSync(configPath, "utf8");
@@ -1046,11 +1066,47 @@ test("plugin install output points to Goal Prep and the local goal surface", () 
 
     const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome], { env });
     assert.equal(install.status, 0, install.stderr || install.stdout);
-    assert.match(install.stdout, /Agents: 3 installed/);
+    assert.match(install.stdout, /Agents: 4 installed/);
     assert.match(install.stdout, /\$goal-prep/);
     assert.match(install.stdout, /Goal surface/);
     assert.match(install.stdout, /npx goalbuddy board docs\/goals\/<slug>/);
     assert.doesNotMatch(install.stdout, /goalbuddy extend/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("update preserves an existing marketplace source unless explicitly overridden", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const configPath = join(codexHome, "config.toml");
+    const localSource = join(root, "local-goalbuddy");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(configPath, [
+      "[marketplaces.goalbuddy]",
+      'source_type = "local"',
+      `source = ${JSON.stringify(localSource)}`,
+      "",
+    ].join("\n"));
+    const env = fakeCodexEnv(root);
+
+    const preserved = runGoalMaker(["update", "--target", "codex", "--codex-home", codexHome, "--json"], { env });
+    assert.equal(preserved.status, 0, preserved.stderr || preserved.stdout);
+    assert.equal(JSON.parse(preserved.stdout).marketplace_source, localSource);
+
+    const overridden = runGoalMaker([
+      "update",
+      "--target",
+      "codex",
+      "--source",
+      "tolibear/goalbuddy",
+      "--codex-home",
+      codexHome,
+      "--json",
+    ], { env });
+    assert.equal(overridden.status, 0, overridden.stderr || overridden.stdout);
+    assert.equal(JSON.parse(overridden.stdout).marketplace_source, "tolibear/goalbuddy");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1089,9 +1145,10 @@ test("default command installs the native Codex plugin", () => {
     const report = JSON.parse(install.stdout);
     assert.equal(report.installed, true);
     assert.equal(report.plugin, "goalbuddy@goalbuddy");
-    assert.equal(report.agents.length, 3);
+    assert.equal(report.agents.length, 4);
     assert.equal(existsSync(join(codexHome, "skills", "goalbuddy", "SKILL.md")), false);
     assert.equal(existsSync(join(codexHome, "agents", "goal_worker.toml")), true);
+    assert.equal(existsSync(join(codexHome, "agents", "goal_ledger.toml")), true);
 
     const config = readFileSync(join(codexHome, "config.toml"), "utf8");
     assert.match(config, /\[plugins\."goalbuddy@goalbuddy"\]/);
@@ -1118,6 +1175,7 @@ test("default command installs Codex and Claude Code when both homes are provide
     assert.equal(existsSync(join(codexHome, "config.toml")), true);
     assert.equal(existsSync(join(claudeHome, "skills", "goal-prep", "SKILL.md")), true);
     assert.equal(existsSync(join(claudeHome, "agents", "goal-worker.md")), true);
+    assert.equal(existsSync(join(claudeHome, "agents", "goal-ledger.md")), true);
     assert.equal(existsSync(join(claudeHome, "commands", "goal-prep.md")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1177,7 +1235,7 @@ test("install reports Codex plugin state in json mode", () => {
     assert.equal(report.installed, true);
     assert.equal(report.plugin, "goalbuddy@goalbuddy");
     assert.match(report.cache_path, pathSuffixPattern("plugins", "cache", "goalbuddy", "goalbuddy", packageVersion));
-    assert.equal(report.agents.length, 3);
+    assert.equal(report.agents.length, 4);
     assert.equal(existsSync(join(codexHome, "skills", "goalbuddy")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1312,6 +1370,15 @@ test("judge receipt contract includes worker_package in every surface", () => {
   assert.deepEqual(mdSchema.worker_package, tomlSchema.worker_package);
 });
 
+test("ledger audit contract is parseable and aligned across both harnesses", () => {
+  const tomlSchema = ledgerAuditContractSchema("goalbuddy/agents/goal_ledger.toml");
+  const mdSchema = ledgerAuditContractSchema("plugins/goalbuddy/agents/goal-ledger.md");
+  assert.deepEqual(mdSchema, tomlSchema);
+  assert.equal(tomlSchema.state_digest, "<validated state.yaml SHA-256>");
+  assert.equal(tomlSchema.verdict, "congruent | discrepant | uncertain");
+  assert.equal(tomlSchema.main_agent_action, "continue | escalate");
+});
+
 test("installs the Claude skill as goal-prep and migrates the legacy directory", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-skill-rename-"));
   try {
@@ -1390,9 +1457,45 @@ goal:
   kind: specific
   tranche: "test"
   status: ${active ? "active" : "done"}
-active_task: ${active ? "T001" : "null"}
+  oracle:
+    signal: "The widget behavior is verified."
+    final_proof: "A passing npm test receipt and final Judge audit."
+  intake:
+    original_request: "Make the widget work."
+    interpreted_outcome: "The widget works and the test proves it."
+    authority: approved
+    proof_type: test
+    completion_proof: "npm test passes and the final audit is complete."
+    likely_misfire: "Changing code without proving behavior."
+rules:
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+  goal_pressure_requires_oracle: true
+  no_completion_on_weak_proof: true
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: ${active ? "T002" : "null"}
 tasks:
+  - id: T000
+    type: pm
+    assignee: PM
+    status: done
+    objective: "Record old orientation."
+    receipt:
+      result: done
+      summary: "OLD_RECEIPT_SHOULD_NOT_APPEAR"
   - id: T001
+    type: pm
+    assignee: PM
+    status: done
+    objective: "Select the widget task."
+    receipt:
+      result: done
+      summary: "Recent transition selected the bounded widget task."
+      note: notes/T001-transition.md
+  - id: T002
     type: worker
     assignee: Worker
     status: ${active ? "active" : "done"}
@@ -1411,7 +1514,28 @@ tasks:
         - cmd: npm test
           status: pass
       summary: "done"`}
+${active ? "" : `  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Audit the completed widget outcome."
+    receipt:
+      result: done
+      decision: complete
+      full_outcome_complete: true
+      rationale: "The widget is complete and npm test passed."
+      evidence:
+        - src/widget.mjs
+`}checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: ${active ? "unknown" : "pass"}
+    task: ${active ? "null" : "T002"}
+    commands:${active ? " []" : `
+      - cmd: npm test
+        status: pass`}
 `);
+  writeFileSync(join(goalDir, "notes", "T001-transition.md"), "# T001 transition\n\nThe recent task-selection evidence.\n");
   return goalDir;
 }
 
@@ -1425,7 +1549,7 @@ test("resume lists boards and prints the handoff command for active goals", () =
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /one goal/);
     assert.match(result.stdout, /two goal/);
-    assert.match(result.stdout, /T001 \(worker\) Fix the widget in one\./);
+    assert.match(result.stdout, /T002 \(worker\) Fix the widget in one\./);
     assert.match(result.stdout, /Resume in any harness \(Codex or Claude Code\)/);
     assert.match(result.stdout, /\/goal Follow docs\/goals\/one\/goal\.md\./);
     assert.doesNotMatch(result.stdout, /\/goal Follow docs\/goals\/two\/goal\.md\./);
@@ -1444,25 +1568,54 @@ test("resume --json returns structured boards", () => {
     assert.equal(report.boards.length, 1);
     assert.equal(report.boards[0].slug, "one");
     assert.equal(report.boards[0].status, "active");
-    assert.equal(report.boards[0].active_task.id, "T001");
+    assert.equal(report.boards[0].active_task.id, "T002");
     assert.equal(report.boards[0].run_command, "/goal Follow docs/goals/one/goal.md.");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("resume scoped to one goal dir and empty repos behave", () => {
+test("resume scoped to one goal dir returns a validated continuation projection", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-scoped-"));
   try {
     writeResumeGoal(root, "one", { active: true });
     writeResumeGoal(root, "two", { active: false });
 
-    const scoped = runGoalMaker(["resume", "docs/goals/two", "--json"], { cwd: root });
+    const scoped = runGoalMaker(["resume", "docs/goals/one", "--json"], { cwd: root });
     assert.equal(scoped.status, 0, scoped.stderr || scoped.stdout);
     const scopedReport = JSON.parse(scoped.stdout);
-    assert.equal(scopedReport.boards.length, 1);
-    assert.equal(scopedReport.boards[0].slug, "two");
-    assert.equal(scopedReport.boards[0].active_task, null);
+    assert.equal(scopedReport.ok, true);
+    assert.equal(scopedReport.schema_version, 1);
+    assert.equal(scopedReport.checker.ok, true);
+    assert.equal(scopedReport.board.slug, "one");
+    assert.match(scopedReport.board.state_digest, /^[a-f0-9]{64}$/);
+    assert.equal(scopedReport.board.intake.original_request, "Make the widget work.");
+    assert.equal(scopedReport.board.intake.interpreted_outcome, "The widget works and the test proves it.");
+    assert.equal(scopedReport.board.active_task.id, "T002");
+    assert.deepEqual(scopedReport.board.active_task.allowed_files, ["src/widget.mjs"]);
+    assert.deepEqual(scopedReport.board.active_task.verify, ["npm test"]);
+    assert.deepEqual(scopedReport.board.active_task.stop_if, ["Need files outside allowed_files."]);
+    assert.equal(scopedReport.board.recent_receipt.task_id, "T001");
+    assert.equal(scopedReport.board.recent_receipt.note, "notes/T001-transition.md");
+    assert.doesNotMatch(scoped.stdout, /OLD_RECEIPT_SHOULD_NOT_APPEAR/);
+    assert.equal(scopedReport.recovery.audit_required, true);
+    assert.equal(scopedReport.recovery.audit_agent.codex, "goal_ledger");
+    assert.equal(scopedReport.recovery.audit_agent.claude_code, "goal-ledger");
+    assert.equal(scopedReport.recovery.continue_only_on, "congruent");
+    assert.equal(scopedReport.recovery.worker_liveness, "unknown");
+    assert.equal(scopedReport.recovery.continuation_allowed_after_audit, true);
+
+    const scopedHuman = runGoalMaker(["resume", "docs/goals/one"], { cwd: root });
+    assert.equal(scopedHuman.status, 0, scopedHuman.stderr || scopedHuman.stdout);
+    assert.match(scopedHuman.stdout, /State digest: [a-f0-9]{64}/);
+    assert.match(scopedHuman.stdout, /Recovery audit required before continuation/);
+
+    const complete = runGoalMaker(["resume", "docs/goals/two", "--json"], { cwd: root });
+    assert.equal(complete.status, 0, complete.stderr || complete.stdout);
+    const completeReport = JSON.parse(complete.stdout);
+    assert.equal(completeReport.board.slug, "two");
+    assert.equal(completeReport.board.active_task, null);
+    assert.equal(completeReport.recovery.continuation_allowed_after_audit, false);
 
     const empty = mkdtempSync(join(tmpdir(), "goalbuddy-resume-empty-"));
     try {
@@ -1474,6 +1627,94 @@ test("resume scoped to one goal dir and empty repos behave", () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume scoped to an invalid board fails closed with checker evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-invalid-"));
+  try {
+    const goalDir = writeResumeGoal(root, "invalid", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    writeFileSync(statePath, readFileSync(statePath, "utf8").replace("active_task: T002", "active_task: T404"));
+
+    const result = runGoalMaker(["resume", "docs/goals/invalid", "--json"], { cwd: root });
+    assert.equal(result.status, 1);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.checker.ok, false);
+    assert.equal(report.recovery.main_agent_action, "inspect_board");
+    assert.match(report.checker.errors.join("\n"), /active_task/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume preserves an unresolved exact-approval gate without inventing an active task", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-approval-"));
+  try {
+    const goalDir = join(root, "docs", "goals", "production-migration");
+    mkdirSync(join(goalDir, "notes"), { recursive: true });
+    writeFileSync(join(goalDir, "goal.md"), "# Production migration\n");
+    writeFileSync(join(goalDir, "state.yaml"), `version: 2
+goal:
+  title: "Run production migration"
+  slug: "production-migration"
+  kind: specific
+  tranche: "Apply the migration after exact owner approval."
+  status: blocked
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+  continuous_until_full_outcome: true
+  missing_input_or_credentials_do_not_stop_goal: true
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: null
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: blocked
+    objective: "Apply production migration after exact approval."
+    allowed_files:
+      - db/migrations/**
+    verify:
+      - npm test
+    stop_if:
+      - "Need exact production approval phrase."
+    receipt:
+      result: blocked
+      waiting_for_user_approval: true
+      required_reply: "approve 20260711120000"
+      blocked_reason: "Production migration requires exact human approval."
+      summary: "Asked once for the exact approval phrase and stopped."
+checks:
+  dirty_fingerprint: clean
+  last_verification:
+    result: pass
+    task: T001
+    commands:
+      - cmd: npm test
+        status: pass
+`);
+
+    const result = runGoalMaker(["resume", "docs/goals/production-migration", "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.board.status, "blocked");
+    assert.equal(report.board.active_task, null);
+    assert.equal(report.board.approval_gates.length, 1);
+    assert.equal(report.board.approval_gates[0].task_id, "T001");
+    assert.equal(report.board.approval_gates[0].required_reply, "approve 20260711120000");
+    assert.equal(report.board.blocked_tasks[0].waiting_for_user_approval, true);
+    assert.equal(report.recovery.continuation_allowed_after_audit, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

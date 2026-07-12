@@ -357,7 +357,7 @@ If the goal is audit, keep the active task read-only. Queue execution only if th
 
 ## Agents
 
-Scout, Worker, and Judge templates are bundled with GoalBuddy. They may also be installed as user or project agent configs, but a board must not claim `installed` unless the preparer verified the matching agent files.
+Scout, Worker, and Judge task templates are bundled with GoalBuddy. A separate Ledger Auditor is bundled for recovery-only reconciliation. They may also be installed as user or project agent configs, but a board must not claim Scout/Worker/Judge `installed` unless the preparer verified the matching task-agent files.
 
 Use these `state.yaml` values:
 
@@ -372,9 +372,11 @@ Non-`installed` states are warnings, not false failures, because the main `/goal
 
 | Agent | Thinking level | Write access | Use for |
 |---|---:|---:|---|
-| Scout | low | no | targeted source/spec/repo evidence mapping |
-| Worker | medium | yes, bounded | one coherent bounded useful slice |
-| Judge | high | no | phase/risk/final review, ambiguity, scope, completion skepticism |
+| Scout | medium | no | targeted source/spec/repo evidence mapping |
+| Worker | high | yes, bounded | one coherent bounded useful slice |
+| Judge | xhigh | no | phase/risk/final review, ambiguity, scope, completion skepticism |
+
+Ledger is not represented in `state.yaml` agent availability or task cards. At a genuine recovery boundary, `/goal` invokes `goal_ledger` (Codex, Sol medium) or `goal-ledger` (Claude Code, Opus high) with the board path and projected `state_digest`; Ledger independently reruns resume and compares the complete board with independent repo/worktree/receipt/verification/gate/Worker evidence. It returns `goalbuddy_ledger_audit_v1`, never a task receipt, and never mutates the board. Only `congruent` with matching pre/post digests permits continuation. The exact recovery contract lives in `references/goal-execution.md`.
 
 A task's `assignee` determines the agent. The task card is the order. The receipt is the return format.
 
