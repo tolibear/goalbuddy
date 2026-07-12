@@ -369,6 +369,8 @@ const allowedAgentStatuses = new Set(["installed", "bundled_not_installed", "mis
 const continuousUntilFullOutcome = nestedScalar("rules", "continuous_until_full_outcome") === true;
 const missingInputOrCredentialsDoNotStopGoal =
   nestedScalar("rules", "missing_input_or_credentials_do_not_stop_goal") === true;
+const exactHumanApprovalCanTerminalWait =
+  nestedScalar("rules", "exact_human_approval_can_terminal_wait") === true;
 const goalPressureRequiresOracle = nestedScalar("rules", "goal_pressure_requires_oracle") !== false;
 const noCompletionOnWeakProof = nestedScalar("rules", "no_completion_on_weak_proof") !== false;
 const completionProof = pathScalar(["goal", "intake"], "completion_proof");
@@ -568,18 +570,29 @@ warnings.push(...microSliceWarnings(tasks, activeTask, goalStatus));
 
 function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
   if (goalStatus !== "blocked") return false;
+  if (!exactHumanApprovalCanTerminalWait) return false;
   if (activeTask !== null) return false;
   if (activeTasks.length !== 0) return false;
 
   const unfinishedTasks = tasks.filter((task) => task.status !== "done");
   if (unfinishedTasks.length === 0) return false;
   if (unfinishedTasks.some((task) => task.status !== "blocked")) return false;
+  const hasCompletionClaim = tasks.some((task) => {
+    if (!task.receipt.present || task.receipt.value === null) return false;
+    const decision = task.receipt.scalar("decision");
+    return task.receipt.scalar("full_outcome_complete") === true
+      || decision === "complete"
+      || decision === "done";
+  });
+  if (hasCompletionClaim) return false;
 
   return unfinishedTasks.some((task) => {
     if (!task.receipt.present || task.receipt.value === null) return false;
+    const requiredReply = task.receipt.scalar("required_reply");
     return task.receipt.scalar("result") === "blocked"
       && task.receipt.scalar("waiting_for_user_approval") === true
-      && Boolean(task.receipt.scalar("required_reply"));
+      && typeof requiredReply === "string"
+      && requiredReply.trim().length > 0;
   });
 }
 

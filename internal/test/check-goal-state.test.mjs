@@ -1332,10 +1332,8 @@ checks:
   }
 });
 
-test("accepts terminal approval wait when exact human approval is the only remaining action", () => {
-  const root = makeRoot();
-  try {
-    writeState(root, `
+function terminalApprovalWaitBoard() {
+  return `
 version: 2
 goal:
   title: "Run production migration"
@@ -1351,6 +1349,7 @@ rules:
   no_completion_without_judge_or_pm_audit: true
   continuous_until_full_outcome: true
   missing_input_or_credentials_do_not_stop_goal: true
+  exact_human_approval_can_terminal_wait: true
 agents:
   scout: installed
   worker: installed
@@ -1374,6 +1373,21 @@ tasks:
       required_reply: "approve 20260521234500"
       blocked_reason: "Production migration requires exact human approval before any destructive operation."
       summary: "Asked once for the exact approval phrase and stopped."
+  - id: T002
+    type: worker
+    assignee: Worker
+    status: blocked
+    objective: "Verify the migration after the approved operation."
+    allowed_files:
+      - db/migrations/**
+    verify:
+      - npm test
+    stop_if:
+      - "T001 remains approval-blocked."
+    receipt:
+      result: blocked
+      blocked_reason: "Sequence-closed behind the exact T001 approval wait."
+      summary: "No independent safe work remains before T001 approval."
 checks:
   dirty_fingerprint: clean
   last_verification:
@@ -1382,12 +1396,61 @@ checks:
     commands:
       - cmd: npm test
         status: pass
-`);
+`;
+}
+
+test("accepts terminal approval wait when exact human approval is the only remaining action", () => {
+  const root = makeRoot();
+  try {
+    writeState(root, terminalApprovalWaitBoard());
     const result = runChecker(root);
     assert.equal(result.status, 0, result.stderr || JSON.stringify(result.stdout));
     assert.equal(result.stdout.ok, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects incomplete or generic continuous-goal approval waits", () => {
+  const cases = [
+    {
+      name: "exception rule disabled",
+      state: terminalApprovalWaitBoard().replace("exact_human_approval_can_terminal_wait: true", "exact_human_approval_can_terminal_wait: false"),
+    },
+    {
+      name: "active task retained",
+      state: terminalApprovalWaitBoard()
+        .replace("active_task: null", "active_task: T002")
+        .replace(/(- id: T002[\s\S]*?status:) blocked/, "$1 active"),
+    },
+    {
+      name: "downstream task remains queued",
+      state: terminalApprovalWaitBoard().replace(/(- id: T002[\s\S]*?status:) blocked/, "$1 queued"),
+    },
+    {
+      name: "generic blocker without approval marker",
+      state: terminalApprovalWaitBoard().replace("waiting_for_user_approval: true", "waiting_for_user_approval: false"),
+    },
+    {
+      name: "empty exact reply",
+      state: terminalApprovalWaitBoard().replace('required_reply: "approve 20260521234500"', 'required_reply: "   "'),
+    },
+    {
+      name: "completion claim present",
+      state: terminalApprovalWaitBoard().replace("waiting_for_user_approval: true", "waiting_for_user_approval: true\n      full_outcome_complete: true"),
+    },
+  ];
+
+  for (const testCase of cases) {
+    const root = makeRoot();
+    try {
+      writeState(root, testCase.state);
+      const result = runChecker(root);
+      assert.equal(result.status, 1, `${testCase.name}: ${JSON.stringify(result.stdout)}`);
+      assert.match(result.stdout.errors.join("\n"), /continuous goals must keep goal\.status active/i, testCase.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

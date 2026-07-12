@@ -1831,6 +1831,7 @@ rules:
   no_completion_without_judge_or_pm_audit: true
   continuous_until_full_outcome: true
   missing_input_or_credentials_do_not_stop_goal: true
+  exact_human_approval_can_terminal_wait: true
 agents:
   scout: installed
   worker: installed

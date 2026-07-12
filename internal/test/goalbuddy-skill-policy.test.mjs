@@ -69,6 +69,9 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /This section applies after the user starts `\/goal Follow docs\/goals\/<slug>\/goal\.md\.`/);
     assert.match(text, /exact human approval phrase is the only remaining blocker/);
     assert.match(text, /waiting_for_user_approval: true/);
+    assert.match(text, /exact_human_approval_can_terminal_wait: true/);
+    assert.match(text, /Downstream tasks may not remain queued/);
+    assert.match(text, /No receipt may claim `decision: complete`/);
     assert.match(text, /required_reply: "<exact phrase>"/);
     assert.match(text, /Board Health Stewardship/);
     assert.match(text, /Keeper is on demand or warm within one uninterrupted session, not an always-on poller/);
