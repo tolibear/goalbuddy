@@ -304,7 +304,7 @@ Usage:
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
-  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--status done|blocked] [--activate T###|none] [--json]
+  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file>] [--status done|blocked] [--activate T###|none] [--json]
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
@@ -557,6 +557,7 @@ function doctorClaude() {
 
   console.log(JSON.stringify({
     target: "claude",
+    capabilities: installedRuntimeCapabilities(claudeSkillRoot()),
     claude_home: claudeHome(),
     skill_installed: installed,
     skill_path: skillPath,
@@ -719,6 +720,7 @@ function doctor() {
   const skillPath = join(installedSkillRoot(), "SKILL.md");
   const legacySkillPath = join(legacyInstalledSkillRoot(), "SKILL.md");
   const plugin = installedCodexPlugin();
+  const runtimeSkillRoot = plugin.skill_installed ? plugin.skill_path : installedSkillRoot();
   const agentsPath = join(codexHome(), "agents");
   const installed = existsSync(skillPath);
   const legacyInstalled = existsSync(legacySkillPath);
@@ -773,6 +775,7 @@ function doctor() {
   console.log(JSON.stringify({
     codex_home: codexHome(),
     codex_install_model: "plugin",
+    capabilities: installedRuntimeCapabilities(runtimeSkillRoot),
     expected_state: {
       plugin_cache: true,
       bundled_skill: "$goal-prep",
@@ -801,6 +804,16 @@ function doctor() {
   const installOk = (pluginOk || legacySkillOk) && missingAgents.length === 0 && staleAgents.length === 0;
   const goalReadyOk = !hasFlag("--goal-ready") || goalRuntime.ready;
   process.exit(installOk && goalReadyOk && errors.length === 0 ? 0 : 1);
+}
+
+function installedRuntimeCapabilities(root) {
+  const receiptScript = join(root, "scripts", "apply-receipt.mjs");
+  const keeperAgent = join(root, "agents", "goal_keeper.toml");
+  const receiptText = existsSync(receiptScript) ? readFileSync(receiptScript, "utf8") : "";
+  const keeperText = existsSync(keeperAgent) ? readFileSync(keeperAgent, "utf8") : "";
+  return {
+    atomic_amendment_transition: receiptText.includes("--add-tasks") && keeperText.includes("apply_amendment"),
+  };
 }
 
 function codexInstallState({ plugin, installed, legacyInstalled, residualAgents, missingAgents, staleAgents }) {

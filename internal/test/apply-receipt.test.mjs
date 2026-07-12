@@ -63,14 +63,50 @@ const DONE_RECEIPT = {
   harness: "codex",
 };
 
-function runApply(root, args, receipt) {
+function runApply(root, args, receipt, taskCards = null) {
   const receiptPath = join(root, "receipt.json");
   writeFileSync(receiptPath, JSON.stringify(receipt));
-  return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, "--json", ...args], {
+  const taskArgs = [];
+  if (taskCards !== null) {
+    const taskCardsPath = join(root, "task-cards.json");
+    writeFileSync(taskCardsPath, JSON.stringify(taskCards));
+    taskArgs.push("--add-tasks", taskCardsPath);
+  }
+  return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, ...taskArgs, "--json", ...args], {
     cwd: root,
     encoding: "utf8",
   });
 }
+
+const AMENDMENT_TASKS = [
+  {
+    id: "T046",
+    type: "worker",
+    assignee: "Worker",
+    status: "queued",
+    reasoning_hint: "high",
+    objective: "Implement the exact amended slice without truncating this deliberately long task payload.",
+    inputs: ["T001 receipt", "Judge amendment"],
+    constraints: ["Keep the implementation bounded.", "Preserve the accepted architecture."],
+    allowed_files: ["src/widget.mjs", "test/widget.test.mjs"],
+    verify: ["npm test", "npm run lint", "git diff --check"],
+    stop_if: ["Need files outside allowed_files.", "Verification fails twice."],
+    expected_output: ["Working behavior", "Passing verification"],
+    receipt: null,
+  },
+  {
+    id: "T047",
+    type: "judge",
+    assignee: "Judge",
+    status: "queued",
+    reasoning_hint: "xhigh",
+    objective: "Audit the amended implementation.",
+    inputs: ["T046 receipt"],
+    constraints: ["Do not implement."],
+    expected_output: ["approve | amend"],
+    receipt: null,
+  },
+];
 
 test("apply-receipt records a done receipt and activates the next task atomically", () => {
   const { root, goalDir } = makeBoard();
@@ -88,6 +124,55 @@ test("apply-receipt records a done receipt and activates the next task atomicall
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt adds exact amendment tasks, closes the current task, and activates the successor atomically", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const result = runApply(root, ["--task", "T001", "--activate", "T046"], DONE_RECEIPT, AMENDMENT_TASKS);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.added_task_ids, ["T046", "T047"]);
+
+    const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    assert.match(state, /active_task: T046/);
+    assert.match(state, /- id: T046[\s\S]*status: active/);
+    assert.match(state, /- id: T047[\s\S]*status: queued/);
+    assert.match(state, /allowed_files:\n      - src\/widget\.mjs\n      - test\/widget\.test\.mjs/);
+    assert.match(state, /objective: "Implement the exact amended slice without truncating this deliberately long task payload\."/);
+
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt rejects duplicate amendment task ids before writing", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], DONE_RECEIPT, [
+      { ...AMENDMENT_TASKS[0], id: "T999" },
+    ]);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /Task T999 already exists/);
+    assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt restores the original board when an amendment successor is invalid", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const result = runApply(root, ["--task", "T001", "--activate", "T404"], DONE_RECEIPT, AMENDMENT_TASKS);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

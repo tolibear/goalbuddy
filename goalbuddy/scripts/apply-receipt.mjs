@@ -32,7 +32,7 @@ function isDirectRun() {
 }
 
 export function parseApplyArgs(args) {
-  const options = { goalRoot: "", taskId: "", receiptPath: "", status: "", activate: "", json: false };
+  const options = { goalRoot: "", taskId: "", receiptPath: "", addTasksPath: "", status: "", activate: "", json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -40,6 +40,8 @@ export function parseApplyArgs(args) {
     else if (arg.startsWith("--task=")) options.taskId = arg.slice("--task=".length);
     else if (arg === "--receipt") options.receiptPath = args[++index] || "";
     else if (arg.startsWith("--receipt=")) options.receiptPath = arg.slice("--receipt=".length);
+    else if (arg === "--add-tasks") options.addTasksPath = args[++index] || "";
+    else if (arg.startsWith("--add-tasks=")) options.addTasksPath = arg.slice("--add-tasks=".length);
     else if (arg === "--status") options.status = args[++index] || "";
     else if (arg.startsWith("--status=")) options.status = arg.slice("--status=".length);
     else if (arg === "--activate") options.activate = args[++index] || "";
@@ -49,7 +51,7 @@ export function parseApplyArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot || !options.taskId || !options.receiptPath) {
-    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--status done|blocked] [--activate T###|none] [--json]");
+    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file>] [--status done|blocked] [--activate T###|none] [--json]");
   }
   return options;
 }
@@ -59,12 +61,14 @@ export function applyReceipt(options) {
   const statePath = basename(goalRoot) === "state.yaml" ? goalRoot : join(goalRoot, "state.yaml");
   if (!existsSync(statePath)) throw new Error(`state file not found: ${statePath}`);
   const receipt = loadReceipt(options.receiptPath);
+  const taskCards = options.addTasksPath ? loadTaskCards(options.addTasksPath) : [];
   const status = options.status || (receipt.result === "done" ? "done" : "blocked");
   if (!["done", "blocked"].includes(status)) throw new Error(`Unsupported --status: ${status}`);
 
   const original = readFileSync(statePath, "utf8");
   let lines = original.replace(/\r\n/g, "\n").split("\n");
 
+  if (taskCards.length) lines = appendTaskCards(lines, taskCards);
   lines = setTaskField(lines, options.taskId, "status", status);
   lines = setTaskReceipt(lines, options.taskId, receipt);
   if (options.activate && options.activate !== "none") {
@@ -85,9 +89,9 @@ export function applyReceipt(options) {
 
   if (!checkerReport.ok) {
     writeAtomic(statePath, original);
-    return { ok: false, task_id: options.taskId, status, active_task: nextActive, reverted: true, checker_errors: checkerReport.errors || [] };
+    return { ok: false, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), status, active_task: nextActive, reverted: true, checker_errors: checkerReport.errors || [] };
   }
-  return { ok: true, task_id: options.taskId, status, active_task: nextActive, reverted: false, checker_warnings: checkerReport.warnings || [] };
+  return { ok: true, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), status, active_task: nextActive, reverted: false, checker_warnings: checkerReport.warnings || [] };
 }
 
 function loadReceipt(receiptPath) {
@@ -100,6 +104,50 @@ function loadReceipt(receiptPath) {
   delete receipt.board_path;
   delete receipt.task_id;
   return receipt;
+}
+
+function loadTaskCards(taskCardsPath) {
+  const parsed = JSON.parse(readFileSync(resolve(taskCardsPath), "utf8"));
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error(`${taskCardsPath} must contain a non-empty JSON array of complete task objects.`);
+  }
+  const seen = new Set();
+  for (const [index, task] of parsed.entries()) {
+    if (!task || typeof task !== "object" || Array.isArray(task)) {
+      throw new Error(`${taskCardsPath} task at index ${index} must be an object.`);
+    }
+    if (typeof task.id !== "string" || !/^T\d{3}$/.test(task.id)) {
+      throw new Error(`${taskCardsPath} task at index ${index} must have a strict T### id.`);
+    }
+    if (seen.has(task.id)) throw new Error(`${taskCardsPath} contains duplicate task id ${task.id}.`);
+    seen.add(task.id);
+  }
+  return parsed;
+}
+
+function appendTaskCards(lines, taskCards) {
+  const existing = new Set(
+    lines
+      .map((line) => line.match(/^  - id:\s*"?(T\d+)"?\s*$/)?.[1])
+      .filter(Boolean),
+  );
+  for (const task of taskCards) {
+    if (existing.has(task.id)) throw new Error(`Task ${task.id} already exists in state.yaml.`);
+  }
+
+  const tasksStart = lines.findIndex((line) => /^tasks:\s*$/.test(line));
+  if (tasksStart === -1) throw new Error('state.yaml has no top-level "tasks" sequence.');
+  let tasksEnd = lines.length;
+  for (let index = tasksStart + 1; index < lines.length; index += 1) {
+    if (/^\S/.test(lines[index])) {
+      tasksEnd = index;
+      break;
+    }
+  }
+  while (tasksEnd > tasksStart + 1 && lines[tasksEnd - 1].trim() === "") tasksEnd -= 1;
+  const serialized = toYamlLines({ tasks: taskCards }, 0).slice(1);
+  const separator = lines[tasksEnd]?.trim() === "" ? [] : [""];
+  return [...lines.slice(0, tasksEnd), ...serialized, ...separator, ...lines.slice(tasksEnd)];
 }
 
 function taskBlockRange(lines, taskId) {
@@ -154,35 +202,70 @@ function setTopLevel(lines, key, value) {
 }
 
 export function toYamlLines(value, indent) {
-  const pad = " ".repeat(indent);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("toYamlLines requires an object root.");
+  }
+  return serializeMapping(value, indent);
+}
+
+function serializeMapping(value, indent) {
   const lines = [];
   for (const [key, entry] of Object.entries(value)) {
     if (entry === undefined) continue;
-    if (Array.isArray(entry)) {
-      if (entry.length === 0) {
-        lines.push(`${pad}${key}: []`);
-        continue;
-      }
-      lines.push(`${pad}${key}:`);
-      for (const item of entry) {
-        if (item && typeof item === "object" && !Array.isArray(item)) {
-          const pairs = Object.entries(item);
-          pairs.forEach(([itemKey, itemValue], pairIndex) => {
-            const prefix = pairIndex === 0 ? `${pad}  - ` : `${pad}    `;
-            lines.push(`${prefix}${itemKey}: ${scalar(itemValue)}`);
-          });
-        } else {
-          lines.push(`${pad}  - ${scalar(item)}`);
-        }
-      }
-    } else if (entry && typeof entry === "object") {
-      lines.push(`${pad}${key}:`);
-      lines.push(...toYamlLines(entry, indent + 2));
-    } else {
-      lines.push(`${pad}${key}: ${scalar(entry)}`);
-    }
+    lines.push(...serializeMappingEntry(key, entry, indent));
   }
   return lines;
+}
+
+function serializeMappingEntry(key, value, indent) {
+  const pad = " ".repeat(indent);
+  if (isScalar(value)) return [`${pad}${key}: ${scalar(value)}`];
+  if (Array.isArray(value) && value.length === 0) return [`${pad}${key}: []`];
+  if (!Array.isArray(value) && Object.keys(value).length === 0) return [`${pad}${key}: {}`];
+  return [`${pad}${key}:`, ...serializeNode(value, indent + 2)];
+}
+
+function serializeNode(value, indent) {
+  if (Array.isArray(value)) return serializeSequence(value, indent);
+  return serializeMapping(value, indent);
+}
+
+function serializeSequence(values, indent) {
+  const pad = " ".repeat(indent);
+  const lines = [];
+  for (const value of values) {
+    if (isScalar(value)) {
+      lines.push(`${pad}- ${scalar(value)}`);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      lines.push(`${pad}-`);
+      lines.push(...serializeSequence(value, indent + 2));
+      continue;
+    }
+    const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
+    if (entries.length === 0) {
+      lines.push(`${pad}- {}`);
+      continue;
+    }
+    const [[firstKey, firstValue], ...rest] = entries;
+    if (isScalar(firstValue)) {
+      lines.push(`${pad}- ${firstKey}: ${scalar(firstValue)}`);
+    } else if (Array.isArray(firstValue) && firstValue.length === 0) {
+      lines.push(`${pad}- ${firstKey}: []`);
+    } else if (!Array.isArray(firstValue) && Object.keys(firstValue).length === 0) {
+      lines.push(`${pad}- ${firstKey}: {}`);
+    } else {
+      lines.push(`${pad}- ${firstKey}:`);
+      lines.push(...serializeNode(firstValue, indent + 4));
+    }
+    for (const [key, entry] of rest) lines.push(...serializeMappingEntry(key, entry, indent + 2));
+  }
+  return lines;
+}
+
+function isScalar(value) {
+  return value === null || typeof value !== "object";
 }
 
 function scalar(value) {

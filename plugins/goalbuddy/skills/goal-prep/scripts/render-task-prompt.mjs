@@ -33,6 +33,7 @@ export function renderTaskPrompt(options) {
   const defaults = ROLE_DEFAULTS[role] || ROLE_DEFAULTS.pm;
   const reasoning = normalizeReasoning(task.reasoning_hint, defaults.reasoning);
   const warnings = promptWarnings(board, task);
+  const allowedFiles = stringList(task.allowed_files);
 
   return {
     json: options.json,
@@ -47,6 +48,7 @@ export function renderTaskPrompt(options) {
         child_board_paths: childBoardPaths(board),
         goal_oracle: board.goal.oracle || null,
         slice_policy: board.document.rules?.slice_policy || null,
+        changed_files_path_style: changedFilesPathStyle(allowedFiles),
         warnings,
       },
       task: {
@@ -57,7 +59,7 @@ export function renderTaskPrompt(options) {
         objective: task.objective || "",
         inputs: stringList(task.inputs),
         constraints: stringList(task.constraints),
-        allowed_files: stringList(task.allowed_files),
+        allowed_files: allowedFiles,
         verify: stringList(task.verify),
         stop_if: stringList(task.stop_if),
         reasoning_hint: task.reasoning_hint || null,
@@ -233,6 +235,14 @@ function stringList(value) {
   return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined).map(String) : [];
 }
 
+function changedFilesPathStyle(allowedFiles) {
+  if (!allowedFiles.length) return "board-relative";
+  const absoluteCount = allowedFiles.filter((path) => /^\//.test(path)).length;
+  if (absoluteCount === allowedFiles.length) return "absolute";
+  if (absoluteCount === 0) return "board-relative";
+  return "mirror-each-allowed-file";
+}
+
 function receiptSchema(role) {
   if (role === "worker") {
     return {
@@ -290,6 +300,7 @@ export function formatPrompt(payload) {
     `- sandbox: ${payload.metadata.sandbox}`,
     `- fork_context_allowed: ${payload.metadata.fork_context_allowed}`,
     `- board_path: ${payload.metadata.board_path}`,
+    `- changed_files_path_style: ${payload.metadata.changed_files_path_style}`,
   ];
   if (payload.metadata.child_board_paths.length) {
     lines.push("- child_board_paths:");
@@ -313,6 +324,7 @@ export function formatPrompt(payload) {
     "- Do not substitute generic scout, worker, or judge agents for GoalBuddy agents.",
     "- If the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or install agents.",
     "- After one wait_agent timeout with no visible allowed-file changes, stop waiting and recover deterministically.",
+    `- In the receipt, changed_files must use ${payload.metadata.changed_files_path_style} paths, matching the path form recorded in allowed_files; do not convert absolute paths to relative paths or relative paths to absolute paths.`,
     "",
     "Task:",
     `- id: ${payload.task.id}`,

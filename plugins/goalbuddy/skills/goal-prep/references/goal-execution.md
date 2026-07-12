@@ -66,6 +66,8 @@ For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
 - exact PM-approved instructions and expected before/after facts;
 - the exact bundled checker command.
 
+For `apply_receipt`, also provide typed `transition` fields: `task_id`, `status`, `receipt_path`, and `activate`; set `task_cards_path` to `null`. For a Judge decision that introduces exact successor cards, use `apply_amendment` and provide the same fields plus `task_cards_path`, which points to a JSON array of complete PM-approved task objects. Do not embed a long task payload in prose and do not send a separate `add_task` request. Keeper must perform the amendment with one `apply-receipt.mjs --add-tasks` invocation so task addition, closeout, activation, checker validation, and rollback share one atomic boundary.
+
 Keeper reads the board in its isolated context, applies no judgment, prefers the bundled atomic receipt applier for receipt/status/successor transitions, validates the result, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
 
 Keeper is control-plane, not a task agent: it receives no task card, never returns `goalbuddy_receipt_v1`, never chooses a task or successor, and never edits product files. Do not add Keeper status to `state.yaml`. Run at most one Keeper against a board. Digest drift, ambiguous instructions, unavailable validation, concurrent board activity, unauthorized paths, or a failed checker blocks the operation with no accepted mutation.
@@ -205,6 +207,14 @@ node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --rece
 ```
 
 It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Keeper invokes it from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
+
+When a Judge amendment creates successors that are not yet on the board, put the exact complete task objects in a temporary JSON array and apply the entire transition once:
+
+```bash
+node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --add-tasks task-cards.json --activate T###
+```
+
+The command rejects malformed, duplicate, or pre-existing task IDs before writing. The normal checker remains the final authority; any invalid resulting board is restored byte-for-byte. A successful retry therefore cannot duplicate cards, and a failed attempt does not leave a half-applied amendment.
 
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 

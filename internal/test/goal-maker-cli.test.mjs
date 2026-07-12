@@ -120,6 +120,7 @@ test("doctor fails when a required bundled agent is missing", () => {
     assert.equal(doctor.status, 1, doctor.stderr || doctor.stdout);
 
     const report = JSON.parse(doctor.stdout);
+    assert.equal(report.capabilities.atomic_amendment_transition, true);
     assert.equal(report.codex_install_model, "plugin");
     assert.equal(report.plugin.skill_installed, true);
     assert.equal(report.plugin.enabled, true);
@@ -370,6 +371,7 @@ checks:
     assert.equal(report.metadata.required_spawn_agent_type, "goal_worker");
     assert.equal(report.metadata.recommended_reasoning, "high");
     assert.equal(report.metadata.sandbox, "workspace-write");
+    assert.equal(report.metadata.changed_files_path_style, "board-relative");
     assert.deepEqual(report.metadata.goal_oracle, {
       signal: "Prompt includes the active task contract without dumping old receipts.",
       final_proof: "JSON and human prompt outputs include the goal oracle and active task.",
@@ -394,8 +396,54 @@ checks:
     assert.match(human.stdout, /Codex spawn_agent agent_type: goal_worker/);
     assert.match(human.stdout, /Do not substitute generic scout, worker, or judge agents/);
     assert.match(human.stdout, /After one wait_agent timeout/);
+    assert.match(human.stdout, /changed_files must use board-relative paths/);
+    assert.match(human.stdout, /do not convert absolute paths to relative paths/);
     assert.match(human.stdout, /goal_oracle/);
     assert.match(human.stdout, /slice_policy/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt requires absolute changed_files when allowed_files are absolute", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const goal = join(root, "goal");
+    mkdirSync(goal, { recursive: true });
+    writeFileSync(join(goal, "state.yaml"), `version: 2
+goal:
+  title: "Absolute receipt path test"
+  slug: "absolute-receipt-path-test"
+  kind: specific
+  tranche: "Render path guidance."
+  status: active
+agents:
+  scout: unknown
+  worker: unknown
+  judge: unknown
+active_task: T001
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: active
+    objective: "Preserve absolute scope paths."
+    allowed_files:
+      - /tmp/project/src/**
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
+    receipt: null
+`);
+
+    const result = runGoalMaker(["prompt", goal, "--json"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).metadata.changed_files_path_style, "absolute");
+
+    const human = runGoalMaker(["prompt", goal]);
+    assert.equal(human.status, 0, human.stderr || human.stdout);
+    assert.match(human.stdout, /changed_files must use absolute paths/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1420,6 +1468,7 @@ test("installs the Claude skill as goal-prep and migrates the legacy directory",
     assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.legacy_skill_present, false);
+    assert.equal(report.capabilities.atomic_amendment_transition, true);
     assert.match(report.skill_path, pathSuffixPattern("skills", "goal-prep", "SKILL.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });

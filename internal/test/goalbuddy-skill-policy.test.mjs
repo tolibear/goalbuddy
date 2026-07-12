@@ -94,6 +94,9 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /### Board Keeper/);
     assert.match(text, /goalbuddy_keeper_request_v1/);
     assert.match(text, /goalbuddy_keeper_receipt_v1/);
+    assert.match(text, /apply_amendment/);
+    assert.match(text, /--add-tasks task-cards\.json/);
+    assert.match(text, /Do not embed a long task payload in prose/);
     assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
     assert.match(text, /Ledger remains independently read-only/);
   }
@@ -168,6 +171,9 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /Never stage, commit, push/);
   assert.match(canonicalKeeper, /Run `checker_command` after every mutation/);
   assert.match(canonicalKeeper, /Never paste the board/);
+  assert.match(canonicalKeeper, /apply_amendment/);
+  assert.match(canonicalKeeper, /task_cards_path/);
+  assert.doesNotMatch(canonicalKeeper, /\| add_task \|/);
   assert.match(claudeKeeper, /model: claude-opus-4-8/);
   assert.match(claudeKeeper, /effort: low/);
   assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
