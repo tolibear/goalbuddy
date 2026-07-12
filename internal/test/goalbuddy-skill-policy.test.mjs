@@ -99,6 +99,14 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Do not embed a long task payload in prose/);
     assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
     assert.match(text, /Ledger remains independently read-only/);
+    assert.match(text, /`wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry/);
+    assert.match(text, /Continue polling the same live agent/);
+    assert.match(text, /do not interrupt, replace, redispatch, declare a timeout, or trigger PM fallback solely because a poll expired/);
+    assert.match(text, /absence is not evidence of inactivity during reading, analysis, planning, or verification/);
+    assert.match(text, /Read-only Judge and Ledger work, plus inspection-only Keeper work, may never create allowed-file diffs/);
+    assert.match(text, /configured job\/runtime deadline is actually exceeded/);
+    assert.match(text, /Preserve the one-agent\/no-duplicate-dispatch rule/);
+    assert.doesNotMatch(text, /After one `wait_agent` timeout/);
   }
 });
 

@@ -395,9 +395,15 @@ checks:
     assert.equal(human.status, 0, human.stderr || human.stdout);
     assert.match(human.stdout, /Codex spawn_agent agent_type: goal_worker/);
     assert.match(human.stdout, /Do not substitute generic scout, worker, or judge agents/);
-    assert.match(human.stdout, /After one wait_agent timeout/);
+    assert.match(human.stdout, /wait_agent polling timeout while the target agent is still running is only a polling interval expiry/);
+    assert.match(human.stdout, /Keep waiting on the same agent; do not interrupt, replace, redispatch, declare a task timeout, or trigger PM fallback/);
+    assert.match(human.stdout, /absence is not evidence of inactivity; read-only Judge\/Ledger work and inspection-only Keeper work may never create diffs/);
+    assert.match(human.stdout, /terminal timeout, failed, or unavailable state/);
+    assert.match(human.stdout, /configured job\/runtime deadline is actually exceeded/);
+    assert.match(human.stdout, /Preserve one-agent\/no-duplicate dispatch/);
     assert.match(human.stdout, /changed_files must use board-relative paths/);
     assert.match(human.stdout, /do not convert absolute paths to relative paths/);
+    assert.doesNotMatch(human.stdout, /After one wait_agent timeout/);
     assert.match(human.stdout, /goal_oracle/);
     assert.match(human.stdout, /slice_policy/);
   } finally {
