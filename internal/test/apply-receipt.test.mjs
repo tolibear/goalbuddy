@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
 
-function makeBoard({ placeholder = false } = {}) {
+function makeBoard({ placeholder = false, populatedWorker = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-apply-receipt-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
@@ -59,9 +59,23 @@ ${placeholder ? `  - id: T042
       - "Keep the operation local."
     allowed_files: []
     verify: []
-    stop_if: []
+    stop_if:
+      - "T041 has not returned pilot_ready and replaced this provisional card with its exact worker_package and approval phrase."
     expected_output:
       - "Exact implementation receipt"
+    receipt: null
+` : ""}
+${populatedWorker ? `  - id: T043
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Already materialized Worker package."
+    allowed_files:
+      - src/existing.mjs
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
     receipt: null
 ` : ""}
 `);
@@ -215,6 +229,7 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
     assert.match(state, /approval_phrases:\n      - "Approve T042 exactly as hash-bound in the card\."/);
     assert.match(state, /boundary_classification: "local-only; no external effects"/);
     assert.doesNotMatch(state, /Provisional worker/);
+    assert.doesNotMatch(state, /T041 has not returned pilot_ready/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -243,10 +258,11 @@ test("apply-receipt hydrates a placeholder from the exact Judge worker_package",
   }
 });
 
-test("apply-receipt rejects task-card id mismatch and populated non-placeholder Workers without writing", () => {
+test("apply-receipt rejects task-card id mismatch, populated Worker packages, and unknown fields without writing", () => {
   for (const testCase of [
     { name: "id mismatch", board: { placeholder: true }, card: { ...HYDRATED_T042, id: "T043" }, pattern: /does not match --hydrate-task T042/ },
     { name: "non-placeholder", board: {}, card: { ...HYDRATED_T042, id: "T001", status: "active" }, hydrate: "T001", pattern: /not a queued receipt-free Worker placeholder/ },
+    { name: "populated Worker package", board: { populatedWorker: true }, card: { ...HYDRATED_T042, id: "T043" }, hydrate: "T043", pattern: /not a placeholder: allowed_files is already populated/ },
     { name: "unsupported field", board: { placeholder: true }, card: { ...HYDRATED_T042, arbitrary_board_edit: true }, pattern: /unsupported fields: arbitrary_board_edit/ },
   ]) {
     const { root, goalDir } = makeBoard(testCase.board);

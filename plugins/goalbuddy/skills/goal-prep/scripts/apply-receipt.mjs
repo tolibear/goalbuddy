@@ -172,7 +172,7 @@ function hydratePlaceholderTask(lines, taskId, hydration) {
   if (type !== "worker" || status !== "queued" || receipt !== null) {
     throw new Error(`Task ${taskId} is not a queued receipt-free Worker placeholder.`);
   }
-  for (const key of ["allowed_files", "verify", "stop_if"]) {
+  for (const key of ["allowed_files", "verify"]) {
     if (taskSequenceLength(lines, start, end, key) !== 0) {
       throw new Error(`Task ${taskId} is not a placeholder: ${key} is already populated.`);
     }
