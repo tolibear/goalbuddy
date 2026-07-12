@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 const inputPath = process.argv[2];
 const isChildCheck = process.argv.includes("--child");
+const useSnapshotStdin = process.argv.includes("--snapshot-stdin");
 
 if (!inputPath) {
   console.error("Usage: node scripts/check-goal-state.mjs docs/goals/<slug>[/state.yaml]");
@@ -21,24 +23,74 @@ if (!existsSync(statePath)) {
 }
 
 const root = dirname(statePath);
-const text = readFileSync(statePath, "utf8");
+const stateOnDisk = readFileSync(statePath, "utf8");
+const text = useSnapshotStdin ? readFileSync(0, "utf8") : stateOnDisk;
 const errors = [];
 const warnings = [];
+if (useSnapshotStdin && text !== stateOnDisk) {
+  errors.push("supplied state snapshot does not match state.yaml on disk");
+}
+
+function decodeScalar(value) {
+  if (value === undefined || value === null) return null;
+  const cleaned = stripInlineComment(String(value).trim()).trim();
+  if (cleaned.startsWith("\"")) {
+    if (!cleaned.endsWith("\"")) {
+      return { value: cleaned, error: "unterminated double-quoted scalar" };
+    }
+    try {
+      return { value: JSON.parse(cleaned), error: null };
+    } catch {
+      return { value: cleaned, error: "invalid double-quoted scalar" };
+    }
+  }
+  if (cleaned.startsWith("'")) {
+    if (!cleaned.endsWith("'")) {
+      return { value: cleaned, error: "unterminated single-quoted scalar" };
+    }
+    return { value: cleaned.slice(1, -1).replace(/''/g, "'"), error: null };
+  }
+  if (cleaned === "" || cleaned === "null") return { value: null, error: null };
+  if (cleaned === "true") return { value: true, error: null };
+  if (cleaned === "false") return { value: false, error: null };
+  if (/^\d+$/.test(cleaned)) return { value: Number(cleaned), error: null };
+  return { value: cleaned, error: null };
+}
+
+function stripInlineComment(value) {
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote === "\"" && escaped) {
+      escaped = false;
+      continue;
+    }
+    if (quote === "\"" && char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      if (quote === char) {
+        if (char === "'" && value[index + 1] === "'") {
+          index += 1;
+          continue;
+        }
+        quote = null;
+      } else if (quote === null) {
+        quote = char;
+      }
+      continue;
+    }
+    if (char === "#" && quote === null && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index);
+    }
+  }
+  return value;
+}
 
 function clean(value) {
-  if (value === undefined || value === null) return null;
-  let cleaned = String(value).trim();
-  const quoted = cleaned.match(/^"([^"]*)"\s*(?:#.*)?$|^'([^']*)'\s*(?:#.*)?$/);
-  if (quoted) {
-    cleaned = (quoted[1] ?? quoted[2]).trim();
-  } else {
-    cleaned = cleaned.replace(/(^|\s)#.*$/, "").trim();
-  }
-  if (cleaned === "" || cleaned === "null") return null;
-  if (cleaned === "true") return true;
-  if (cleaned === "false") return false;
-  if (/^\d+$/.test(cleaned)) return Number(cleaned);
-  return cleaned;
+  return decodeScalar(value)?.value ?? null;
 }
 
 function topScalar(key) {
@@ -186,8 +238,7 @@ function taskReceipt(task) {
     raw,
     has: (key) => new RegExp(`^\\s{6}${key}:`, "m").test(raw),
     list: (key) => receiptList(raw, key),
-    commands: () => receiptCommands(raw),
-    commandStatuses: () => receiptCommandStatuses(raw),
+    commandEntries: () => receiptCommandEntries(raw),
     scalar: (key) => {
       const match = raw.match(new RegExp(`^\\s{6}${key}:\\s*(.*?)\\s*$`, "m"));
       return match ? clean(match[1]) : null;
@@ -234,16 +285,10 @@ function receiptList(raw, key) {
   return values.filter((value) => value !== null);
 }
 
-function receiptCommandStatuses(raw) {
-  return receiptCommands(raw)
-    .map((command) => command.status)
-    .filter((value) => value !== null);
-}
-
-function receiptCommands(raw) {
+function receiptCommandEntries(raw) {
   const lines = raw.split(/\r?\n/);
   const start = lines.findIndex((line) => /^\s{6}commands:\s*$/.test(line));
-  if (start === -1) return [];
+  if (start === -1) return { commands: [], errors: [] };
 
   const commands = [];
   let current = null;
@@ -251,18 +296,43 @@ function receiptCommands(raw) {
     const line = lines[index];
     if (/^\s{6}\S/.test(line)) break;
 
-    const item = line.match(/^\s{8}-\s+cmd:\s*(.*?)\s*$/);
+    const item = line.match(/^\s{8}-\s*(.*?)\s*$/);
     if (item) {
-      current = { cmd: clean(item[1]), status: null };
+      const command = item[1].match(/^cmd:\s*(.*?)\s*$/);
+      current = { cmd: null, status: null, errors: [] };
       commands.push(current);
+      if (!command) {
+        current.errors.push("each commands list item must begin with cmd");
+        continue;
+      }
+      const decoded = decodeScalar(command[1]);
+      current.cmd = decoded?.value ?? null;
+      if (decoded?.error) current.errors.push(`cmd has ${decoded.error}`);
+      if (typeof current.cmd !== "string" || current.cmd.trim() === "") {
+        current.errors.push("cmd must be a nonempty string");
+      }
       continue;
     }
 
     const status = line.match(/^\s{10}status:\s*(.*?)\s*$/);
-    if (status && current) current.status = clean(status[1]);
+    if (status && current) {
+      if (current.status !== null) {
+        current.errors.push("status must appear exactly once");
+        continue;
+      }
+      const decoded = decodeScalar(status[1]);
+      current.status = decoded?.value ?? null;
+      if (decoded?.error) current.errors.push(`status has ${decoded.error}`);
+    }
   }
 
-  return commands.filter((command) => command.cmd !== null);
+  for (const command of commands) {
+    if (command.status === null) command.errors.push("status is required");
+  }
+  return {
+    commands,
+    errors: commands.flatMap((command, index) => command.errors.map((error) => `entry ${index + 1}: ${error}`)),
+  };
 }
 
 function rootEntryErrors() {
@@ -453,8 +523,14 @@ for (const task of tasks) {
         errors.push(`Worker receipt for ${task.id} changed file outside allowed_files: ${changedFile}`);
       }
     }
-    const commandStatuses = task.receipt.commandStatuses();
-    const receiptCommands = task.receipt.commands();
+    const commandEntries = task.receipt.commandEntries();
+    const receiptCommands = commandEntries.commands;
+    const commandStatuses = receiptCommands
+      .map((command) => command.status)
+      .filter((value) => value !== null);
+    for (const commandError of commandEntries.errors) {
+      errors.push(`Worker receipt for ${task.id} has invalid commands entry: ${commandError}`);
+    }
     if (task.receipt.has("commands") && commandStatuses.length === 0) {
       errors.push(`Worker receipt for ${task.id} commands must include status fields`);
     }
@@ -683,6 +759,7 @@ const result = {
   ok: errors.length === 0,
   version,
   state_path: statePath,
+  state_digest: createHash("sha256").update(text).digest("hex"),
   goal_status: goalStatus,
   active_task: activeTask,
   agent_statuses: Object.fromEntries(agentStatuses.map(({ agent, status }) => [agent, status])),

@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
+const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
 const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 
 function runGoalMaker(args, options = {}) {
@@ -1587,6 +1588,7 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.ok, true);
     assert.equal(scopedReport.schema_version, 1);
     assert.equal(scopedReport.checker.ok, true);
+    assert.equal(scopedReport.checker.state_digest, scopedReport.board.state_digest);
     assert.equal(scopedReport.board.slug, "one");
     assert.match(scopedReport.board.state_digest, /^[a-f0-9]{64}$/);
     assert.equal(scopedReport.board.state_digest_status, "checker_validated");
@@ -1605,6 +1607,15 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.recovery.continue_only_on, "congruent");
     assert.equal(scopedReport.recovery.worker_liveness, "unknown");
     assert.equal(scopedReport.recovery.continuation_allowed_after_audit, true);
+    assert.match(scopedReport.commands.resume, /^node /);
+    assert.match(scopedReport.commands.resume, /scripts\/resume-board\.mjs/);
+
+    const direct = spawnSync(process.execPath, [bundledResume, "docs/goals/one", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(direct.status, 0, direct.stderr || direct.stdout);
+    assert.deepEqual(JSON.parse(direct.stdout), scopedReport);
 
     const scopedHuman = runGoalMaker(["resume", "docs/goals/one"], { cwd: root });
     assert.equal(scopedHuman.status, 0, scopedHuman.stderr || scopedHuman.stdout);
@@ -1685,6 +1696,33 @@ test("resume rejects a checker-green board when only the lossy parser can render
     const prompt = runGoalMaker(["prompt", "docs/goals/strict-projection", "--json"], { cwd: root });
     assert.equal(prompt.status, 1, prompt.stderr || prompt.stdout);
     assert.match(prompt.stderr, /Block scalar YAML is not supported/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume rejects duplicate mapping keys instead of projecting a different value than the checker", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-duplicate-key-"));
+  try {
+    const goalDir = writeResumeGoal(root, "duplicate-key", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    writeFileSync(
+      statePath,
+      readFileSync(statePath, "utf8").replace(
+        "active_task: T002",
+        "active_task: T002\nactive_task: T001",
+      ),
+    );
+
+    const result = runGoalMaker(["resume", "docs/goals/duplicate-key", "--json"], { cwd: root });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.checker.ok, true);
+    assert.equal(report.recovery.mode, "full_board_review");
+    assert.equal(report.recovery.continuation_allowed, false);
+    assert.match(report.errors.join("\n"), /Duplicate mapping key "active_task"/);
+    assert.equal(report.board.active_task, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

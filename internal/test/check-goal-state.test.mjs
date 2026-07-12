@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -18,9 +19,12 @@ function writeState(root, body) {
   writeFileSync(join(root, "state.yaml"), body.trimStart());
 }
 
-function runChecker(root) {
-  const result = spawnSync(process.execPath, [checker, join(root, "state.yaml")], {
+function runChecker(root, { snapshot = null } = {}) {
+  const args = [checker, join(root, "state.yaml")];
+  if (snapshot !== null) args.push("--snapshot-stdin");
+  const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
+    input: snapshot ?? undefined,
   });
   return {
     status: result.status,
@@ -98,6 +102,22 @@ test("accepts a valid v2 board with one active Scout task", () => {
     assert.equal(result.stdout.ok, true);
     assert.equal(result.stdout.version, 2);
     assert.equal(result.stdout.active_task, "T001");
+    assert.equal(result.stdout.state_digest, createHash("sha256").update(validScoutBoard.trimStart()).digest("hex"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("digests the exact stdin snapshot and rejects an on-disk mismatch", () => {
+  const root = makeRoot();
+  try {
+    writeState(root, validScoutBoard.replace("Improve this project", "On-disk board"));
+    const snapshot = validScoutBoard.replace("Improve this project", "Captured board").trimStart();
+    const result = runChecker(root, { snapshot });
+    assert.equal(result.status, 1, result.stderr || JSON.stringify(result.stdout));
+    assert.equal(result.stdout.ok, false);
+    assert.equal(result.stdout.state_digest, createHash("sha256").update(snapshot).digest("hex"));
+    assert.match(result.stdout.errors.join("\n"), /snapshot does not match state\.yaml on disk/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -798,6 +818,153 @@ checks:
     const errors = result.stdout.errors.join("\n");
     assert.match(errors, /changed file outside allowed_files: package\.json/i);
     assert.match(errors, /non-passing command status: fail/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("matches JSON-escaped verification commands emitted by the receipt applier", () => {
+  const root = makeRoot();
+  const command = 'node -e "process.exit(0)"';
+  const encodedCommand = JSON.stringify(command);
+  const unquotedCommand = 'node -e "console.log(1)"';
+  try {
+    writeState(root, `
+version: 2
+goal:
+  title: "Escaped command"
+  slug: "escaped-command"
+  kind: specific
+  tranche: "Preserve exact command identity."
+  status: done
+  oracle:
+    signal: "The exact command passes."
+    final_proof: "T999 confirms the exact command passed."
+  intake:
+    completion_proof: "The exact command passes."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: null
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Run the quoted command."
+    allowed_files:
+      - README.md
+    verify:
+      - ${encodedCommand}
+      - ${unquotedCommand}
+    stop_if:
+      - "The command fails."
+    receipt:
+      result: done
+      changed_files:
+        - README.md
+      commands:
+        - cmd: ${encodedCommand}
+          status: pass
+        - cmd: ${unquotedCommand}
+          status: pass
+      summary: "The exact command passed."
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Audit completion."
+    receipt:
+      result: done
+      decision: complete
+      summary: "Complete."
+checks:
+  dirty_fingerprint: clean
+  last_verification:
+    result: pass
+    task: T001
+    commands:
+      - cmd: ${encodedCommand}
+        status: pass
+      - cmd: ${unquotedCommand}
+        status: pass
+`);
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr || JSON.stringify(result.stdout));
+    assert.equal(result.stdout.ok, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not let a non-command list item overwrite an earlier failed command", () => {
+  const root = makeRoot();
+  try {
+    writeState(root, `
+version: 2
+goal:
+  title: "False status overwrite"
+  slug: "false-status-overwrite"
+  kind: specific
+  tranche: "Keep every command result."
+  status: done
+  oracle:
+    signal: "npm test passes."
+    final_proof: "T999 confirms npm test passed."
+  intake:
+    completion_proof: "npm test passes."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: null
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Run verification."
+    allowed_files:
+      - README.md
+    verify:
+      - npm test
+    stop_if:
+      - "Verification fails."
+    receipt:
+      result: done
+      changed_files:
+        - README.md
+      commands:
+        - cmd: npm test
+          status: fail
+        - note: "This is not a command."
+          status: pass
+      summary: "Incorrectly claimed success."
+  - id: T999
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Audit completion."
+    receipt:
+      result: done
+      decision: complete
+      summary: "Incorrectly approved."
+checks:
+  dirty_fingerprint: clean
+  last_verification:
+    result: fail
+    task: T001
+    commands:
+      - cmd: npm test
+        status: fail
+`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    const errors = result.stdout.errors.join("\n");
+    assert.match(errors, /invalid commands entry: entry 2: each commands list item must begin with cmd/i);
+    assert.match(errors, /non-passing command status: fail/i);
+    assert.match(errors, /missing passing verification command: npm test/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

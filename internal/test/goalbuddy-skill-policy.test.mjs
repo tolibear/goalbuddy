@@ -62,6 +62,7 @@ test("the execution contract carries the /goal runtime rules", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
     assert.match(text, /governs `\/goal` runs/);
     assert.match(text, /node <skill-path>\/scripts\/render-task-prompt\.mjs docs\/goals\/<slug>/);
+    assert.match(text, /node <skill-path>\/scripts\/resume-board\.mjs docs\/goals\/<slug> --json/);
     assert.match(text, /node <skill-path>\/scripts\/parallel-plan\.mjs docs\/goals\/<slug>/);
     assert.match(text, /Operator Escalation/);
     assert.match(text, /ask the operator one concise question before creating the external artifact/);
@@ -138,6 +139,8 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.match(canonicalLedger, /Never.*dispatch a task/);
   assert.match(canonicalLedger, /goalbuddy_ledger_audit_v1/);
   assert.match(canonicalLedger, /state_digest/);
+  assert.match(canonicalLedger, /exact bundled `commands\.resume` command/);
+  assert.doesNotMatch(canonicalLedger, /Run `goalbuddy resume/);
   assert.match(canonicalLedger, /SHA-256 before and after/);
   assert.match(canonicalLedger, /main_agent_action.*continue.*congruent/s);
   assert.match(claudeLedger, /model: claude-opus-4-8/);

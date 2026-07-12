@@ -618,6 +618,9 @@ function parseObject(lines, index, indent) {
     if (line.indent !== indent || line.text.startsWith("- ")) break;
 
     const { key, valueText } = splitKeyValue(line);
+    if (Object.prototype.hasOwnProperty.call(object, key)) {
+      throw new GoalBoardError(`Duplicate mapping key "${key}" at line ${line.number}.`);
+    }
     index += 1;
 
     if (valueText === "") {
@@ -662,7 +665,12 @@ function parseArray(lines, index, indent) {
       if (index < lines.length && lines[index].indent > indent) {
         const [child, nextIndex] = parseBlock(lines, index, lines[index].indent);
         if (child && typeof child === "object" && !Array.isArray(child)) {
-          Object.assign(object, child);
+          for (const [key, value] of Object.entries(child)) {
+            if (Object.prototype.hasOwnProperty.call(object, key)) {
+              throw new GoalBoardError(`Duplicate mapping key "${key}" below line ${line.number}.`);
+            }
+            object[key] = value;
+          }
         } else {
           throw new GoalBoardError(`Expected mapping below line ${line.number}.`);
         }
