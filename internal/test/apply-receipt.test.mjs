@@ -22,6 +22,8 @@ goal:
   kind: specific
   tranche: "test"
   status: active
+rules:
+  exact_human_approval_can_terminal_wait: true
 agents:
   scout: unknown
   worker: unknown
@@ -112,6 +114,24 @@ function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hyd
     taskArgs.push("--task-card", taskCardPath, "--task-card-sha256", hydrateSha256 ?? createHash("sha256").update(rawTaskCard).digest("hex"));
   }
   return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, ...taskArgs, "--json", ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function runWait(root, args, receipt) {
+  const receiptPath = join(root, "wait.json");
+  writeFileSync(receiptPath, JSON.stringify(receipt));
+  return spawnSync(process.execPath, [script, "wait", "docs/goals/one", "--receipt", receiptPath, "--json", ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function runReply(root, args, reply) {
+  const replyPath = join(root, "reply.json");
+  writeFileSync(replyPath, JSON.stringify(reply));
+  return spawnSync(process.execPath, [script, "reply", "docs/goals/one", "--reply-file", replyPath, "--json", ...args], {
     cwd: root,
     encoding: "utf8",
   });
@@ -468,5 +488,126 @@ test("apply-receipt accepts a dispatch report and defaults status from the recei
     assert.match(t001, /status: done/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exact-human wait and reply are atomic, strict, durable, and final-receipt safe", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const requiredReply = "Approve  T001 exactly";
+    const waitReceipt = {
+      result: "blocked",
+      task_id: "T001",
+      board_path: boardPath,
+      waiting_for_user_approval: true,
+      required_reply: requiredReply,
+      blocked_reason: "The exact owner string is required.",
+      summary: "Waiting once without claiming identity or authorization.",
+      evidence: [{ kind: "inert-custom-evidence", retained: true }],
+    };
+    const before = readFileSync(boardPath, "utf8");
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const wait = runWait(root, ["--task", "T001", "--expected-state-digest", beforeDigest], waitReceipt);
+    assert.equal(wait.status, 0, wait.stderr || wait.stdout);
+    const waitReport = JSON.parse(wait.stdout);
+    assert.equal(waitReport.mode, "wait");
+    assert.equal(waitReport.no_change, false);
+
+    const waitingState = readFileSync(boardPath, "utf8");
+    const waitingDigest = createHash("sha256").update(waitingState).digest("hex");
+    const waitingBoard = parseGoalStateText(waitingState, { allowFallback: false });
+    assert.equal(waitingBoard.goal.status, "blocked");
+    assert.equal(waitingBoard.active_task, null);
+    assert.equal(waitingBoard.tasks.find((task) => task.id === "T001").status, "blocked");
+    assert.deepEqual(waitingBoard.tasks.find((task) => task.id === "T001").receipt, waitReceipt);
+    assert.equal(waitingBoard.tasks.find((task) => task.id === "T999").status, "queued");
+
+    for (const reply of ["approve  T001 exactly", "Approve T001 exactly", `${requiredReply} `]) {
+      const mismatch = runReply(root, ["--task", "T001", "--expected-state-digest", waitingDigest], { reply });
+      assert.equal(mismatch.status, 0, mismatch.stderr || mismatch.stdout);
+      assert.deepEqual(JSON.parse(mismatch.stdout), {
+        ok: true,
+        mode: "reply",
+        task_id: "T001",
+        exact_match: false,
+        no_change: true,
+        before_digest: waitingDigest,
+        after_digest: waitingDigest,
+      });
+      assert.equal(readFileSync(boardPath, "utf8"), waitingState);
+    }
+
+    for (const testCase of [
+      { name: "stale digest", args: ["--task", "T001", "--expected-state-digest", "0".repeat(64)], payload: { reply: requiredReply } },
+      { name: "wrong task", args: ["--task", "T999", "--expected-state-digest", waitingDigest], payload: { reply: requiredReply } },
+      { name: "extra reply field", args: ["--task", "T001", "--expected-state-digest", waitingDigest], payload: { reply: requiredReply, authority: true } },
+      { name: "non-string reply", args: ["--task", "T001", "--expected-state-digest", waitingDigest], payload: { reply: 42 } },
+    ]) {
+      const rejected = runReply(root, testCase.args, testCase.payload);
+      assert.equal(rejected.status, 1, `${testCase.name}: ${rejected.stdout}`);
+      assert.equal(readFileSync(boardPath, "utf8"), waitingState, testCase.name);
+    }
+
+    const exact = runReply(root, ["--task", "T001", "--expected-state-digest", waitingDigest], { reply: requiredReply });
+    assert.equal(exact.status, 0, exact.stderr || exact.stdout);
+    const exactReport = JSON.parse(exact.stdout);
+    assert.equal(exactReport.exact_match, true);
+    assert.equal(exactReport.wait_board_digest, waitingDigest);
+    const resumedState = readFileSync(boardPath, "utf8");
+    const resumedBoard = parseGoalStateText(resumedState, { allowFallback: false });
+    const resumedTask = resumedBoard.tasks.find((task) => task.id === "T001");
+    assert.equal(resumedBoard.goal.status, "active");
+    assert.equal(resumedBoard.active_task, "T001");
+    assert.equal(resumedTask.status, "active");
+    assert.equal(resumedTask.receipt, null);
+    assert.equal(resumedBoard.tasks.find((task) => task.id === "T999").status, "queued");
+    const evidence = resumedTask.transition_evidence.exact_human_replies[0];
+    assert.deepEqual(evidence.wait_receipt, waitReceipt);
+    assert.equal(evidence.wait_board_digest, waitingDigest);
+    assert.equal(evidence.required_reply_sha256, createHash("sha256").update(requiredReply).digest("hex"));
+    assert.equal(evidence.reply_sha256, evidence.required_reply_sha256);
+    assert.equal(evidence.exact_match, true);
+
+    const replay = runReply(root, ["--task", "T001", "--expected-state-digest", exactReport.after_digest], { reply: requiredReply });
+    assert.equal(replay.status, 1, replay.stdout);
+    assert.equal(readFileSync(boardPath, "utf8"), resumedState);
+
+    const final = runApply(root, ["--task", "T001", "--activate", "T999"], DONE_RECEIPT);
+    assert.equal(final.status, 0, final.stderr || final.stdout);
+    const finalBoard = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    const finalTask = finalBoard.tasks.find((task) => task.id === "T001");
+    assert.equal(finalTask.receipt.result, "done");
+    assert.deepEqual(finalTask.transition_evidence.exact_human_replies[0], evidence);
+
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exact-human wait rejects malformed entry conditions without writing", () => {
+  const cases = [
+    { name: "missing digest", args: ["--task", "T001"], receipt: null },
+    { name: "missing identity", args: null, receipt: { result: "blocked", waiting_for_user_approval: true, required_reply: "Exact" } },
+    { name: "empty reply", args: null, receipt: { result: "blocked", task_id: "T001", waiting_for_user_approval: true, required_reply: "" } },
+    { name: "completion claim", args: null, receipt: { result: "blocked", task_id: "T001", waiting_for_user_approval: true, required_reply: "Exact", full_outcome_complete: true } },
+  ];
+  for (const testCase of cases) {
+    const { root, goalDir } = makeBoard();
+    try {
+      const boardPath = join(goalDir, "state.yaml");
+      const before = readFileSync(boardPath, "utf8");
+      const digest = createHash("sha256").update(before).digest("hex");
+      const receipt = { ...(testCase.receipt || { result: "blocked", task_id: "T001", waiting_for_user_approval: true, required_reply: "Exact" }) };
+      if (!Object.hasOwn(receipt, "board_path") && testCase.name !== "missing identity") receipt.board_path = boardPath;
+      const args = testCase.args || ["--task", "T001", "--expected-state-digest", digest];
+      const result = runWait(root, args, receipt);
+      assert.equal(result.status, 1, testCase.name);
+      assert.equal(readFileSync(boardPath, "utf8"), before, testCase.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });

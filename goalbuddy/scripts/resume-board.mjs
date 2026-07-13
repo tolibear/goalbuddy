@@ -345,6 +345,24 @@ function projectResumeTask(raw, normalized) {
     allowed_files: resumeList(raw.allowed_files || normalized?.allowedFiles),
     verify: resumeList(raw.verify || normalized?.verify),
     stop_if: resumeList(raw.stop_if || normalized?.stopIf),
+    transition_evidence: projectTransitionEvidence(raw.transition_evidence),
+  };
+}
+
+function projectTransitionEvidence(evidence) {
+  const replies = evidence && typeof evidence === "object" && !Array.isArray(evidence) && Array.isArray(evidence.exact_human_replies)
+    ? evidence.exact_human_replies
+    : [];
+  if (replies.length === 0) return null;
+  const latest = replies[replies.length - 1] || {};
+  return {
+    exact_human_reply_count: replies.length,
+    latest_exact_human_reply: {
+      wait_board_digest: resumeText(latest.wait_board_digest),
+      required_reply_sha256: resumeText(latest.required_reply_sha256),
+      reply_sha256: resumeText(latest.reply_sha256),
+      exact_match: latest.exact_match === true,
+    },
   };
 }
 

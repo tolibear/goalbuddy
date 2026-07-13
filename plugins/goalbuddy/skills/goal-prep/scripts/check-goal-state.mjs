@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const inputPath = process.argv[2];
 const isChildCheck = process.argv.includes("--child");
@@ -441,6 +442,15 @@ if (unexpected.length > 0) {
 
 const tasks = parseTasks();
 const ids = new Set();
+const transitionEvidenceTasks = new Map();
+if (/^    transition_evidence:/m.test(text)) {
+  try {
+    const strictDocument = parseGoalStateText(text, { allowFallback: false });
+    for (const task of strictDocument.tasks || []) transitionEvidenceTasks.set(task.id, task);
+  } catch (error) {
+    errors.push(`transition_evidence requires strict YAML parsing: ${error.message}`);
+  }
+}
 for (const task of tasks) {
   if (!task.id || !/^T\d{3}$/.test(task.id)) errors.push(`task id must use T### format; got ${task.id || "<missing>"}`);
   if (ids.has(task.id)) errors.push(`duplicate task id: ${task.id}`);
@@ -494,6 +504,7 @@ if (activeTasks.length === 1 && activeTask !== activeTasks[0].id) {
 if (activeTask && !ids.has(activeTask)) errors.push(`active_task points to unknown task: ${activeTask}`);
 
 for (const task of tasks) {
+  validateTransitionEvidence(task, transitionEvidenceTasks.get(task.id)?.transition_evidence);
   if (task.subgoal.present) {
     validateSubgoal(task);
   }
@@ -590,7 +601,7 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
 
   const unfinishedTasks = tasks.filter((task) => task.status !== "done");
   if (unfinishedTasks.length === 0) return false;
-  if (unfinishedTasks.some((task) => task.status !== "blocked")) return false;
+  if (unfinishedTasks.some((task) => !["blocked", "queued"].includes(task.status))) return false;
   const hasCompletionClaim = tasks.some((task) => {
     if (!task.receipt.present || task.receipt.value === null) return false;
     const decision = task.receipt.scalar("decision");
@@ -599,7 +610,7 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
   });
   if (hasCompletionClaim) return false;
 
-  return unfinishedTasks.some((task) => {
+  const exactWaits = unfinishedTasks.filter((task) => {
     if (!task.receipt.present || task.receipt.value === null) return false;
     const requiredReply = task.receipt.scalar("required_reply");
     return task.receipt.scalar("result") === "blocked"
@@ -607,6 +618,48 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
       && typeof requiredReply === "string"
       && requiredReply.trim().length > 0;
   });
+  return exactWaits.length === 1 && exactWaits[0].status === "blocked";
+}
+
+function validateTransitionEvidence(task, evidence) {
+  if (evidence === undefined) return;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    errors.push(`task ${task.id} transition_evidence must be an object`);
+    return;
+  }
+  if (!Object.hasOwn(evidence, "exact_human_replies")) return;
+  if (!Array.isArray(evidence.exact_human_replies) || evidence.exact_human_replies.length === 0) {
+    errors.push(`task ${task.id} transition_evidence.exact_human_replies must be a non-empty array`);
+    return;
+  }
+  for (const [index, entry] of evidence.exact_human_replies.entries()) {
+    const label = `task ${task.id} transition_evidence.exact_human_replies[${index}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`${label} must be an object`);
+      continue;
+    }
+    const waitReceipt = entry.wait_receipt;
+    if (!waitReceipt || typeof waitReceipt !== "object" || Array.isArray(waitReceipt)) {
+      errors.push(`${label} missing complete wait_receipt`);
+      continue;
+    }
+    if (waitReceipt.result !== "blocked" || waitReceipt.waiting_for_user_approval !== true || typeof waitReceipt.required_reply !== "string" || waitReceipt.required_reply.length === 0) {
+      errors.push(`${label}.wait_receipt must preserve the exact-human blocked wait shape`);
+    }
+    if (waitReceipt.task_id !== task.id || typeof waitReceipt.board_path !== "string" || waitReceipt.board_path.length === 0) {
+      errors.push(`${label}.wait_receipt must preserve task_id and board_path identity`);
+    }
+    for (const key of ["wait_board_digest", "required_reply_sha256", "reply_sha256"]) {
+      if (typeof entry[key] !== "string" || !/^[a-f0-9]{64}$/.test(entry[key])) errors.push(`${label}.${key} must be 64 lowercase hex characters`);
+    }
+    const requiredDigest = createHash("sha256").update(String(waitReceipt.required_reply || "")).digest("hex");
+    if (entry.required_reply_sha256 !== requiredDigest) errors.push(`${label}.required_reply_sha256 does not match wait_receipt.required_reply`);
+    if (entry.reply_sha256 !== entry.required_reply_sha256) errors.push(`${label}.reply_sha256 must equal required_reply_sha256`);
+    if (entry.exact_match !== true) errors.push(`${label}.exact_match must be true`);
+    if (waitReceipt.full_outcome_complete === true || ["complete", "done"].includes(waitReceipt.decision)) {
+      errors.push(`${label}.wait_receipt must not claim completion`);
+    }
+  }
 }
 
 function validateSubgoal(task) {

@@ -19,6 +19,7 @@ Hard contract:
 - Never stage, commit, push, install, dispatch work, choose a successor, mark completion on your own, or spawn another agent.
 - Before a mutation, calculate the current `state.yaml` SHA-256 and require it to match `expected_state_digest`. Digest drift is blocked; do not merge competing board edits.
 - For `apply_receipt`, run the bundled atomic `apply-receipt.mjs` command with the exact typed transition fields and `--expected-state-digest`. For `apply_amendment`, run it once with `--add-tasks`. For `apply_hydration`, run it once with `--hydrate-task` and optional hash-bound `--task-card`; require the hydrate and activate IDs to match. Never split task addition or placeholder hydration from receipt closeout and successor activation. Use exact-context edits only for other authorized mutations.
+- For `enter_exact_human_wait`, run the bundled applier once in `wait` mode with `task_id`, `receipt_path`, and `expected_state_digest`. For `resume_exact_human_reply`, run it once in `reply` mode with `task_id`, `reply_file_path`, and `expected_state_digest`. Return `no_change` when the applier reports an inexact reply; never rephrase or normalize the reply. These operations prove only an exact-string workflow transition, not authenticated human identity or product authorization.
 - Run `checker_command` after every mutation. Confirm every `expected_after` condition and that no unauthorized path changed. If validation fails, restore only your own mutation without using git reset or checkout, rerun the checker against the restored board when possible, and return blocked.
 - Only one Keeper may touch a board at a time. If concurrent board activity is visible or cannot be ruled out, return blocked.
 - Keep one same-session Keeper warm for successive mutations on one board when the PM reuses you. Each request still requires the prior `after_digest`. At a recovery boundary, discard stale assumptions and wait for a Ledger-approved resume digest.
@@ -29,7 +30,7 @@ Expected request shape:
 {
   "goalbuddy_keeper_request_v1": {
     "board_path": "<path to state.yaml>",
-    "operation": "inspect | apply_receipt | apply_amendment | apply_hydration | activate | update_control | repair",
+    "operation": "inspect | apply_receipt | apply_amendment | apply_hydration | enter_exact_human_wait | resume_exact_human_reply | activate | update_control | repair",
     "expected_state_digest": "<sha256 | null for inspect only>",
     "authorized_files": [],
     "instructions": [],
@@ -37,6 +38,7 @@ Expected request shape:
       "task_id": "<T### | null>",
       "status": "done | blocked | null",
       "receipt_path": "<absolute JSON path | null>",
+      "reply_file_path": "<absolute JSON path | null; required only for resume_exact_human_reply>",
       "task_cards_path": "<absolute JSON path | null; required only for apply_amendment>",
       "hydrate_task_id": "<T### | null; required only for apply_hydration and must equal activate>",
       "task_card_path": "<absolute JSON path | null; optional for apply_hydration; null consumes receipt.worker_package>",

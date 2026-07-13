@@ -1398,6 +1398,8 @@ tasks:
       - "Need exact production approval phrase."
     receipt:
       result: blocked
+      task_id: T001
+      board_path: /tmp/goalbuddy/state.yaml
       waiting_for_user_approval: true
       required_reply: "approve 20260521234500"
       blocked_reason: "Production migration requires exact human approval before any destructive operation."
@@ -1405,7 +1407,7 @@ tasks:
   - id: T002
     type: worker
     assignee: Worker
-    status: blocked
+    status: queued
     objective: "Verify the migration after the approved operation."
     allowed_files:
       - db/migrations/**
@@ -1413,10 +1415,7 @@ tasks:
       - npm test
     stop_if:
       - "T001 remains approval-blocked."
-    receipt:
-      result: blocked
-      blocked_reason: "Sequence-closed behind the exact T001 approval wait."
-      summary: "No independent safe work remains before T001 approval."
+    receipt: null
 checks:
   dirty_fingerprint: clean
   last_verification:
@@ -1426,6 +1425,38 @@ checks:
       - cmd: npm test
         status: pass
 `;
+}
+
+function exactHumanReplyEvidenceBoard() {
+  const replyDigest = createHash("sha256").update("approve 20260521234500").digest("hex");
+  return terminalApprovalWaitBoard()
+    .replace('  status: blocked\nrules:', '  status: active\nrules:')
+    .replace("active_task: null", "active_task: T001")
+    .replace(/(- id: T001[\s\S]*?status:) blocked/, "$1 active")
+    .replace(`    receipt:
+      result: blocked
+      task_id: T001
+      board_path: /tmp/goalbuddy/state.yaml
+      waiting_for_user_approval: true
+      required_reply: "approve 20260521234500"
+      blocked_reason: "Production migration requires exact human approval before any destructive operation."
+      summary: "Asked once for the exact approval phrase and stopped."
+`, `    transition_evidence:
+      exact_human_replies:
+        - wait_board_digest: ${"a".repeat(64)}
+          required_reply_sha256: ${replyDigest}
+          reply_sha256: ${replyDigest}
+          exact_match: true
+          wait_receipt:
+            result: blocked
+            task_id: T001
+            board_path: /tmp/goalbuddy/state.yaml
+            waiting_for_user_approval: true
+            required_reply: "approve 20260521234500"
+            blocked_reason: "Production migration requires exact human approval before any destructive operation."
+            summary: "Asked once for the exact approval phrase and stopped."
+    receipt: null
+`);
 }
 
 test("accepts terminal approval wait when exact human approval is the only remaining action", () => {
@@ -1440,6 +1471,36 @@ test("accepts terminal approval wait when exact human approval is the only remai
   }
 });
 
+test("accepts durable exact-human reply transition evidence and rejects malformed variants", () => {
+  const validRoot = makeRoot();
+  try {
+    writeState(validRoot, exactHumanReplyEvidenceBoard());
+    const valid = runChecker(validRoot);
+    assert.equal(valid.status, 0, valid.stderr || JSON.stringify(valid.stdout));
+  } finally {
+    rmSync(validRoot, { recursive: true, force: true });
+  }
+
+  const cases = [
+    ["wrong required hash", exactHumanReplyEvidenceBoard().replace(/required_reply_sha256: [a-f0-9]{64}/, `required_reply_sha256: ${"b".repeat(64)}`)],
+    ["mismatched reply hash", exactHumanReplyEvidenceBoard().replace(/reply_sha256: [a-f0-9]{64}/, `reply_sha256: ${"c".repeat(64)}`)],
+    ["false exact match", exactHumanReplyEvidenceBoard().replace("exact_match: true", "exact_match: false")],
+    ["wrong task identity", exactHumanReplyEvidenceBoard().replace("            task_id: T001", "            task_id: T999")],
+    ["completion claim", exactHumanReplyEvidenceBoard().replace("            result: blocked", "            result: blocked\n            full_outcome_complete: true")],
+  ];
+  for (const [name, state] of cases) {
+    const root = makeRoot();
+    try {
+      writeState(root, state);
+      const result = runChecker(root);
+      assert.equal(result.status, 1, `${name}: ${JSON.stringify(result.stdout)}`);
+      assert.match(result.stdout.errors.join("\n"), /transition_evidence/, name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("rejects incomplete or generic continuous-goal approval waits", () => {
   const cases = [
     {
@@ -1451,10 +1512,6 @@ test("rejects incomplete or generic continuous-goal approval waits", () => {
       state: terminalApprovalWaitBoard()
         .replace("active_task: null", "active_task: T002")
         .replace(/(- id: T002[\s\S]*?status:) blocked/, "$1 active"),
-    },
-    {
-      name: "downstream task remains queued",
-      state: terminalApprovalWaitBoard().replace(/(- id: T002[\s\S]*?status:) blocked/, "$1 queued"),
     },
     {
       name: "generic blocker without approval marker",

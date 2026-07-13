@@ -224,6 +224,24 @@ node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --rece
 
 Omit `--task-card` and `--task-card-sha256` only when the receipt itself carries the exact four-field `worker_package`. A complete task card may additionally preserve generic package controls such as inputs, constraints, and expected output. Product-specific approval phrases and boundary classifications are not task-card fields. Hydration is deliberately narrow: the target must already be a queued, receipt-free Worker with empty `allowed_files` and `verify`; it may carry a protective provisional `stop_if`, which the exact package replaces atomically. Its ID must match both `--hydrate-task` and `--activate`; a complete card must preserve identity, assignee, lifecycle status, and null receipt. Hash mismatches, unknown card fields, populated Worker packages, ID mismatches, mixed add-and-hydrate requests, malformed packages, and checker failures are rejected without an accepted mutation. The report returns the exact hydration source and SHA-256 used.
 
+### Exact-human wait and reply
+
+When an exact human reply is the only remaining action, Keeper enters the terminal wait through the official digest-bound transition rather than hand-editing task and goal status:
+
+```bash
+goalbuddy wait docs/goals/<slug> --task T### --receipt wait.json --expected-state-digest <sha256> --json
+```
+
+The selected task and goal must both be active, `active_task` must select that task, and `rules.exact_human_approval_can_terminal_wait` must be true. `wait.json` must preserve `task_id` and `board_path`, use `result: blocked`, set `waiting_for_user_approval: true`, include a nonempty `required_reply`, and make no completion claim. The transition atomically blocks only the selected task and goal and clears `active_task`; queued dependent tasks remain inert and queued.
+
+After the user supplies a reply, write exactly `{"reply":"<exact bytes>"}` to a temporary JSON file and run:
+
+```bash
+goalbuddy reply docs/goals/<slug> --task T### --reply-file reply.json --expected-state-digest <sha256> --json
+```
+
+Comparison is case- and whitespace-sensitive. A mismatch returns `no_change: true` with identical before/after digests. An exact match atomically reactivates only the waiting task and goal, moves the complete wait receipt into `transition_evidence.exact_human_replies`, records the waiting-board digest and SHA-256 hashes of the required and supplied strings, sets `exact_match: true`, and clears the live receipt for the eventual final task receipt. Resume projects only compact hashes and counts for Ledger recovery; the complete wait receipt remains durable in board truth. This proves an exact-string workflow transition only. It never proves who supplied the string or grants product authorization.
+
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 
 For follow-up slices tightly coupled to a just-finished task, reusing the same still-available subagent — which retains the relevant context — is often cheaper and more accurate than a fresh spawn. Prefer it when the follow-up amends that worker's own output.
@@ -264,7 +282,7 @@ Avoid setting `goal.status: blocked` for missing input, credentials, production 
 
 A common local case: the task's own fix is complete and correct, but its `verify` command fails for a pre-existing cause outside the task's `allowed_files` — for example, a broken test-runner script masking a correct code fix. Do not mark that task `done`, and do not widen its `allowed_files` mid-flight. Mark it `blocked` with the failing verify visible in the receipt, spawn a new Worker task scoped to the out-of-scope file, and verify the original oracle there.
 
-Exception: if an exact human approval phrase is the only remaining blocker and no safe local work remains, ask once, preserve the exact phrase, and stop. This exception requires `rules.exact_human_approval_can_terminal_wait: true`. Set `goal.status: blocked`, set `active_task: null`, mark every unfinished task `blocked`, and give at least the approval-blocked task a receipt with `result: blocked`, `waiting_for_user_approval: true`, and nonempty `required_reply: "<exact phrase>"`. This exact pair is the sole `exact_human_reply` shape; do not invent or interpret approval classes. Downstream tasks may not remain queued; block them truthfully as sequence-closed with receipts. No receipt may claim `decision: complete`, `decision: done`, or `full_outcome_complete: true`. Do not rephrase, retry, spawn follow-up work, or post another approval prompt until the user replies.
+Exception: if an exact human reply is the only remaining blocker and no safe local work remains, ask once, preserve the exact string, and stop. This exception requires `rules.exact_human_approval_can_terminal_wait: true`. Use the official `goalbuddy wait` transition with a receipt containing `result: blocked`, `waiting_for_user_approval: true`, and nonempty `required_reply: "<exact string>"`; do not hand-edit the terminal state. This exact pair is the sole `exact_human_reply` shape; do not invent or interpret approval classes. Queued dependents remain inert. No receipt may claim `decision: complete`, `decision: done`, or `full_outcome_complete: true`. Do not rephrase, retry, spawn follow-up work, or post another prompt until the user replies; then use `goalbuddy reply` with the exact string.
 
 ## Board Health Stewardship
 

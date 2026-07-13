@@ -22,6 +22,12 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
 - [x] (2026-07-13 01:20Z) Ran the focused SSE replay, plan/capture/mirror gates, combined 133-test stabilization lane, and full 154-test GoalBuddy check successfully.
 - [x] (2026-07-13 01:22Z) Rebuilt the compiler archive without directory entries after its first archive regression failure, then passed all 48 compiler tests on the second declared attempt.
 - [x] (2026-07-13 01:25Z) Created scoped compiler commit `d5963b29add95101536cac6ac24c0cb3c3cfb85c`; the GoalBuddy commit containing this plan remains the final commit action.
+- [x] (2026-07-13 02:05Z) Rendered T009, read the approved T008 architecture, and verified exact clean GoalBuddy/compiler bases plus protected repository fingerprints before editing.
+- [x] (2026-07-13 02:05Z) Recorded the canary's byte-preserving failed wait at digest `3994129e221bc9aac2988be3a89afaafeab701bcccb4cfc87ea24716298c94e2` as the T009 red failure evidence.
+- [x] (2026-07-13 02:35Z) Implemented digest-bound atomic `goalbuddy wait` and exact `goalbuddy reply`, durable task-level transition evidence, compact resume projection, typed Keeper operations, and the sixth closed runtime capability.
+- [x] (2026-07-13 02:38Z) Added strict lifecycle, malformed-input, mismatch, replay, final-receipt, checker, CLI, resume, Keeper-policy, and compiler-admission regressions; synchronized canonical plugin mirrors and rebuilt the byte-exact compiler archive.
+- [x] (2026-07-13 02:43Z) Passed the 111-test focused GoalBuddy lane, full 158-test GoalBuddy check, all 50 compiler tests, both compiler runtime validators, mirror check, and archive hygiene gate.
+- [x] (2026-07-13 02:45Z) Created scoped compiler commit `89d9af9b329167e8522f10eff7b2a77ba9996e5b`; the GoalBuddy commit containing this living plan remains the final commit action.
 
 ## Surprises & Discoveries
 
@@ -41,6 +47,8 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
   Evidence: A child-state change during that unobserved interval could be absent from both `lastPayload` and every filesystem watcher. T004 now authorizes the runtime file and closes the gap without changing board data or weakening the regression.
 - Observation: Updating the compiler zip with ordinary recursive `zip` options introduced directory entries that the byte-exact archive contract excludes.
   Evidence: The first full compiler verification failed `test_package_archive.py` because the archive contained six additional directory members. Rebuilding with `zip -FS -D -r` removed directory entries; the focused archive test and the second literal 48-test compiler run passed.
+- Observation: The clean-room canary can validate and project a manually shaped exact-human wait, but the official applier cannot enter that state atomically.
+  Evidence: The official terminal-wait application reverted byte-for-byte because it left `goal.status: active`; the preserved board digest is `3994129e221bc9aac2988be3a89afaafeab701bcccb4cfc87ea24716298c94e2`. No official exact-reply reactivation command exists.
 
 ## Decision Log
 
@@ -62,10 +70,20 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
 - Decision: Register an entire new watcher set successfully before closing the old set, then schedule a debounced reconciliation after every rebuild.
   Rationale: Overlapping watcher generations removes refresh gaps; the reconciliation closes the initial snapshot-to-registration gap and recovers coalesced filesystem events. Existing SSE payload and board semantics remain unchanged.
   Date/Author: 2026-07-13 / Worker T004
+- Decision: Reuse `apply-receipt.mjs` as the only persistence boundary for wait entry and reply resumption, with public `goalbuddy wait` and `goalbuddy reply` CLI modes.
+  Rationale: T008 approved a single digest-bound, candidate-validated, atomic boundary rather than a daemon, database, manifest, or parallel state system.
+  Date/Author: 2026-07-13 / Worker T009
+- Decision: Store completed exact-reply transitions under task-level `transition_evidence.exact_human_replies` and keep the live `receipt` slot free for the task's eventual final receipt.
+  Rationale: This preserves the complete wait receipt and compact transition hashes through final receipt replacement without claiming authenticated human identity or product authority.
+  Date/Author: 2026-07-13 / Worker T009
 
 ## Outcomes & Retrospective
 
 T004 completed the stabilization implementation and repaired the T003 verification blocker without weakening the regression. The focused SSE replay passes; the combined stabilization lane passes 133 tests; `npm run check` passes 154 tests; the compiler passes all 48 tests; receipt capture is absent; and tracked mirrors are byte-exact. Compiler commit `d5963b29add95101536cac6ac24c0cb3c3cfb85c` is clean and scoped. This plan is being finalized inside the single scoped GoalBuddy commit; its exact hash is necessarily recorded in the external Worker receipt to avoid a self-referential commit.
+
+T009 is complete. Its required outcome was one official atomic wait/reply lifecycle that preserves strict exact-string evidence across reply, resume, and eventual final receipt replacement while leaving historical boards valid and product authority external.
+
+T009 delivered that lifecycle without a new service or migration. Public wait entry and reply resumption share the existing candidate-validated atomic applier; mismatches preserve board bytes and digest; successful replies preserve the complete wait receipt plus deterministic hashes in task-level transition evidence; resume exposes only compact proof. Compiler version 3.1.7 now requires the sixth runtime capability. Compiler commit `89d9af9b329167e8522f10eff7b2a77ba9996e5b` is clean and scoped. The exact GoalBuddy commit hash is recorded in the external Worker receipt because this plan is part of that commit.
 
 ## Context and Orientation
 
@@ -73,7 +91,9 @@ T004 completed the stabilization implementation and repaired the T003 verificati
 
 The Codex Goal Compiler lives in the sibling repository path `/Users/danielalnajjar/Code/skills/shared/skills/codex-goal-compiler/`. Its runtime checker resolves the installed or local GoalBuddy command, validates the hard-coded capability contract, and reports provenance. The tracked `shared/skills/codex-goal-compiler.zip` archive must exactly reflect that skill directory after changes.
 
-A "closed vocabulary" means a fixed set of accepted string values. GoalBuddy's Judge decision set is exactly `approved`, `rejected`, `approve_subgoal`, `reject_subgoal`, `not_complete`, and `complete`. Its runtime capability set is exactly `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, and `closed_judge_decision_vocabulary`. Unknown or missing advertised capabilities fail closed. Human waiting has one shape: `exact_human_reply`; it does not imply an approval class.
+A "closed vocabulary" means a fixed set of accepted string values. GoalBuddy's Judge decision set is exactly `approved`, `rejected`, `approve_subgoal`, `reject_subgoal`, `not_complete`, and `complete`. Its runtime capability set is exactly `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, and `atomic_exact_human_wait_resume`. Unknown or missing advertised capabilities fail closed. Human waiting has one shape: `exact_human_reply`; it does not imply an approval class.
+
+T009 adds `atomic_exact_human_wait_resume` as the sixth and only new capability. Wait entry requires an active selected task and goal, the existing terminal-wait rule, a mandatory expected board digest, and an identity-bound blocked receipt containing the sole exact-human wait shape. Reply compares a one-field JSON string exactly, including case and whitespace. A mismatch is a digest-identical no-op. An exact match reactivates only the waiting task and goal, moves the complete wait receipt into task-level transition evidence, and clears the live receipt.
 
 ## Plan of Work
 
@@ -153,6 +173,10 @@ T004 recovery and final evidence:
 
 ## Interfaces and Dependencies
 
-No runtime dependency may be added. Receipt application and validation remain dependency-free Node.js modules. `apply-receipt.mjs` must accept the existing receipt envelope and persist the identity fields `task_id` and `board_path` unchanged in the selected task's `receipt`. The runtime capability query must return exactly the five strings named above. The compiler checker remains Python standard-library code and must expose provenance fields that distinguish package version, resolved CLI path, source kind, Git HEAD, and dirty state. Canonical GoalBuddy skill files and tracked plugin mirrors must be byte-identical where `sync-skill-tree.mjs` defines a mirror relationship.
+No runtime dependency may be added. Receipt application and validation remain dependency-free Node.js modules. `apply-receipt.mjs` must accept the existing receipt envelope and persist the identity fields `task_id` and `board_path` unchanged in the selected task's `receipt`. The runtime capability query must return exactly the six strings named above. The compiler checker remains Python standard-library code and must expose provenance fields that distinguish package version, resolved CLI path, source kind, Git HEAD, and dirty state. Canonical GoalBuddy skill files and tracked plugin mirrors must be byte-identical where `sync-skill-tree.mjs` defines a mirror relationship.
 
 Revision note (2026-07-13 01:25Z): Recorded all T004 verification evidence, the deterministic archive repair, the exact compiler commit, and the completed outcome before the self-containing GoalBuddy commit.
+
+Revision note (2026-07-13 02:05Z): Recorded T009 intake, exact clean bases, the preserved canary failure digest, and the approved atomic wait/reply architecture before behavioral edits.
+
+Revision note (2026-07-13 02:45Z): Recorded T009 implementation, durable evidence decisions, full verification results, the rebuilt compiler archive, and scoped compiler commit before the self-containing GoalBuddy commit.

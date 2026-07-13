@@ -142,6 +142,27 @@ identifying the runtime that performed the task. Boards are portable across harn
 
 A terminal wait for an exact human reply uses one closed shape: `result: blocked`, `waiting_for_user_approval: true`, and a nonempty `required_reply`, on a board that explicitly enables `rules.exact_human_approval_can_terminal_wait: true`. No approval-class field is recognized or inferred.
 
+The official `goalbuddy wait` command requires `task_id`, `board_path`, and an expected board digest, then atomically blocks the selected task and goal while clearing `active_task`. `goalbuddy reply` consumes a JSON object containing exactly one string field, `reply`. Comparison is byte-for-byte at the JSON string value: case and whitespace differences are mismatches and cannot mutate state.
+
+After an exact reply, the task returns to `active` with `receipt: null`. Its complete wait receipt moves to optional task-level transition evidence so a later final receipt cannot erase why the task paused:
+
+```yaml
+transition_evidence:
+      exact_human_replies:
+        - wait_board_digest: "<sha256 of the waiting state before reply>"
+          required_reply_sha256: "<sha256>"
+          reply_sha256: "<same sha256 after exact match>"
+          exact_match: true
+          wait_receipt:
+            result: blocked
+            task_id: T001
+            board_path: /absolute/path/to/state.yaml
+            waiting_for_user_approval: true
+            required_reply: "exact string"
+```
+
+This evidence records only a deterministic workflow transition. It is not authenticated-human evidence and conveys no product authorization. Historical tasks without `transition_evidence` remain valid and require no migration.
+
 ## The honesty invariant
 
 This is the format's load-bearing rule, and the validator enforces it:

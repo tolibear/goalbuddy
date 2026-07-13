@@ -67,12 +67,12 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Operator Escalation/);
     assert.match(text, /ask the operator one concise question before creating the external artifact/);
     assert.match(text, /This section applies after the user starts `\/goal Follow docs\/goals\/<slug>\/goal\.md\.`/);
-    assert.match(text, /exact human approval phrase is the only remaining blocker/);
+    assert.match(text, /exact human reply is the only remaining blocker/);
     assert.match(text, /waiting_for_user_approval: true/);
     assert.match(text, /exact_human_approval_can_terminal_wait: true/);
-    assert.match(text, /Downstream tasks may not remain queued/);
+    assert.match(text, /Queued dependents remain inert/);
     assert.match(text, /No receipt may claim `decision: complete`/);
-    assert.match(text, /required_reply: "<exact phrase>"/);
+    assert.match(text, /required_reply: "<exact string>"/);
     assert.match(text, /sole `exact_human_reply` shape/);
     assert.match(text, /do not invent or interpret approval classes/);
     assert.match(text, /Board Health Stewardship/);
@@ -189,6 +189,10 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /Never paste the board/);
   assert.match(canonicalKeeper, /apply_amendment/);
   assert.match(canonicalKeeper, /apply_hydration/);
+  assert.match(canonicalKeeper, /enter_exact_human_wait/);
+  assert.match(canonicalKeeper, /resume_exact_human_reply/);
+  assert.match(canonicalKeeper, /reply_file_path/);
+  assert.match(canonicalKeeper, /not authenticated human identity or product authorization/);
   assert.match(canonicalKeeper, /task_cards_path/);
   assert.match(canonicalKeeper, /hydrate_task_id/);
   assert.match(canonicalKeeper, /task_card_path/);
@@ -197,6 +201,9 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(claudeKeeper, /model: claude-opus-4-8/);
   assert.match(claudeKeeper, /effort: low/);
   assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
+  assert.match(claudeKeeper, /enter_exact_human_wait/);
+  assert.match(claudeKeeper, /resume_exact_human_reply/);
+  assert.match(claudeKeeper, /not authenticated human identity or product authorization/);
 });
 
 test("Codex install keeps Goal Prep in the plugin and removes compatibility skill folders", () => {

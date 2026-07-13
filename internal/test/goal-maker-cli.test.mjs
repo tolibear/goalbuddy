@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -14,6 +15,7 @@ const runtimeCapabilities = {
   lossless_receipt_identity: true,
   strict_multiline_yaml_projection: true,
   closed_judge_decision_vocabulary: true,
+  atomic_exact_human_wait_resume: true,
 };
 
 function runGoalMaker(args, options = {}) {
@@ -1658,6 +1660,54 @@ test("resume --json returns structured boards", () => {
     assert.equal(report.boards[0].status, "active");
     assert.equal(report.boards[0].active_task.id, "T002");
     assert.equal(report.boards[0].run_command, "/goal Follow docs/goals/one/goal.md.");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wait and reply expose the digest-bound exact-human lifecycle and compact resume evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-exact-human-cli-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    const initial = readFileSync(statePath, "utf8").replace(
+      "  missing_input_or_credentials_do_not_stop_goal: true\n",
+      "  missing_input_or_credentials_do_not_stop_goal: true\n  exact_human_approval_can_terminal_wait: true\n",
+    );
+    writeFileSync(statePath, initial);
+    const waitPath = join(root, "wait.json");
+    const requiredReply = "resume T002 exactly";
+    writeFileSync(waitPath, JSON.stringify({
+      result: "blocked",
+      task_id: "T002",
+      board_path: statePath,
+      waiting_for_user_approval: true,
+      required_reply: requiredReply,
+      evidence: [{ kind: "opaque", retained: true }],
+    }));
+    const initialDigest = createHash("sha256").update(initial).digest("hex");
+
+    const wait = runGoalMaker(["wait", goalDir, "--task", "T002", "--receipt", waitPath, "--expected-state-digest", initialDigest, "--json"], { cwd: root });
+    assert.equal(wait.status, 0, wait.stderr || wait.stdout);
+    const waitReport = JSON.parse(wait.stdout);
+    assert.equal(waitReport.mode, "wait");
+    assert.equal(waitReport.active_task, null);
+
+    const replyPath = join(root, "reply.json");
+    writeFileSync(replyPath, JSON.stringify({ reply: requiredReply }));
+    const reply = runGoalMaker(["reply", goalDir, "--task", "T002", "--reply-file", replyPath, "--expected-state-digest", waitReport.after_digest, "--json"], { cwd: root });
+    assert.equal(reply.status, 0, reply.stderr || reply.stdout);
+    const replyReport = JSON.parse(reply.stdout);
+    assert.equal(replyReport.exact_match, true);
+    assert.equal(replyReport.active_task, "T002");
+
+    const resumed = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(resumed.status, 0, resumed.stderr || resumed.stdout);
+    const projection = JSON.parse(resumed.stdout).board.active_task.transition_evidence;
+    assert.equal(projection.exact_human_reply_count, 1);
+    assert.equal(projection.latest_exact_human_reply.wait_board_digest, waitReport.after_digest);
+    assert.equal(projection.latest_exact_human_reply.exact_match, true);
+    assert.doesNotMatch(resumed.stdout, /resume T002 exactly|waiting_for_user_approval|opaque/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
