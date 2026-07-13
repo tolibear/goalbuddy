@@ -7,6 +7,8 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 const inputPath = process.argv[2];
 const isChildCheck = process.argv.includes("--child");
 const useSnapshotStdin = process.argv.includes("--snapshot-stdin");
+const useCandidateStdin = process.argv.includes("--candidate-stdin");
+const judgeDecisions = new Set(["approved", "rejected", "approve_subgoal", "reject_subgoal", "not_complete", "complete"]);
 
 if (!inputPath) {
   console.error("Usage: node scripts/check-goal-state.mjs docs/goals/<slug>[/state.yaml]");
@@ -24,7 +26,7 @@ if (!existsSync(statePath)) {
 
 const root = dirname(statePath);
 const stateOnDisk = readFileSync(statePath, "utf8");
-const text = useSnapshotStdin ? readFileSync(0, "utf8") : stateOnDisk;
+const text = useSnapshotStdin || useCandidateStdin ? readFileSync(0, "utf8") : stateOnDisk;
 const errors = [];
 const warnings = [];
 if (useSnapshotStdin && text !== stateOnDisk) {
@@ -498,6 +500,13 @@ for (const task of tasks) {
 
   const hasReceipt = task.receipt.present && task.receipt.value !== null;
   const receiptResult = hasReceipt ? task.receipt.scalar("result") : null;
+  if (hasReceipt && (task.receipt.has("waiting_for_user_approval") || task.receipt.has("required_reply"))) {
+    const waitingForUserApproval = task.receipt.scalar("waiting_for_user_approval");
+    const requiredReply = task.receipt.scalar("required_reply");
+    if (receiptResult !== "blocked" || waitingForUserApproval !== true || typeof requiredReply !== "string" || requiredReply.trim().length === 0) {
+      errors.push(`receipt for ${task.id} has an incomplete exact human reply wait; require result: blocked, waiting_for_user_approval: true, and nonempty required_reply`);
+    }
+  }
   if (task.status === "done" && !hasReceipt) {
     errors.push(`done task ${task.id} missing receipt`);
   }
@@ -561,8 +570,13 @@ for (const task of tasks) {
       errors.push(`Scout receipt for ${task.id} must include evidence or note`);
     }
   }
-  if (task.type === "judge" && task.status === "done" && hasReceipt && !task.receipt.has("decision")) {
-    errors.push(`Judge receipt for ${task.id} missing decision`);
+  if (task.type === "judge" && task.status === "done" && hasReceipt) {
+    const decision = task.receipt.scalar("decision");
+    if (!task.receipt.has("decision")) {
+      errors.push(`Judge receipt for ${task.id} missing decision`);
+    } else if (!judgeDecisions.has(decision)) {
+      errors.push(`Judge receipt for ${task.id} has unsupported decision ${JSON.stringify(decision)}; expected one of ${[...judgeDecisions].join(", ")}`);
+    }
   }
 }
 
@@ -581,8 +595,7 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
     if (!task.receipt.present || task.receipt.value === null) return false;
     const decision = task.receipt.scalar("decision");
     return task.receipt.scalar("full_outcome_complete") === true
-      || decision === "complete"
-      || decision === "done";
+      || decision === "complete";
   });
   if (hasCompletionClaim) return false;
 

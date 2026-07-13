@@ -631,8 +631,15 @@ function parseObject(lines, index, indent) {
       } else {
         object[key] = {};
       }
-    } else {
+    } else if (valueText === "|" || valueText === ">") {
       object[key] = parseScalar(valueText);
+    } else {
+      const scalarLines = [valueText];
+      while (index < lines.length && lines[index].indent > indent && !lines[index].text.startsWith("- ") && !isInlineMapping(lines[index].text)) {
+        scalarLines.push(lines[index].text);
+        index += 1;
+      }
+      object[key] = parseScalar(scalarLines.join(" "));
     }
   }
   return [object, index];

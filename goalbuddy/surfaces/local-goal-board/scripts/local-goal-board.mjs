@@ -459,15 +459,24 @@ function watchGoal(goalDir, onChange) {
   let watchedDirs = new Set();
 
   const rebuild = () => {
-    for (const watcher of watchers.splice(0)) watcher.close();
-    watchedDirs = goalDirsForPayload(goalDir);
-    for (const dir of watchedDirs) {
-      watchers.push(watch(dir, { persistent: true }, (_event, filename) => {
-        if (!filename || filename === "state.yaml" || filename === "notes") schedule();
-      }));
-      const notesDir = join(dir, "notes");
-      if (existsSync(notesDir)) watchers.push(watch(notesDir, { persistent: true }, schedule));
+    const nextWatchedDirs = goalDirsForPayload(goalDir);
+    const nextWatchers = [];
+    try {
+      for (const dir of nextWatchedDirs) {
+        nextWatchers.push(watch(dir, { persistent: true }, (_event, filename) => {
+          if (!filename || filename === "state.yaml" || filename === "notes") schedule();
+        }));
+        const notesDir = join(dir, "notes");
+        if (existsSync(notesDir)) nextWatchers.push(watch(notesDir, { persistent: true }, schedule));
+      }
+    } catch (error) {
+      for (const watcher of nextWatchers) watcher.close();
+      throw error;
     }
+    const previousWatchers = watchers.splice(0, watchers.length, ...nextWatchers);
+    watchedDirs = nextWatchedDirs;
+    for (const watcher of previousWatchers) watcher.close();
+    schedule();
   };
 
   rebuild();

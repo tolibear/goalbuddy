@@ -164,7 +164,7 @@ receipt:
     - T005
 ```
 
-When a Judge decision selects or approves the next Worker task, `worker_package` carries the exact Worker spec; the PM copies it onto the Worker task card. When no Worker follows, `worker_package` is null.
+When a Judge decision selects or approves the next Worker task, `worker_package` carries the exact Worker spec; the PM copies it onto the Worker task card. When no Worker follows, `worker_package` is null. Judge `decision` is closed to `approved`, `rejected`, `approve_subgoal`, `reject_subgoal`, `not_complete`, or `complete`; any other value is invalid.
 
 Worker receipt:
 
@@ -203,10 +203,10 @@ receipt:
 Recording a receipt by hand takes three separate precise edits (task status, receipt block, `active_task`). The bundled applier does the transition atomically and fail-closed — it validates the resulting board with the checker and reverts the file on any error:
 
 ```bash
-node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --activate T###
+node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --expected-state-digest <64-lowercase-hex> --activate T###
 ```
 
-It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Keeper invokes it from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
+It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Receipt `task_id` and `board_path` identity are preserved losslessly and rejected when they contradict the selected task or board. Other additive receipt evidence is stored as inert data; GoalBuddy does not interpret it as product authority. Keeper invokes the applier from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
 
 When a Judge amendment creates successors that are not yet on the board, put the exact complete task objects in a temporary JSON array and apply the entire transition once:
 
@@ -222,7 +222,7 @@ When a Judge instead selects an already-existing queued Worker placeholder, hydr
 node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --hydrate-task T042 --task-card t042-task-card.json --task-card-sha256 <64-lowercase-hex> --activate T042
 ```
 
-Omit `--task-card` and `--task-card-sha256` only when the receipt itself carries the exact four-field `worker_package`. A complete task card may additionally preserve standard package controls such as inputs, constraints, expected output, exact approval phrase(s), and boundary classification. Hydration is deliberately narrow: the target must already be a queued, receipt-free Worker with empty `allowed_files` and `verify`; it may carry a protective provisional `stop_if`, which the exact package replaces atomically. Its ID must match both `--hydrate-task` and `--activate`; a complete card must preserve identity, assignee, lifecycle status, and null receipt. Hash mismatches, unknown card fields, populated Worker packages, ID mismatches, mixed add-and-hydrate requests, malformed packages, and checker failures are rejected without an accepted mutation. The report returns the exact hydration source and SHA-256 used.
+Omit `--task-card` and `--task-card-sha256` only when the receipt itself carries the exact four-field `worker_package`. A complete task card may additionally preserve generic package controls such as inputs, constraints, and expected output. Product-specific approval phrases and boundary classifications are not task-card fields. Hydration is deliberately narrow: the target must already be a queued, receipt-free Worker with empty `allowed_files` and `verify`; it may carry a protective provisional `stop_if`, which the exact package replaces atomically. Its ID must match both `--hydrate-task` and `--activate`; a complete card must preserve identity, assignee, lifecycle status, and null receipt. Hash mismatches, unknown card fields, populated Worker packages, ID mismatches, mixed add-and-hydrate requests, malformed packages, and checker failures are rejected without an accepted mutation. The report returns the exact hydration source and SHA-256 used.
 
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 
@@ -264,7 +264,7 @@ Avoid setting `goal.status: blocked` for missing input, credentials, production 
 
 A common local case: the task's own fix is complete and correct, but its `verify` command fails for a pre-existing cause outside the task's `allowed_files` — for example, a broken test-runner script masking a correct code fix. Do not mark that task `done`, and do not widen its `allowed_files` mid-flight. Mark it `blocked` with the failing verify visible in the receipt, spawn a new Worker task scoped to the out-of-scope file, and verify the original oracle there.
 
-Exception: if an exact human approval phrase is the only remaining blocker and no safe local work remains, ask once, preserve the exact phrase, and stop. This exception requires `rules.exact_human_approval_can_terminal_wait: true`. Set `goal.status: blocked`, set `active_task: null`, mark every unfinished task `blocked`, and give at least the approval-blocked task a receipt with `result: blocked`, `waiting_for_user_approval: true`, and nonempty `required_reply: "<exact phrase>"`. Downstream tasks may not remain queued; block them truthfully as sequence-closed with receipts. No receipt may claim `decision: complete`, `decision: done`, or `full_outcome_complete: true`. Do not rephrase, retry, spawn follow-up work, or post another approval prompt until the user replies.
+Exception: if an exact human approval phrase is the only remaining blocker and no safe local work remains, ask once, preserve the exact phrase, and stop. This exception requires `rules.exact_human_approval_can_terminal_wait: true`. Set `goal.status: blocked`, set `active_task: null`, mark every unfinished task `blocked`, and give at least the approval-blocked task a receipt with `result: blocked`, `waiting_for_user_approval: true`, and nonempty `required_reply: "<exact phrase>"`. This exact pair is the sole `exact_human_reply` shape; do not invent or interpret approval classes. Downstream tasks may not remain queued; block them truthfully as sequence-closed with receipts. No receipt may claim `decision: complete`, `decision: done`, or `full_outcome_complete: true`. Do not rephrase, retry, spawn follow-up work, or post another approval prompt until the user replies.
 
 ## Board Health Stewardship
 

@@ -108,6 +108,35 @@ test("accepts a valid v2 board with one active Scout task", () => {
   }
 });
 
+test("accepts only the closed Judge decision vocabulary", () => {
+  const completedJudgeBoard = (decision) => validScoutBoard
+    .replace('    status: queued\n    objective: "Choose the first safe tranche."', '    status: done\n    objective: "Choose the first safe tranche."')
+    .replace('    receipt: null\n\nchecks:', `    receipt:\n      result: done\n      decision: ${decision}\n\nchecks:`);
+
+  for (const decision of ["approved", "rejected", "approve_subgoal", "reject_subgoal", "not_complete", "complete"]) {
+    const root = makeRoot();
+    try {
+      writeState(root, completedJudgeBoard(decision));
+      const result = runChecker(root);
+      assert.equal(result.status, 0, `${decision}: ${JSON.stringify(result.stdout)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  for (const decision of ["approve", "done", "ready_for_launch", "authorization_ready"]) {
+    const root = makeRoot();
+    try {
+      writeState(root, completedJudgeBoard(decision));
+      const result = runChecker(root);
+      assert.equal(result.status, 1, `${decision}: ${JSON.stringify(result.stdout)}`);
+      assert.match(result.stdout.errors.join("\n"), /unsupported decision/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("digests the exact stdin snapshot and rejects an on-disk mismatch", () => {
   const root = makeRoot();
   try {
@@ -1430,6 +1459,12 @@ test("rejects incomplete or generic continuous-goal approval waits", () => {
     {
       name: "generic blocker without approval marker",
       state: terminalApprovalWaitBoard().replace("waiting_for_user_approval: true", "waiting_for_user_approval: false"),
+    },
+    {
+      name: "invented approval class",
+      state: terminalApprovalWaitBoard()
+        .replace("waiting_for_user_approval: true", "approval_class: production")
+        .replace('required_reply: "approve 20260521234500"', 'approval_value: "approve 20260521234500"'),
     },
     {
       name: "empty exact reply",

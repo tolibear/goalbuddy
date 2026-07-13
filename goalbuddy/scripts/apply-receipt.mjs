@@ -3,7 +3,7 @@
 // Fail-closed: the result is validated with check-goal-state.mjs and reverted on errors.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,7 +33,7 @@ function isDirectRun() {
 }
 
 export function parseApplyArgs(args) {
-  const options = { goalRoot: "", taskId: "", receiptPath: "", addTasksPath: "", hydrateTaskId: "", taskCardPath: "", taskCardSha256: "", status: "", activate: "", json: false };
+  const options = { goalRoot: "", taskId: "", receiptPath: "", addTasksPath: "", hydrateTaskId: "", taskCardPath: "", taskCardSha256: "", expectedStateDigest: "", status: "", activate: "", json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -49,6 +49,8 @@ export function parseApplyArgs(args) {
     else if (arg.startsWith("--task-card=")) options.taskCardPath = arg.slice("--task-card=".length);
     else if (arg === "--task-card-sha256") options.taskCardSha256 = args[++index] || "";
     else if (arg.startsWith("--task-card-sha256=")) options.taskCardSha256 = arg.slice("--task-card-sha256=".length);
+    else if (arg === "--expected-state-digest") options.expectedStateDigest = args[++index] || "";
+    else if (arg.startsWith("--expected-state-digest=")) options.expectedStateDigest = arg.slice("--expected-state-digest=".length);
     else if (arg === "--status") options.status = args[++index] || "";
     else if (arg.startsWith("--status=")) options.status = arg.slice("--status=".length);
     else if (arg === "--activate") options.activate = args[++index] || "";
@@ -58,13 +60,14 @@ export function parseApplyArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot || !options.taskId || !options.receiptPath) {
-    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--json]");
+    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--expected-state-digest <hex>] [--status done|blocked] [--activate T###|none] [--json]");
   }
   if (options.addTasksPath && options.hydrateTaskId) throw new Error("--add-tasks and --hydrate-task are mutually exclusive atomic transitions.");
   if (options.taskCardPath && !options.hydrateTaskId) throw new Error("--task-card requires --hydrate-task T###.");
   if (options.taskCardPath && !/^[a-f0-9]{64}$/.test(options.taskCardSha256)) throw new Error("--task-card requires --task-card-sha256 with exactly 64 lowercase hex characters.");
   if (options.taskCardSha256 && !options.taskCardPath) throw new Error("--task-card-sha256 requires --task-card.");
   if (options.hydrateTaskId && options.activate !== options.hydrateTaskId) throw new Error("--hydrate-task must name the same task as --activate.");
+  if (options.expectedStateDigest && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) throw new Error("--expected-state-digest must contain exactly 64 lowercase hex characters.");
   return options;
 }
 
@@ -73,12 +76,15 @@ export function applyReceipt(options) {
   const statePath = basename(goalRoot) === "state.yaml" ? goalRoot : join(goalRoot, "state.yaml");
   if (!existsSync(statePath)) throw new Error(`state file not found: ${statePath}`);
   const receipt = loadReceipt(options.receiptPath);
+  validateReceiptIdentity(receipt, options.taskId, statePath);
   const taskCards = options.addTasksPath ? loadTaskCards(options.addTasksPath) : [];
   const hydration = options.hydrateTaskId ? loadHydration(options, receipt) : null;
   const status = options.status || (receipt.result === "done" ? "done" : "blocked");
   if (!["done", "blocked"].includes(status)) throw new Error(`Unsupported --status: ${status}`);
 
   const original = readFileSync(statePath, "utf8");
+  const originalDigest = sha256(original);
+  if (options.expectedStateDigest && options.expectedStateDigest !== originalDigest) throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${originalDigest}.`);
   let lines = original.replace(/\r\n/g, "\n").split("\n");
 
   if (taskCards.length) lines = appendTaskCards(lines, taskCards);
@@ -91,9 +97,9 @@ export function applyReceipt(options) {
   const nextActive = options.activate === "none" || !options.activate ? "null" : options.activate;
   lines = setTopLevel(lines, "active_task", nextActive);
 
-  writeAtomic(statePath, lines.join("\n"));
-
-  const check = spawnSync(process.execPath, [join(scriptDir, "check-goal-state.mjs"), statePath], { encoding: "utf8" });
+  const candidate = withFinalNewline(lines.join("\n"));
+  const candidatePath = `${statePath}.goalbuddy-candidate-${process.pid}`;
+  const check = spawnSync(process.execPath, [join(scriptDir, "check-goal-state.mjs"), statePath, "--candidate-stdin"], { encoding: "utf8", input: candidate });
   let checkerReport = null;
   try {
     checkerReport = JSON.parse(check.stdout);
@@ -102,10 +108,15 @@ export function applyReceipt(options) {
   }
 
   if (!checkerReport.ok) {
-    writeAtomic(statePath, original);
     return { ok: false, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), hydrated_task_id: hydration ? options.hydrateTaskId : null, hydration_source: hydration?.source ?? null, hydration_sha256: hydration?.sha256 ?? null, status, active_task: nextActive, reverted: true, checker_errors: checkerReport.errors || [] };
   }
-  return { ok: true, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), hydrated_task_id: hydration ? options.hydrateTaskId : null, hydration_source: hydration?.source ?? null, hydration_sha256: hydration?.sha256 ?? null, status, active_task: nextActive, reverted: false, checker_warnings: checkerReport.warnings || [] };
+  if (sha256(readFileSync(statePath)) !== originalDigest) {
+    throw new Error("state.yaml changed during atomic receipt transition; candidate was not installed.");
+  }
+  writeAtomic(candidatePath, candidate);
+  renameSync(candidatePath, statePath);
+  fsyncDirectory(dirname(statePath));
+  return { ok: true, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), hydrated_task_id: hydration ? options.hydrateTaskId : null, hydration_source: hydration?.source ?? null, hydration_sha256: hydration?.sha256 ?? null, status, active_task: nextActive, reverted: false, before_digest: originalDigest, after_digest: sha256(candidate), checker_warnings: checkerReport.warnings || [] };
 }
 
 function loadReceipt(receiptPath) {
@@ -114,10 +125,18 @@ function loadReceipt(receiptPath) {
   if (!candidate || typeof candidate !== "object" || typeof candidate.result !== "string") {
     throw new Error(`${receiptPath} does not contain a receipt (need a JSON object with a "result" field, a goalbuddy_receipt_v1 envelope, or a dispatch report).`);
   }
-  const receipt = { ...candidate };
-  delete receipt.board_path;
-  delete receipt.task_id;
-  return receipt;
+  return { ...candidate };
+}
+
+function validateReceiptIdentity(receipt, taskId, statePath) {
+  if (Object.hasOwn(receipt, "task_id") && receipt.task_id !== taskId) {
+    throw new Error(`Receipt task_id ${JSON.stringify(receipt.task_id)} does not match --task ${taskId}.`);
+  }
+  if (Object.hasOwn(receipt, "board_path")) {
+    if (typeof receipt.board_path !== "string" || !existsSync(resolve(receipt.board_path)) || realpathSync(resolve(receipt.board_path)) !== realpathSync(statePath)) {
+      throw new Error(`Receipt board_path ${JSON.stringify(receipt.board_path)} does not resolve to ${statePath}.`);
+    }
+  }
 }
 
 function loadTaskCards(taskCardsPath) {
@@ -183,7 +202,7 @@ function hydratePlaceholderTask(lines, taskId, hydration) {
 }
 
 function replacePlaceholderFromCard(lines, taskId, task, start, end) {
-  const allowed = new Set(["id", "type", "assignee", "status", "reasoning_hint", "harness", "objective", "inputs", "constraints", "allowed_files", "verify", "stop_if", "expected_output", "approval_phrase", "approval_phrases", "boundary_classification", "receipt"]);
+  const allowed = new Set(["id", "type", "assignee", "status", "reasoning_hint", "harness", "objective", "inputs", "constraints", "allowed_files", "verify", "stop_if", "expected_output", "receipt"]);
   const extras = Object.keys(task).filter((key) => !allowed.has(key));
   if (extras.length) throw new Error(`Task card for ${taskId} has unsupported fields: ${extras.join(", ")}.`);
   const required = ["id", "type", "assignee", "status", "objective", "allowed_files", "verify", "stop_if", "receipt"];
@@ -411,4 +430,11 @@ function writeAtomic(path, content) {
   const tempPath = `${path}.goalbuddy-tmp-${process.pid}`;
   writeFileSync(tempPath, content.endsWith("\n") ? content : `${content}\n`);
   renameSync(tempPath, path);
+}
+
+function withFinalNewline(content) { return content.endsWith("\n") ? content : `${content}\n`; }
+
+function fsyncDirectory(path) {
+  const fd = openSync(path, "r");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
 }

@@ -24,6 +24,32 @@ test("normalizes a dense goal into local board columns", () => {
   assert.equal(scout.receipt.summary, "T001 completed during the progressive board motion demo.");
 });
 
+test("strict parser folds valid multiline plain scalars without fallback", () => {
+  const state = `version: 2
+goal:
+  title: Plain continuation
+  slug: plain-continuation
+  kind: specific
+  tranche: test
+  status: active
+active_task: T001
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: active
+    objective: Audit the exact boundary.
+    receipt:
+      result: done
+      summary: First plain line
+        continues on the next valid YAML line
+        and folds with spaces.
+`;
+  const parsed = parseGoalStateText(state, { allowFallback: false });
+  assert.equal(parsed.tasks[0].receipt.summary, "First plain line continues on the next valid YAML line and folds with spaces.");
+  assert.equal(parsed.__parseWarning, undefined);
+});
+
 test("orders completed cards newest first while preserving queued order", () => {
   const columns = buildColumns([
     { id: "T001", column: "completed", status: "done" },

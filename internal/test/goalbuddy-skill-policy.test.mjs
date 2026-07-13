@@ -73,6 +73,8 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Downstream tasks may not remain queued/);
     assert.match(text, /No receipt may claim `decision: complete`/);
     assert.match(text, /required_reply: "<exact phrase>"/);
+    assert.match(text, /sole `exact_human_reply` shape/);
+    assert.match(text, /do not invent or interpret approval classes/);
     assert.match(text, /Board Health Stewardship/);
     assert.match(text, /Keeper is on demand or warm within one uninterrupted session, not an always-on poller/);
     assert.match(text, /node <skill-path>\/scripts\/check-goal-state\.mjs docs\/goals\/<slug>/);
@@ -101,6 +103,7 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /--add-tasks task-cards\.json/);
     assert.match(text, /apply_hydration/);
     assert.match(text, /--hydrate-task T042/);
+    assert.match(text, /Product-specific approval phrases and boundary classifications are not task-card fields/);
     assert.match(text, /Do not embed a long task payload in prose/);
     assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
     assert.match(text, /Ledger remains independently read-only/);

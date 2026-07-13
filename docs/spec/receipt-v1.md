@@ -61,7 +61,9 @@ Agents performing a task return a single JSON object:
 { "goalbuddy_receipt_v1": { "result": "done | blocked", "task_id": "<T###>", "board_path": "<path to state.yaml>", "...role fields...": "see below" } }
 ```
 
-The PM decides the resulting status and successor, then gives the receipt to Board Keeper. Keeper copies its fields verbatim into the task card's `receipt:` mapping as YAML, dropping only null or empty fields. Fields are never renamed and never invented beyond the shapes below.
+The PM decides the resulting status and successor, then gives the receipt to Board Keeper. Keeper copies its fields losslessly into the task card's `receipt:` mapping as YAML, including `task_id` and `board_path`. The applier rejects either identity field when it contradicts the selected task or board. Additive evidence fields are retained as inert data: GoalBuddy does not reinterpret them as product approval, security authority, or a new decision vocabulary.
+
+Newly hydrated Worker task cards accept only generic GoalBuddy fields. Product-specific `approval_phrase`, `approval_phrases`, and `boundary_classification` keys are rejected during hydration. Existing historical board text is not migrated or rewritten.
 
 ## Receipt shapes by role
 
@@ -96,6 +98,8 @@ receipt:
   missing_evidence: []
   required_board_updates: []
 ```
+
+The six displayed Judge decisions are a closed vocabulary. The validator rejects every other value.
 
 Worker, done:
 
@@ -135,6 +139,8 @@ harness: codex | claude-code | <other runtime name>
 ```
 
 identifying the runtime that performed the task. Boards are portable across harnesses (the format is plain repo files), and this field lets a board's history show which harness produced each receipt after a handoff. Optional and additive — validators must tolerate its absence and its presence.
+
+A terminal wait for an exact human reply uses one closed shape: `result: blocked`, `waiting_for_user_approval: true`, and a nonempty `required_reply`, on a board that explicitly enables `rules.exact_human_approval_can_terminal_wait: true`. No approval-class field is recognized or inferred.
 
 ## The honesty invariant
 

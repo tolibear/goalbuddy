@@ -8,6 +8,13 @@ import assert from "node:assert/strict";
 const cli = resolve("internal/cli/goal-maker.mjs");
 const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
 const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+const runtimeCapabilities = {
+  atomic_amendment_transition: true,
+  atomic_placeholder_hydration_transition: true,
+  lossless_receipt_identity: true,
+  strict_multiline_yaml_projection: true,
+  closed_judge_decision_vocabulary: true,
+};
 
 function runGoalMaker(args, options = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
@@ -120,8 +127,7 @@ test("doctor fails when a required bundled agent is missing", () => {
     assert.equal(doctor.status, 1, doctor.stderr || doctor.stdout);
 
     const report = JSON.parse(doctor.stdout);
-    assert.equal(report.capabilities.atomic_amendment_transition, true);
-    assert.equal(report.capabilities.atomic_placeholder_hydration_transition, true);
+    assert.deepEqual(report.capabilities, runtimeCapabilities);
     assert.equal(report.codex_install_model, "plugin");
     assert.equal(report.plugin.skill_installed, true);
     assert.equal(report.plugin.enabled, true);
@@ -1475,8 +1481,7 @@ test("installs the Claude skill as goal-prep and migrates the legacy directory",
     assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
     const report = JSON.parse(doctor.stdout);
     assert.equal(report.legacy_skill_present, false);
-    assert.equal(report.capabilities.atomic_amendment_transition, true);
-    assert.equal(report.capabilities.atomic_placeholder_hydration_transition, true);
+    assert.deepEqual(report.capabilities, runtimeCapabilities);
     assert.match(report.skill_path, pathSuffixPattern("skills", "goal-prep", "SKILL.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1721,6 +1726,27 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume strictly projects valid multiline plain scalars", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-multiline-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    const state = readFileSync(statePath, "utf8").replace(
+      '      summary: "Recent transition selected the bounded widget task."',
+      "      summary: Recent transition selected\n        the bounded widget task.",
+    );
+    writeFileSync(statePath, state);
+
+    const result = runGoalMaker(["resume", "docs/goals/one", "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.board.recent_receipt.summary, "Recent transition selected the bounded widget task.");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
@@ -60,7 +61,7 @@ ${placeholder ? `  - id: T042
     allowed_files: []
     verify: []
     stop_if:
-      - "T041 has not returned pilot_ready and replaced this provisional card with its exact worker_package and approval phrase."
+      - "The provisional card has not been replaced with the exact worker_package."
     expected_output:
       - "Exact implementation receipt"
     receipt: null
@@ -159,9 +160,6 @@ const HYDRATED_T042 = {
   verify: ["npm test", "npm run lint", "git diff --check"],
   stop_if: ["Need files outside allowed_files."],
   expected_output: ["Exact implementation receipt"],
-  approval_phrase: "Approve T042 exactly as hash-bound in the card.",
-  approval_phrases: ["Approve T042 exactly as hash-bound in the card."],
-  boundary_classification: "local-only; no external effects",
   receipt: null,
 };
 
@@ -181,6 +179,61 @@ test("apply-receipt records a done receipt and activates the next task atomicall
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt preserves receipt task and board identity losslessly", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const receipt = {
+      ...DONE_RECEIPT,
+      board_path: boardPath,
+      evidence: [{ kind: "custom-proof", digest: "abc123", accepted: false }],
+    };
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const board = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    const storedReceipt = board.tasks.find((task) => task.id === "T001").receipt;
+    assert.equal(storedReceipt.task_id, "T001");
+    assert.equal(storedReceipt.board_path, boardPath);
+    assert.deepEqual(storedReceipt.evidence, receipt.evidence);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt rejects contradictory receipt identity without writing", () => {
+  for (const receipt of [
+    { ...DONE_RECEIPT, task_id: "T999" },
+    { ...DONE_RECEIPT, board_path: "/tmp/a-different-goal/state.yaml" },
+  ]) {
+    const { root, goalDir } = makeBoard();
+    try {
+      const boardPath = join(goalDir, "state.yaml");
+      const before = readFileSync(boardPath, "utf8");
+      const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /Receipt (?:task_id|board_path)/);
+      assert.equal(readFileSync(boardPath, "utf8"), before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("apply-receipt rejects a stale expected board digest without writing", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const result = runApply(root, ["--task", "T001", "--expected-state-digest", "0".repeat(64), "--activate", "T999"], DONE_RECEIPT);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /state\.yaml digest drift/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -225,11 +278,9 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
     assert.match(state, /objective: "Run the exact approved local pilot packet\."/);
     assert.match(state, /allowed_files:\n      - src\/pilot\.mjs/);
     assert.match(state, /constraints:\n      - "Keep the operation local\."\n      - "Use the hash-bound packet\."/);
-    assert.match(state, /approval_phrase: "Approve T042 exactly as hash-bound in the card\."/);
-    assert.match(state, /approval_phrases:\n      - "Approve T042 exactly as hash-bound in the card\."/);
-    assert.match(state, /boundary_classification: "local-only; no external effects"/);
+    assert.doesNotMatch(state, /approval_phrase|approval_phrases|boundary_classification/);
     assert.doesNotMatch(state, /Provisional worker/);
-    assert.doesNotMatch(state, /T041 has not returned pilot_ready/);
+    assert.doesNotMatch(state, /provisional card has not been replaced/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -264,6 +315,9 @@ test("apply-receipt rejects task-card id mismatch, populated Worker packages, an
     { name: "non-placeholder", board: {}, card: { ...HYDRATED_T042, id: "T001", status: "active" }, hydrate: "T001", pattern: /not a queued receipt-free Worker placeholder/ },
     { name: "populated Worker package", board: { populatedWorker: true }, card: { ...HYDRATED_T042, id: "T043" }, hydrate: "T043", pattern: /not a placeholder: allowed_files is already populated/ },
     { name: "unsupported field", board: { placeholder: true }, card: { ...HYDRATED_T042, arbitrary_board_edit: true }, pattern: /unsupported fields: arbitrary_board_edit/ },
+    { name: "product approval phrase", board: { placeholder: true }, card: { ...HYDRATED_T042, approval_phrase: "Approve production." }, pattern: /unsupported fields: approval_phrase/ },
+    { name: "product approval phrases", board: { placeholder: true }, card: { ...HYDRATED_T042, approval_phrases: ["Approve production."] }, pattern: /unsupported fields: approval_phrases/ },
+    { name: "product boundary classification", board: { placeholder: true }, card: { ...HYDRATED_T042, boundary_classification: "production" }, pattern: /unsupported fields: boundary_classification/ },
   ]) {
     const { root, goalDir } = makeBoard(testCase.board);
     try {

@@ -27,6 +27,13 @@ const legacySkillName = "goal-maker";
 const skillSource = join(packageRoot, canonicalSkillDirectory);
 const claudePluginSource = join(packageRoot, "plugins", "goalbuddy");
 const packageInfo = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+const runtimeCapabilities = Object.freeze({
+  atomic_amendment_transition: true,
+  atomic_placeholder_hydration_transition: true,
+  lossless_receipt_identity: true,
+  strict_multiline_yaml_projection: true,
+  closed_judge_decision_vocabulary: true,
+});
 const defaultCodexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const defaultClaudeHome = process.env.CLAUDE_HOME || join(homedir(), ".claude");
 const requiredAgentFiles = [
@@ -557,7 +564,7 @@ function doctorClaude() {
 
   console.log(JSON.stringify({
     target: "claude",
-    capabilities: installedRuntimeCapabilities(claudeSkillRoot()),
+    capabilities: installedRuntimeCapabilities(),
     claude_home: claudeHome(),
     skill_installed: installed,
     skill_path: skillPath,
@@ -720,7 +727,6 @@ function doctor() {
   const skillPath = join(installedSkillRoot(), "SKILL.md");
   const legacySkillPath = join(legacyInstalledSkillRoot(), "SKILL.md");
   const plugin = installedCodexPlugin();
-  const runtimeSkillRoot = plugin.skill_installed ? plugin.skill_path : installedSkillRoot();
   const agentsPath = join(codexHome(), "agents");
   const installed = existsSync(skillPath);
   const legacyInstalled = existsSync(legacySkillPath);
@@ -775,7 +781,7 @@ function doctor() {
   console.log(JSON.stringify({
     codex_home: codexHome(),
     codex_install_model: "plugin",
-    capabilities: installedRuntimeCapabilities(runtimeSkillRoot),
+    capabilities: installedRuntimeCapabilities(),
     expected_state: {
       plugin_cache: true,
       bundled_skill: "$goal-prep",
@@ -806,15 +812,8 @@ function doctor() {
   process.exit(installOk && goalReadyOk && errors.length === 0 ? 0 : 1);
 }
 
-function installedRuntimeCapabilities(root) {
-  const receiptScript = join(root, "scripts", "apply-receipt.mjs");
-  const keeperAgent = join(root, "agents", "goal_keeper.toml");
-  const receiptText = existsSync(receiptScript) ? readFileSync(receiptScript, "utf8") : "";
-  const keeperText = existsSync(keeperAgent) ? readFileSync(keeperAgent, "utf8") : "";
-  return {
-    atomic_amendment_transition: receiptText.includes("--add-tasks") && keeperText.includes("apply_amendment"),
-    atomic_placeholder_hydration_transition: receiptText.includes("--hydrate-task") && keeperText.includes("apply_hydration"),
-  };
+function installedRuntimeCapabilities() {
+  return { ...runtimeCapabilities };
 }
 
 function codexInstallState({ plugin, installed, legacyInstalled, residualAgents, missingAgents, staleAgents }) {
