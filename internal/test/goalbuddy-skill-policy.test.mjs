@@ -106,6 +106,8 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /--hydrate-task T042/);
     assert.match(text, /Product-specific approval phrases and boundary classifications are not task-card fields/);
     assert.match(text, /Do not embed a long task payload in prose/);
+    assert.match(text, /For `rebind_goalbuddy`, set `transition: null` exactly/);
+    assert.match(text, /Do not send an all-null transition object/);
     assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
     assert.match(text, /Ledger remains independently read-only/);
     assert.match(text, /`wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry/);
@@ -194,6 +196,10 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /resume_exact_human_reply/);
   assert.match(canonicalKeeper, /complete_goal/);
   assert.match(canonicalKeeper, /rebind_goalbuddy/);
+  assert.match(canonicalKeeper, /require exactly `transition: null`/);
+  assert.match(canonicalKeeper, /"transition": null/);
+  assert.match(canonicalKeeper, /"control": null/);
+  assert.match(canonicalKeeper, /never substitute a fully-null transition or control object/);
   assert.match(canonicalKeeper, /immutable_history_authorized/);
   assert.match(canonicalKeeper, /immutable_history_compatible/);
   assert.match(canonicalKeeper, /--allow-immutable-history/);
@@ -211,6 +217,10 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(claudeKeeper, /resume_exact_human_reply/);
   assert.match(claudeKeeper, /complete_goal/);
   assert.match(claudeKeeper, /rebind_goalbuddy/);
+  assert.match(claudeKeeper, /require exactly `transition: null`/);
+  assert.match(claudeKeeper, /"transition": null/);
+  assert.match(claudeKeeper, /"control": null/);
+  assert.match(claudeKeeper, /never substitute a fully-null transition or control object/);
   assert.match(claudeKeeper, /immutable_history_authorized/);
   assert.match(claudeKeeper, /immutable_history_compatible/);
   assert.match(claudeKeeper, /not authenticated human identity or product authorization/);
