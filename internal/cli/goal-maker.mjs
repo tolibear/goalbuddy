@@ -34,6 +34,7 @@ const runtimeCapabilities = Object.freeze({
   strict_multiline_yaml_projection: true,
   closed_judge_decision_vocabulary: true,
   atomic_exact_human_wait_resume: true,
+  atomic_goal_completion: true,
 });
 const defaultCodexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const defaultClaudeHome = process.env.CLAUDE_HOME || join(homedir(), ".claude");
@@ -173,6 +174,7 @@ async function main() {
       break;
     case "wait":
     case "reply":
+    case "complete":
       if (wantsHelp()) {
         usage();
         break;
@@ -323,6 +325,7 @@ Usage:
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--json]
   ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--json]
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--json]
+  ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--json]
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 

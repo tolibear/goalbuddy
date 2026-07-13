@@ -242,6 +242,14 @@ goalbuddy reply docs/goals/<slug> --task T### --reply-file reply.json --expected
 
 Comparison is case- and whitespace-sensitive. A mismatch returns `no_change: true` with identical before/after digests. An exact match atomically reactivates only the waiting task and goal, moves the complete wait receipt into `transition_evidence.exact_human_replies`, records the waiting-board digest and SHA-256 hashes of the required and supplied strings, sets `exact_match: true`, and clears the live receipt for the eventual final task receipt. Resume projects only compact hashes and counts for Ledger recovery; the complete wait receipt remains durable in board truth. This proves an exact-string workflow transition only. It never proves who supplied the string or grants product authorization.
 
+When the final active Judge or PM audit proves the full owner outcome, finish through the same atomic boundary:
+
+```bash
+goalbuddy complete docs/goals/<slug> --task T### --receipt final.json --expected-state-digest <sha256> --json
+```
+
+The final receipt must preserve `task_id` and `board_path` and contain `result: done`, `decision: complete`, and `full_outcome_complete: true`. The transition requires no other queued or active task, preserves task-level transition evidence, and atomically sets the task and goal done with `active_task: null`. Do not split final receipt application from goal completion.
+
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 
 For follow-up slices tightly coupled to a just-finished task, reusing the same still-available subagent — which retains the relevant context — is often cheaper and more accurate than a fresh spawn. Prefer it when the follow-up amends that worker's own output.

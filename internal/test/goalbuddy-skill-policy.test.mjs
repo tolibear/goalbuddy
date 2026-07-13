@@ -93,6 +93,7 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /receipt may still be in flight/);
     assert.match(text, /run the full goal oracle suite/);
     assert.match(text, /node <skill-path>\/scripts\/apply-receipt\.mjs docs\/goals\/<slug>/);
+    assert.match(text, /goalbuddy complete docs\/goals\/<slug>/);
     assert.match(text, /node <skill-path>\/scripts\/dispatch-task\.mjs docs\/goals\/<slug> --to codex/);
     assert.match(text, /Never dispatch externally by default/);
     assert.match(text, /The dispatcher never edits `state\.yaml`/);
@@ -191,6 +192,7 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /apply_hydration/);
   assert.match(canonicalKeeper, /enter_exact_human_wait/);
   assert.match(canonicalKeeper, /resume_exact_human_reply/);
+  assert.match(canonicalKeeper, /complete_goal/);
   assert.match(canonicalKeeper, /reply_file_path/);
   assert.match(canonicalKeeper, /not authenticated human identity or product authorization/);
   assert.match(canonicalKeeper, /task_cards_path/);
@@ -203,6 +205,7 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
   assert.match(claudeKeeper, /enter_exact_human_wait/);
   assert.match(claudeKeeper, /resume_exact_human_reply/);
+  assert.match(claudeKeeper, /complete_goal/);
   assert.match(claudeKeeper, /not authenticated human identity or product authorization/);
 });
 

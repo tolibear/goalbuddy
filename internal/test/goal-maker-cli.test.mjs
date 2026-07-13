@@ -16,6 +16,7 @@ const runtimeCapabilities = {
   strict_multiline_yaml_projection: true,
   closed_judge_decision_vocabulary: true,
   atomic_exact_human_wait_resume: true,
+  atomic_goal_completion: true,
 };
 
 function runGoalMaker(args, options = {}) {
@@ -1708,6 +1709,39 @@ test("wait and reply expose the digest-bound exact-human lifecycle and compact r
     assert.equal(projection.latest_exact_human_reply.wait_board_digest, waitReport.after_digest);
     assert.equal(projection.latest_exact_human_reply.exact_match, true);
     assert.doesNotMatch(resumed.stdout, /resume T002 exactly|waiting_for_user_approval|opaque/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("complete is exposed through the public CLI and closes an audit-only tail", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-complete-cli-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: false });
+    const statePath = join(goalDir, "state.yaml");
+    let state = readFileSync(statePath, "utf8")
+      .replace("  status: done\n  oracle:", "  status: active\n  oracle:")
+      .replace("active_task: null", "active_task: T999")
+      .replace("  - id: T999\n    type: judge\n    assignee: Judge\n    status: done", "  - id: T999\n    type: judge\n    assignee: Judge\n    status: active")
+      .replace(/    receipt:\n      result: done\n      decision: complete\n      full_outcome_complete: true\n      rationale: "The widget is complete and npm test passed\."\n      evidence:\n        - src\/widget\.mjs\n/, "    receipt: null\n");
+    writeFileSync(statePath, state);
+    const digest = createHash("sha256").update(state).digest("hex");
+    const receiptPath = join(root, "final.json");
+    writeFileSync(receiptPath, JSON.stringify({
+      result: "done",
+      task_id: "T999",
+      board_path: statePath,
+      decision: "complete",
+      full_outcome_complete: true,
+      summary: "The public CLI proved the final outcome.",
+    }));
+
+    const result = runGoalMaker(["complete", goalDir, "--task", "T999", "--receipt", receiptPath, "--expected-state-digest", digest, "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.mode, "complete");
+    assert.equal(report.active_task, null);
+    assert.match(readFileSync(statePath, "utf8"), /status: done/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

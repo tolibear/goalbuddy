@@ -163,6 +163,8 @@ transition_evidence:
 
 This evidence records only a deterministic workflow transition. It is not authenticated-human evidence and conveys no product authorization. Historical tasks without `transition_evidence` remain valid and require no migration.
 
+Final goal completion uses `goalbuddy complete` with a mandatory expected digest and an identity-bound Judge or PM receipt containing `result: done`, `decision: complete`, and `full_outcome_complete: true`. It atomically records the final receipt, sets `goal.status: done`, and clears `active_task` while preserving task-level transition evidence. Invalid, stale, wrong-task, non-audit, incomplete, duplicate, and replayed completion requests cannot mutate the board.
+
 ## The honesty invariant
 
 This is the format's load-bearing rule, and the validator enforces it:

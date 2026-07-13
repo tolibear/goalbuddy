@@ -22,6 +22,8 @@ if (isDirectRun()) {
       console.log(`Exact reply matched ${report.task_id}; the task is active again.`);
     } else if (report.mode === "wait") {
       console.log(`Recorded exact-human wait for ${report.task_id}; the goal is blocked.`);
+    } else if (report.mode === "complete") {
+      console.log(`Recorded final completion for ${report.task_id}; the goal is done.`);
     } else if (report.ok) {
       console.log(`Recorded ${report.task_id} as ${report.status}; active_task is now ${report.active_task}.`);
     } else {
@@ -40,7 +42,7 @@ function isDirectRun() {
 }
 
 export function parseApplyArgs(args) {
-  const modes = new Set(["receipt", "wait", "reply"]);
+  const modes = new Set(["receipt", "wait", "reply", "complete"]);
   const options = { mode: modes.has(args[0]) ? args[0] : "receipt", goalRoot: "", taskId: "", receiptPath: "", replyPath: "", addTasksPath: "", hydrateTaskId: "", taskCardPath: "", taskCardSha256: "", expectedStateDigest: "", status: "", activate: "", json: false };
   for (let index = modes.has(args[0]) ? 1 : 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -72,7 +74,7 @@ export function parseApplyArgs(args) {
   if (!options.goalRoot || !options.taskId || (options.mode !== "reply" && !options.receiptPath) || (options.mode === "reply" && !options.replyPath)) {
     throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--expected-state-digest <hex>] [--status done|blocked] [--activate T###|none] [--json]");
   }
-  if (["wait", "reply"].includes(options.mode) && !options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
+  if (["wait", "reply", "complete"].includes(options.mode) && !options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
   if (options.mode !== "receipt" && (options.addTasksPath || options.hydrateTaskId || options.taskCardPath || options.taskCardSha256 || options.status || options.activate)) {
     throw new Error(`${options.mode} does not accept receipt-transition task, status, or activation options.`);
   }
@@ -90,6 +92,7 @@ export function parseApplyArgs(args) {
 export function applyTransition(options) {
   if (options.mode === "wait") return enterExactHumanWait(options);
   if (options.mode === "reply") return resumeExactHumanReply(options);
+  if (options.mode === "complete") return completeGoal(options);
   return applyReceipt(options);
 }
 
@@ -232,6 +235,44 @@ export function resumeExactHumanReply(options) {
     wait_board_digest: context.originalDigest,
     required_reply_sha256: sha256(task.receipt.required_reply),
     reply_sha256: sha256(reply),
+  });
+}
+
+export function completeGoal(options) {
+  const context = loadTransitionContext(options);
+  const receipt = loadReceipt(options.receiptPath);
+  if (!Object.hasOwn(receipt, "task_id") || !Object.hasOwn(receipt, "board_path")) {
+    throw new Error("complete requires receipt task_id and board_path identity.");
+  }
+  validateReceiptIdentity(receipt, options.taskId, context.statePath);
+  if (context.document.goal?.status !== "active") throw new Error("complete requires goal.status active.");
+  if (context.document.active_task !== options.taskId) throw new Error(`complete requires active_task ${options.taskId}.`);
+  const task = selectedTask(context.document, options.taskId);
+  if (task.status !== "active") throw new Error(`complete requires task ${options.taskId} to be active.`);
+  if (!["judge", "pm"].includes(task.type)) throw new Error("complete requires a Judge or PM audit task.");
+  if (task.receipt !== null) throw new Error(`complete requires task ${options.taskId} to have receipt: null.`);
+  if (receipt.result !== "done" || receipt.decision !== "complete" || receipt.full_outcome_complete !== true) {
+    throw new Error("complete requires result done, decision complete, and full_outcome_complete true.");
+  }
+  const unfinishedOtherTasks = (context.document.tasks || [])
+    .filter((candidate) => candidate.id !== options.taskId && ["queued", "active"].includes(candidate.status))
+    .map((candidate) => candidate.id);
+  if (unfinishedOtherTasks.length > 0) {
+    throw new Error(`complete requires no other queued or active tasks; found ${unfinishedOtherTasks.join(", ")}.`);
+  }
+
+  let lines = context.original.replace(/\r\n/g, "\n").split("\n");
+  lines = setTaskField(lines, options.taskId, "status", "done");
+  lines = setTaskReceipt(lines, options.taskId, receipt);
+  lines = setTopLevel(lines, "active_task", "null");
+  lines = setNestedScalar(lines, "goal", "status", "done");
+  const candidate = withFinalNewline(lines.join("\n"));
+  return installValidatedCandidate(context, candidate, {
+    mode: "complete",
+    task_id: options.taskId,
+    status: "done",
+    active_task: null,
+    no_change: false,
   });
 }
 

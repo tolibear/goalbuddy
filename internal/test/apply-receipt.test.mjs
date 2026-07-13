@@ -137,6 +137,91 @@ function runReply(root, args, reply) {
   });
 }
 
+function runComplete(root, args, receipt) {
+  const receiptPath = join(root, "final.json");
+  writeFileSync(receiptPath, JSON.stringify(receipt));
+  return spawnSync(process.execPath, [script, "complete", "docs/goals/one", "--receipt", receiptPath, "--json", ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function makeCompletionBoard({ taskType = "judge", extraQueued = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-complete-"));
+  const goalDir = join(root, "docs", "goals", "one");
+  mkdirSync(join(goalDir, "notes"), { recursive: true });
+  writeFileSync(join(goalDir, "goal.md"), "# one\n");
+  writeFileSync(join(goalDir, "state.yaml"), `version: 2
+goal:
+  title: "one goal"
+  slug: "one"
+  kind: specific
+  tranche: "test"
+  status: active
+  oracle:
+    signal: "The widget behavior is verified."
+    final_proof: "A passing npm test receipt and final audit."
+  intake:
+    completion_proof: "npm test passes and the final audit records full completion."
+rules:
+  continuous_until_full_outcome: true
+agents:
+  scout: unknown
+  worker: unknown
+  judge: unknown
+active_task: T999
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: done
+    objective: "Adjust the widget."
+    allowed_files:
+      - src/widget.mjs
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
+    receipt:
+      result: done
+      changed_files:
+        - src/widget.mjs
+      commands:
+        - cmd: npm test
+          status: pass
+      summary: "Widget adjusted."
+  - id: T999
+    type: ${taskType}
+    assignee: ${taskType === "judge" ? "Judge" : "PM"}
+    status: active
+    objective: "Audit the complete outcome."
+    transition_evidence:
+      marker: kept
+    receipt: null
+${extraQueued ? `  - id: T998
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Unexpected remaining work."
+    allowed_files:
+      - src/other.mjs
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
+    receipt: null
+` : ""}checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T001
+    commands:
+      - cmd: npm test
+        status: pass
+`);
+  return { root, goalDir };
+}
+
 const AMENDMENT_TASKS = [
   {
     id: "T046",
@@ -605,6 +690,84 @@ test("exact-human wait rejects malformed entry conditions without writing", () =
       const args = testCase.args || ["--task", "T001", "--expected-state-digest", digest];
       const result = runWait(root, args, receipt);
       assert.equal(result.status, 1, testCase.name);
+      assert.equal(readFileSync(boardPath, "utf8"), before, testCase.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("complete closes the active audit and goal atomically while preserving transition evidence", () => {
+  const { root, goalDir } = makeCompletionBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const receipt = {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "complete",
+      full_outcome_complete: true,
+      summary: "The complete goal outcome is proven.",
+    };
+    const result = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.mode, "complete");
+    assert.equal(report.active_task, null);
+
+    const finalText = readFileSync(boardPath, "utf8");
+    const board = parseGoalStateText(finalText, { allowFallback: false });
+    const task = board.tasks.find((candidate) => candidate.id === "T999");
+    assert.equal(board.goal.status, "done");
+    assert.equal(board.active_task, null);
+    assert.equal(task.status, "done");
+    assert.deepEqual(task.receipt, receipt);
+    assert.deepEqual(task.transition_evidence, { marker: "kept" });
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stdout);
+
+    const replay = runComplete(root, ["--task", "T999", "--expected-state-digest", report.after_digest], receipt);
+    assert.equal(replay.status, 1, replay.stdout);
+    assert.equal(readFileSync(boardPath, "utf8"), finalText);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("complete rejects unsafe or incomplete finalization without writing", () => {
+  const cases = [
+    { name: "stale digest", args: ["--task", "T999", "--expected-state-digest", "0".repeat(64)] },
+    { name: "wrong task", args: ["--task", "T001"] },
+    { name: "missing identity", receipt: { task_id: undefined, board_path: undefined } },
+    { name: "incomplete receipt", receipt: { decision: "amend", full_outcome_complete: false } },
+    { name: "non-audit task", board: { taskType: "worker" } },
+    { name: "queued work remains", board: { extraQueued: true } },
+  ];
+  for (const testCase of cases) {
+    const { root, goalDir } = makeCompletionBoard(testCase.board);
+    try {
+      const boardPath = join(goalDir, "state.yaml");
+      const before = readFileSync(boardPath, "utf8");
+      const digest = createHash("sha256").update(before).digest("hex");
+      const receipt = {
+        result: "done",
+        task_id: "T999",
+        board_path: boardPath,
+        decision: "complete",
+        full_outcome_complete: true,
+        summary: "The complete goal outcome is proven.",
+        ...testCase.receipt,
+      };
+      if (testCase.name === "missing identity") {
+        delete receipt.task_id;
+        delete receipt.board_path;
+      }
+      const args = testCase.args || ["--task", "T999"];
+      if (!args.includes("--expected-state-digest")) args.push("--expected-state-digest", digest);
+      const result = runComplete(root, args, receipt);
+      assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
       assert.equal(readFileSync(boardPath, "utf8"), before, testCase.name);
     } finally {
       rmSync(root, { recursive: true, force: true });
