@@ -1,6 +1,6 @@
 interface:
   display_name: "Goal Prep"
   short_description: "Prepare GoalBuddy boards before running /goal."
-  default_prompt: "Use goal-prep to run diagnostic intake on my rough or detailed goal. If the goal is vague or improvement-oriented, ask one guided question at a time, surface likely blind spots, and do not create files until intent, proof, scope, and board handling are clear or explicitly defaulted. If it is clear or already planned, prepare or repair goal.md, state.yaml, and notes/, then print the /goal Follow command instead of starting /goal automatically."
+  default_prompt: "Use $goal-prep because I explicitly selected Goal Prep. Run diagnostic intake on my rough or detailed GoalBuddy goal. If it is vague or improvement-oriented, ask one guided question at a time and do not create files until intent, proof, scope, and board handling are clear or explicitly defaulted. If it is clear or already planned, prepare or repair goal.md, state.yaml, and notes/, then print the /goal Follow command instead of starting /goal automatically."
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

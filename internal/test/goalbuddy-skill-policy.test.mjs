@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 
 const canonicalSkill = readFileSync("goalbuddy/SKILL.md", "utf8");
 const pluginSkill = readFileSync("plugins/goalbuddy/skills/goal-prep/SKILL.md", "utf8");
+const canonicalOpenAI = readFileSync("goalbuddy/agents/openai.yaml", "utf8");
+const pluginOpenAI = readFileSync("plugins/goalbuddy/skills/goal-prep/agents/openai.yaml", "utf8");
 const canonicalExecution = readFileSync("goalbuddy/references/goal-execution.md", "utf8");
 const pluginExecution = readFileSync("plugins/goalbuddy/skills/goal-prep/references/goal-execution.md", "utf8");
 
@@ -55,6 +57,22 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /explicitly invokes `\$goal-prep` on a one-change task/);
     assert.match(text, /Always start `state\.yaml` from `templates\/state\.yaml`/);
     assert.match(text, /scan environment reality before seeding/);
+  }
+});
+
+test("Goal Prep is explicit or compiler-internal across Codex and Claude", () => {
+  for (const text of [canonicalSkill, pluginSkill]) {
+    assert.match(text, /^disable-model-invocation: true$/m);
+    assert.match(text, /^user-invocable: true$/m);
+    assert.match(text, /Goal Prep is an explicit or compiler-internal backend/);
+    assert.match(text, /Do not select it implicitly for generic requests to goalize, route, or compile work/);
+    assert.match(text, /Codex Goal Compiler selects the GoalBuddy route/);
+    assert.match(text, /explicitly load this `SKILL\.md` as its declared board-preparation dependency/);
+  }
+  for (const text of [canonicalOpenAI, pluginOpenAI]) {
+    assert.match(text, /^\s*allow_implicit_invocation: false$/m);
+    assert.doesNotMatch(text, /^\s*allow_implicit_invocation: true$/m);
+    assert.match(text, /Use \$goal-prep because I explicitly selected Goal Prep/);
   }
 });
 
@@ -247,9 +265,12 @@ test("Codex install keeps Goal Prep in the plugin and removes compatibility skil
     assert.equal(install.status, 0, install.stderr);
     const report = JSON.parse(install.stdout);
     const installedPluginSkill = readFileSync(join(report.cache_path, "skills", "goal-prep", "SKILL.md"), "utf8");
+    const installedOpenAI = readFileSync(join(report.cache_path, "skills", "goal-prep", "agents", "openai.yaml"), "utf8");
     assert.equal(existsSync(join(codexHome, "skills", "goal-maker", "SKILL.md")), false);
     assert.equal(existsSync(join(codexHome, "skills", "goalbuddy", "SKILL.md")), false);
     assert.match(installedPluginSkill, /During a `\$goal-prep` turn, do not perform the user's requested work/);
+    assert.match(installedPluginSkill, /^disable-model-invocation: true$/m);
+    assert.match(installedOpenAI, /^\s*allow_implicit_invocation: false$/m);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -1,6 +1,8 @@
 ---
 name: goal-prep
-description: Goal Prep for GoalBuddy. Use for broad, long-running, stalled, vague, detailed, planned, or unhealthy Codex or Claude Code work that needs a structured /goal intake, autonomous task discovery, role-tagged Scout/Judge/Worker delegation, first-class board keeping, one active task, durable receipts, and a PM-owned rolling board that maximizes the chance of a successful goal run.
+description: "Explicit Goal Prep backend for GoalBuddy. Use only when the user explicitly invokes $goal-prep or /goal-prep, or when Codex Goal Compiler explicitly loads it after selecting the GoalBuddy route. Prepares or repairs structured /goal intake, goal.md, state.yaml, notes, role-tagged tasks, receipts, and the starter command; generic requests to goalize, route, or compile work belong to Codex Goal Compiler."
+disable-model-invocation: true
+user-invocable: true
 ---
 
 # Goal Prep
@@ -24,6 +26,8 @@ Intent -> Oracle -> Surface -> Loop -> Proof
 No oracle, no serious goal. A goal oracle is the observable signal that tells the PM whether the original owner outcome is actually true yet. It may be a test suite, browser walkthrough, demo transcript, generated artifact, benchmark, source-backed answer, release check, or final human decision. Weak proof creates weak goals, so record the oracle before shaping tasks and keep testing against it until final completion.
 
 ## Invocation Boundary
+
+Goal Prep is an explicit or compiler-internal backend, not the general goal-routing front door. Do not select it implicitly for generic requests to goalize, route, or compile work; those belong to Codex Goal Compiler. After Codex Goal Compiler selects the GoalBuddy route, it may explicitly load this `SKILL.md` as its declared board-preparation dependency. Direct `$goal-prep` or `/goal-prep` invocation remains supported for users who intentionally want GoalBuddy intake or board repair.
 
 There are two different modes:
 
