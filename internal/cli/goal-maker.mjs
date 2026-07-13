@@ -175,11 +175,12 @@ async function main() {
     case "wait":
     case "reply":
     case "complete":
+    case "rebind":
       if (wantsHelp()) {
         usage();
         break;
       }
-      exactHumanTransitionCli(command);
+      stateTransitionCli(command);
       break;
     case "init":
       if (wantsHelp()) {
@@ -322,10 +323,11 @@ Usage:
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
-  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--json]
-  ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--json]
-  ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--json]
-  ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--json]
+  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--allow-immutable-history] [--json]
+  ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
+  ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
+  ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
+  ${canonicalCliName} rebind <docs/goals/slug> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
@@ -1330,7 +1332,7 @@ function receiptCli() {
   process.exit(result.status ?? 1);
 }
 
-function exactHumanTransitionCli(mode) {
+function stateTransitionCli(mode) {
   const script = join(skillSource, "scripts", "apply-receipt.mjs");
   const result = spawnSync(process.execPath, [script, mode, ...args.slice(1)], {
     cwd: process.cwd(),

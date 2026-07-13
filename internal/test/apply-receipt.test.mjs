@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -146,7 +146,37 @@ function runComplete(root, args, receipt) {
   });
 }
 
-function makeCompletionBoard({ taskType = "judge", extraQueued = false } = {}) {
+function runRebind(root, args, binding, installedCheckerPaths) {
+  const bindingPath = join(root, "binding.json");
+  writeFileSync(bindingPath, JSON.stringify(binding));
+  const installedArgs = installedCheckerPaths.flatMap((path) => ["--installed-checker", path]);
+  return spawnSync(process.execPath, [script, "rebind", "docs/goals/one", "--binding", bindingPath, ...installedArgs, "--json", ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function captureChild(child) {
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  return new Promise((resolveChild, rejectChild) => {
+    child.once("error", rejectChild);
+    child.once("close", (status, signal) => resolveChild({ status, signal, stdout, stderr }));
+  });
+}
+
+function waitForPath(path, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
+  throw new Error(`Timed out waiting for ${path}.`);
+}
+
+function makeCompletionBoard({ taskType = "judge", extraQueued = false, legacyDecision = false, legacyDialect = false, liveTailError = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-complete-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
@@ -190,14 +220,26 @@ tasks:
         - cmd: npm test
           status: pass
       summary: "Widget adjusted."
-  - id: T999
+${legacyDecision ? `  - id: T007
+    type: judge
+    assignee: Judge
+    status: done
+    objective: "Preserve the historical audit exactly."
+    receipt:
+      result: done
+      decision: amend
+      summary: "Historical pre-0.4 decision vocabulary."
+${legacyDialect ? `      evidence:
+      - kind: legacy-indentation
+        summary: "Preserved exactly."
+` : ""}` : ""}  - id: T999
     type: ${taskType}
-    assignee: ${taskType === "judge" ? "Judge" : "PM"}
+    assignee: ${liveTailError ? "Worker" : taskType === "judge" ? "Judge" : "PM"}
     status: active
     objective: "Audit the complete outcome."
-    transition_evidence:
+${legacyDialect ? "" : `    transition_evidence:
       marker: kept
-    receipt: null
+`}    receipt: null
 ${extraQueued ? `  - id: T998
     type: worker
     assignee: Worker
@@ -220,6 +262,56 @@ ${extraQueued ? `  - id: T998
         status: pass
 `);
   return { root, goalDir };
+}
+
+function addExistingGoalbuddyBinding(statePath) {
+  const state = readFileSync(statePath, "utf8");
+  writeFileSync(statePath, state.replace("checks:\n", `checks:
+  goalbuddy_binding:
+    source_root: "/old/goalbuddy"
+    accepted_commit: "${"0".repeat(40)}"
+    checker_path: "/old/goalbuddy/check-goal-state.mjs"
+    checker_sha256: "${"0".repeat(64)}"
+    installed_checker_sha256: "${"0".repeat(64)}"
+    runtime_doctor_goal_ready: true
+    cached_marketplace_checker_authoritative: false
+`));
+}
+
+function makeBindingProof(root) {
+  const sourceRoot = join(root, "goalbuddy-source");
+  const checkerPath = join(sourceRoot, "goalbuddy", "scripts", "check-goal-state.mjs");
+  mkdirSync(dirname(checkerPath), { recursive: true });
+  const checkerBytes = "#!/usr/bin/env node\nconsole.log('fixture checker');\n";
+  writeFileSync(checkerPath, checkerBytes);
+  for (const args of [
+    ["init", "-q"],
+    ["add", "goalbuddy/scripts/check-goal-state.mjs"],
+    ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "commit", "-qm", "fixture checker"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: sourceRoot, encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  }
+  const acceptedCommit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: sourceRoot, encoding: "utf8" }).stdout.trim();
+  const checkerSha256 = createHash("sha256").update(checkerBytes).digest("hex");
+  const codexChecker = join(root, "installed", "codex", "check-goal-state.mjs");
+  const claudeChecker = join(root, "installed", "claude", "check-goal-state.mjs");
+  mkdirSync(dirname(codexChecker), { recursive: true });
+  mkdirSync(dirname(claudeChecker), { recursive: true });
+  writeFileSync(codexChecker, checkerBytes);
+  writeFileSync(claudeChecker, checkerBytes);
+  return {
+    binding: {
+      source_root: sourceRoot,
+      accepted_commit: acceptedCommit,
+      checker_path: checkerPath,
+      checker_sha256: checkerSha256,
+      installed_checker_sha256: checkerSha256,
+      runtime_doctor_goal_ready: true,
+      cached_marketplace_checker_authoritative: false,
+    },
+    installedCheckerPaths: [codexChecker, claudeChecker],
+  };
 }
 
 const AMENDMENT_TASKS = [
@@ -731,6 +823,192 @@ test("complete closes the active audit and goal atomically while preserving tran
     const replay = runComplete(root, ["--task", "T999", "--expected-state-digest", report.after_digest], receipt);
     assert.equal(replay.status, 1, replay.stdout);
     assert.equal(readFileSync(boardPath, "utf8"), finalText);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completion preserves byte-identical done history while admitting only its exact legacy checker errors", () => {
+  const { root, goalDir } = makeCompletionBoard({ legacyDecision: true });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const historicalBefore = before.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0];
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const baselineCheck = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(baselineCheck.status, 1);
+    const baselineErrors = JSON.parse(baselineCheck.stdout).errors;
+    assert.equal(baselineErrors.length, 1);
+
+    const receipt = {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "complete",
+      full_outcome_complete: true,
+      summary: "The live outcome is complete without rewriting old history.",
+    };
+    const implicit = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
+    assert.equal(implicit.status, 1);
+    assert.match(JSON.parse(implicit.stdout).immutable_history_rejection, /explicit --allow-immutable-history/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+
+    const result = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest, "--allow-immutable-history"], receipt);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.checker_status, "immutable_history_compatible");
+    assert.equal(report.immutable_history.baseline_error_count, 1);
+    assert.deepEqual(report.immutable_history.preserved_task_ids, ["T007"]);
+    assert.equal(report.immutable_history.historical_task_bytes_unchanged, true);
+
+    const after = readFileSync(boardPath, "utf8");
+    assert.equal(after.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0], historicalBefore);
+    const afterCheck = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(afterCheck.status, 1);
+    assert.deepEqual(JSON.parse(afterCheck.stdout).errors, baselineErrors);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("immutable-history compatibility rejects checker errors that touch the live tail", () => {
+  const { root, goalDir } = makeCompletionBoard({ legacyDecision: true, liveTailError: true });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const digest = createHash("sha256").update(before).digest("hex");
+    const result = runComplete(root, ["--task", "T999", "--expected-state-digest", digest, "--allow-immutable-history"], {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "complete",
+      full_outcome_complete: true,
+      summary: "This must be rejected because the live task is invalid.",
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.match(report.immutable_history_rejection, /live or missing task T999/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt transition works on a checker-tolerated legacy dialect without strict-parser coercion", () => {
+  const { root, goalDir } = makeCompletionBoard({ legacyDecision: true, legacyDialect: true, extraQueued: true });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    assert.throws(() => parseGoalStateText(before, { allowFallback: false }));
+    const historicalBefore = before.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0];
+    const digest = createHash("sha256").update(before).digest("hex");
+    const result = runApply(root, ["--task", "T999", "--activate", "T998", "--expected-state-digest", digest, "--allow-immutable-history"], {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "approved",
+      summary: "The current audit closed and selected the already-declared successor.",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.checker_status, "immutable_history_compatible");
+    assert.deepEqual(report.immutable_history.preserved_task_ids, ["T007"]);
+    const after = readFileSync(boardPath, "utf8");
+    assert.equal(after.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0], historicalBefore);
+    assert.match(after, /active_task: T998/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rebind updates only checks.goalbuddy_binding under the same immutable-history proof", () => {
+  const { root, goalDir } = makeCompletionBoard({ legacyDecision: true, legacyDialect: true });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    addExistingGoalbuddyBinding(boardPath);
+    const { binding, installedCheckerPaths } = makeBindingProof(root);
+    const before = readFileSync(boardPath, "utf8");
+    const historicalBefore = before.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0];
+    const digest = createHash("sha256").update(before).digest("hex");
+
+    const badInstalledChecker = join(root, "installed", "bad-checker.mjs");
+    writeFileSync(badInstalledChecker, "different bytes\n");
+    const rejected = runRebind(root, ["--expected-state-digest", digest, "--allow-immutable-history"], binding, [badInstalledChecker]);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /Installed checker bytes do not match binding/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+
+    const result = runRebind(root, ["--expected-state-digest", digest, "--allow-immutable-history"], binding, installedCheckerPaths);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.mode, "rebind");
+    assert.equal(report.checker_status, "immutable_history_compatible");
+    assert.equal(report.binding.installed_checker_count, 2);
+    assert.deepEqual(report.immutable_history.preserved_task_ids, ["T007"]);
+
+    const after = readFileSync(boardPath, "utf8");
+    assert.equal(after.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0], historicalBefore);
+    assert.equal(after.includes(`source_root: ${binding.source_root}`), true);
+    assert.equal(after.includes(`accepted_commit: ${binding.accepted_commit}`), true);
+    assert.equal(after.includes(`checker_sha256: ${binding.checker_sha256}`), true);
+    assert.equal(after.includes("runtime_doctor_goal_ready: true"), true);
+    const changedOutsideBinding = after
+      .replace(/  goalbuddy_binding:[\s\S]*?(?=  last_verification:)/, "")
+      .replace(/  goalbuddy_binding:[\s\S]*?(?=  last_verification:)/, "");
+    const beforeOutsideBinding = before.replace(/  goalbuddy_binding:[\s\S]*?(?=  last_verification:)/, "");
+    assert.equal(changedOutsideBinding, beforeOutsideBinding);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent same-digest completion writers serialize and cannot overwrite each other", async () => {
+  const { root, goalDir } = makeCompletionBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const firstReceipt = {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "complete",
+      full_outcome_complete: true,
+      summary: "The first serialized writer completed the goal.",
+    };
+    const secondReceipt = {
+      ...firstReceipt,
+      summary: "The competing writer must never overwrite the first.",
+    };
+    const firstReceiptPath = join(root, "first-final.json");
+    const secondReceiptPath = join(root, "second-final.json");
+    writeFileSync(firstReceiptPath, JSON.stringify(firstReceipt));
+    writeFileSync(secondReceiptPath, JSON.stringify(secondReceipt));
+    const transitionArgs = ["complete", "docs/goals/one", "--task", "T999", "--expected-state-digest", beforeDigest, "--json"];
+
+    const firstChild = spawn(process.execPath, [script, ...transitionArgs.slice(0, 2), "--receipt", firstReceiptPath, ...transitionArgs.slice(2)], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, GOALBUDDY_TEST_HOLD_LOCK_MS: "1000" },
+    });
+    const firstResultPromise = captureChild(firstChild);
+    const lockPath = `${dirname(realpathSync(boardPath))}.goalbuddy-transition-lock`;
+    waitForPath(lockPath);
+
+    const secondResult = spawnSync(process.execPath, [script, ...transitionArgs.slice(0, 2), "--receipt", secondReceiptPath, ...transitionArgs.slice(2)], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(secondResult.status, 1, secondResult.stdout);
+    assert.match(secondResult.stderr, /Another GoalBuddy transition is already in progress/);
+
+    const firstResult = await firstResultPromise;
+    assert.equal(firstResult.status, 0, firstResult.stderr || firstResult.stdout);
+    const board = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    assert.deepEqual(board.tasks.find((task) => task.id === "T999").receipt, firstReceipt);
+    assert.equal(existsSync(lockPath), false);
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stdout);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

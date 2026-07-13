@@ -68,6 +68,8 @@ For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
 
 For `apply_receipt`, also provide typed `transition` fields: `task_id`, `status`, `receipt_path`, and `activate`; set task-card fields to `null`. For a Judge decision that introduces exact successor cards, use `apply_amendment` and provide the same fields plus `task_cards_path`, which points to a JSON array of complete PM-approved task objects. When the selected successor is an existing queued Worker placeholder, use `apply_hydration`: set `hydrate_task_id` to that same successor and either set `task_card_path` plus its exact `task_card_sha256` or leave both null to consume the receipt's exact `worker_package`. Do not embed a long task payload in prose and do not send separate `add_task`, task-edit, receipt, or activation requests. Keeper must perform either typed transition with one `apply-receipt.mjs` invocation so package materialization, closeout, activation, checker validation, and rollback share one atomic boundary.
 
+For the reviewed immutable-history path, set request field `immutable_history_authorized: true`; otherwise it must be false and Keeper must not pass the compatibility flag. For `rebind_goalbuddy`, provide `control.binding_path` plus every absolute `control.installed_checker_paths` entry and no task transition. Keeper runs the public rebind command once; direct control editing is forbidden.
+
 Keeper reads the board in its isolated context, applies no judgment, prefers the bundled atomic receipt applier for receipt/status/successor transitions, validates the result, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
 
 Keeper is control-plane, not a task agent: it receives no task card, never returns `goalbuddy_receipt_v1`, never chooses a task or successor, and never edits product files. Do not add Keeper status to `state.yaml`. Run at most one Keeper against a board. Digest drift, ambiguous instructions, unavailable validation, concurrent board activity, unauthorized paths, or a failed checker blocks the operation with no accepted mutation.
@@ -208,6 +210,10 @@ node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --rece
 
 It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Receipt `task_id` and `board_path` identity are preserved losslessly and rejected when they contradict the selected task or board. Other additive receipt evidence is stored as inert data; GoalBuddy does not interpret it as product authority. Keeper invokes the applier from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
 
+Every official board mutation uses one stable per-board transition lock. The lock is held across the fresh `state.yaml` read, expected-digest check, candidate validation, atomic rename, and directory fsync. A competing writer is rejected without changing board bytes; after the active writer finishes, recover with `goalbuddy resume` and use the fresh digest rather than replaying the old request. A stale-lock diagnostic is not permission to delete it blindly: first prove that no board writer is live and preserve the current board bytes.
+
+The immutable-history compatibility path remains explicit. After the recovery procedure's mandatory PM full-board review proves that every current checker error belongs to exactly one already-done task, add `immutable_history_authorized: true` to the Keeper request and let Keeper pass `--allow-immutable-history` to the same atomic command. The runtime compares the exact pre/post checker-error multiset, requires version 2, verifies every referenced task remains done, and compares each referenced task's raw YAML block byte-for-byte. It rejects global errors, live-tail errors, missing or multi-task attribution, changed history, new/different errors, digest drift, and malformed state. A successful compatibility report is compact: baseline error count/digest, preserved task IDs, unchanged-history proof, and zero live-tail errors. It never makes the raw checker green and never authorizes historical rewriting.
+
 When a Judge amendment creates successors that are not yet on the board, put the exact complete task objects in a temporary JSON array and apply the entire transition once:
 
 ```bash
@@ -248,7 +254,23 @@ When the final active Judge or PM audit proves the full owner outcome, finish th
 goalbuddy complete docs/goals/<slug> --task T### --receipt final.json --expected-state-digest <sha256> --json
 ```
 
-The final receipt must preserve `task_id` and `board_path` and contain `result: done`, `decision: complete`, and `full_outcome_complete: true`. The transition requires no other queued or active task, preserves task-level transition evidence, and atomically sets the task and goal done with `active_task: null`. Do not split final receipt application from goal completion.
+The final receipt must preserve `task_id` and `board_path` and contain `result: done`, `decision: complete`, and `full_outcome_complete: true`. The transition requires no other queued or active task, preserves task-level transition evidence, and atomically sets the task and goal done with `active_task: null`. The shared per-board lock prevents two callers holding the same prior digest from installing competing final receipts. Do not split final receipt application from goal completion.
+
+### Rebinding a board to an accepted GoalBuddy runtime
+
+When an existing board pins `checks.goalbuddy_binding` to an older accepted runtime, never hand-edit the control block. After the new local checkout is committed and clean, both installed checker copies are refreshed and byte-identical, both doctors are green, and the PM has authorized the exact replacement object, Keeper runs:
+
+```bash
+goalbuddy rebind docs/goals/<slug> \
+  --binding goalbuddy-binding.json \
+  --installed-checker <absolute-codex-checker-path> \
+  --installed-checker <absolute-claude-checker-path> \
+  --expected-state-digest <sha256> \
+  [--allow-immutable-history] \
+  --json
+```
+
+The binding JSON has exactly `source_root`, `accepted_commit`, `checker_path`, `checker_sha256`, `installed_checker_sha256`, `runtime_doctor_goal_ready`, and `cached_marketplace_checker_authoritative`. The command requires the source checkout to be clean at the exact commit, the source checker to live inside that checkout and match its hash, every supplied installed checker to match the same bytes, doctor readiness to be true, and cached-marketplace authority to be false. It replaces only `checks.goalbuddy_binding` under the shared lock and the same immutable-history proof. Missing control state, unknown keys, stale digests, dirty source, mismatched commits or bytes, and any live-tail checker error preserve board bytes.
 
 Subagent idle signals and receipt messages can arrive out of order. Treat a bare idle notification as "receipt may still be in flight": check again briefly before nudging, and verify against the working tree (for example `git status`) rather than assuming the receipt is missing. A worker with uncommitted changes and no delivered receipt has not reached a valid stopping state.
 

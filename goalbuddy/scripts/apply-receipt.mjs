@@ -3,8 +3,8 @@
 // Fail-closed: the result is validated with check-goal-state.mjs and reverted on errors.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
@@ -24,6 +24,8 @@ if (isDirectRun()) {
       console.log(`Recorded exact-human wait for ${report.task_id}; the goal is blocked.`);
     } else if (report.mode === "complete") {
       console.log(`Recorded final completion for ${report.task_id}; the goal is done.`);
+    } else if (report.mode === "rebind") {
+      console.log(`Rebound checks.goalbuddy_binding at ${report.after_digest}.`);
     } else if (report.ok) {
       console.log(`Recorded ${report.task_id} as ${report.status}; active_task is now ${report.active_task}.`);
     } else {
@@ -42,17 +44,22 @@ function isDirectRun() {
 }
 
 export function parseApplyArgs(args) {
-  const modes = new Set(["receipt", "wait", "reply", "complete"]);
-  const options = { mode: modes.has(args[0]) ? args[0] : "receipt", goalRoot: "", taskId: "", receiptPath: "", replyPath: "", addTasksPath: "", hydrateTaskId: "", taskCardPath: "", taskCardSha256: "", expectedStateDigest: "", status: "", activate: "", json: false };
+  const modes = new Set(["receipt", "wait", "reply", "complete", "rebind"]);
+  const options = { mode: modes.has(args[0]) ? args[0] : "receipt", goalRoot: "", taskId: "", receiptPath: "", replyPath: "", bindingPath: "", installedCheckerPaths: [], addTasksPath: "", hydrateTaskId: "", taskCardPath: "", taskCardSha256: "", expectedStateDigest: "", status: "", activate: "", allowImmutableHistory: false, json: false };
   for (let index = modes.has(args[0]) ? 1 : 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
+    else if (arg === "--allow-immutable-history") options.allowImmutableHistory = true;
     else if (arg === "--task") options.taskId = args[++index] || "";
     else if (arg.startsWith("--task=")) options.taskId = arg.slice("--task=".length);
     else if (arg === "--receipt") options.receiptPath = args[++index] || "";
     else if (arg.startsWith("--receipt=")) options.receiptPath = arg.slice("--receipt=".length);
     else if (arg === "--reply-file") options.replyPath = args[++index] || "";
     else if (arg.startsWith("--reply-file=")) options.replyPath = arg.slice("--reply-file=".length);
+    else if (arg === "--binding") options.bindingPath = args[++index] || "";
+    else if (arg.startsWith("--binding=")) options.bindingPath = arg.slice("--binding=".length);
+    else if (arg === "--installed-checker") options.installedCheckerPaths.push(args[++index] || "");
+    else if (arg.startsWith("--installed-checker=")) options.installedCheckerPaths.push(arg.slice("--installed-checker=".length));
     else if (arg === "--add-tasks") options.addTasksPath = args[++index] || "";
     else if (arg.startsWith("--add-tasks=")) options.addTasksPath = arg.slice("--add-tasks=".length);
     else if (arg === "--hydrate-task") options.hydrateTaskId = args[++index] || "";
@@ -71,21 +78,31 @@ export function parseApplyArgs(args) {
     else if (!options.goalRoot) options.goalRoot = arg;
     else throw new Error(`Unexpected argument: ${arg}`);
   }
-  if (!options.goalRoot || !options.taskId || (options.mode !== "reply" && !options.receiptPath) || (options.mode === "reply" && !options.replyPath)) {
+  if (!options.goalRoot) {
+    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--expected-state-digest <hex>] [--json]");
+  }
+  if (options.mode === "rebind") {
+    if (!options.bindingPath || options.installedCheckerPaths.length === 0 || options.installedCheckerPaths.some((path) => !path) || options.taskId || options.receiptPath || options.replyPath) {
+      throw new Error("Usage: node apply-receipt.mjs rebind <goal-root> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <hex> [--allow-immutable-history] [--json]");
+    }
+  } else if (!options.taskId || (options.mode !== "reply" && !options.receiptPath) || (options.mode === "reply" && !options.replyPath)) {
     throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--expected-state-digest <hex>] [--status done|blocked] [--activate T###|none] [--json]");
   }
-  if (["wait", "reply", "complete"].includes(options.mode) && !options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
+  if (["wait", "reply", "complete", "rebind"].includes(options.mode) && !options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
   if (options.mode !== "receipt" && (options.addTasksPath || options.hydrateTaskId || options.taskCardPath || options.taskCardSha256 || options.status || options.activate)) {
     throw new Error(`${options.mode} does not accept receipt-transition task, status, or activation options.`);
   }
   if (options.mode === "reply" && options.receiptPath) throw new Error("reply accepts --reply-file, not --receipt.");
   if (options.mode !== "reply" && options.replyPath) throw new Error(`${options.mode} does not accept --reply-file.`);
+  if (options.mode !== "rebind" && options.bindingPath) throw new Error(`${options.mode} does not accept --binding.`);
+  if (options.mode !== "rebind" && options.installedCheckerPaths.length > 0) throw new Error(`${options.mode} does not accept --installed-checker.`);
   if (options.addTasksPath && options.hydrateTaskId) throw new Error("--add-tasks and --hydrate-task are mutually exclusive atomic transitions.");
   if (options.taskCardPath && !options.hydrateTaskId) throw new Error("--task-card requires --hydrate-task T###.");
   if (options.taskCardPath && !/^[a-f0-9]{64}$/.test(options.taskCardSha256)) throw new Error("--task-card requires --task-card-sha256 with exactly 64 lowercase hex characters.");
   if (options.taskCardSha256 && !options.taskCardPath) throw new Error("--task-card-sha256 requires --task-card.");
   if (options.hydrateTaskId && options.activate !== options.hydrateTaskId) throw new Error("--hydrate-task must name the same task as --activate.");
   if (options.expectedStateDigest && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) throw new Error("--expected-state-digest must contain exactly 64 lowercase hex characters.");
+  if (options.allowImmutableHistory && !options.expectedStateDigest) throw new Error("--allow-immutable-history requires --expected-state-digest.");
   return options;
 }
 
@@ -93,13 +110,16 @@ export function applyTransition(options) {
   if (options.mode === "wait") return enterExactHumanWait(options);
   if (options.mode === "reply") return resumeExactHumanReply(options);
   if (options.mode === "complete") return completeGoal(options);
+  if (options.mode === "rebind") return rebindGoalbuddy(options);
   return applyReceipt(options);
 }
 
 export function applyReceipt(options) {
-  const goalRoot = resolve(options.goalRoot);
-  const statePath = basename(goalRoot) === "state.yaml" ? goalRoot : join(goalRoot, "state.yaml");
-  if (!existsSync(statePath)) throw new Error(`state file not found: ${statePath}`);
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => applyReceiptUnderLock(options, statePath));
+}
+
+function applyReceiptUnderLock(options, statePath) {
   const receipt = loadReceipt(options.receiptPath);
   validateReceiptIdentity(receipt, options.taskId, statePath);
   const taskCards = options.addTasksPath ? loadTaskCards(options.addTasksPath) : [];
@@ -107,10 +127,8 @@ export function applyReceipt(options) {
   const status = options.status || (receipt.result === "done" ? "done" : "blocked");
   if (!["done", "blocked"].includes(status)) throw new Error(`Unsupported --status: ${status}`);
 
-  const original = readFileSync(statePath, "utf8");
-  const originalDigest = sha256(original);
-  if (options.expectedStateDigest && options.expectedStateDigest !== originalDigest) throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${originalDigest}.`);
-  let lines = original.replace(/\r\n/g, "\n").split("\n");
+  const context = loadTransitionContext(options, statePath, { parseDocument: false });
+  let lines = context.original.replace(/\r\n/g, "\n").split("\n");
 
   if (taskCards.length) lines = appendTaskCards(lines, taskCards);
   if (hydration) lines = hydratePlaceholderTask(lines, options.hydrateTaskId, hydration);
@@ -123,29 +141,24 @@ export function applyReceipt(options) {
   lines = setTopLevel(lines, "active_task", nextActive);
 
   const candidate = withFinalNewline(lines.join("\n"));
-  const candidatePath = `${statePath}.goalbuddy-candidate-${process.pid}`;
-  const check = spawnSync(process.execPath, [join(scriptDir, "check-goal-state.mjs"), statePath, "--candidate-stdin"], { encoding: "utf8", input: candidate });
-  let checkerReport = null;
-  try {
-    checkerReport = JSON.parse(check.stdout);
-  } catch {
-    checkerReport = { ok: false, errors: [`checker produced unreadable output: ${(check.stderr || check.stdout || "").slice(0, 300)}`] };
-  }
-
-  if (!checkerReport.ok) {
-    return { ok: false, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), hydrated_task_id: hydration ? options.hydrateTaskId : null, hydration_source: hydration?.source ?? null, hydration_sha256: hydration?.sha256 ?? null, status, active_task: nextActive, reverted: true, checker_errors: checkerReport.errors || [] };
-  }
-  if (sha256(readFileSync(statePath)) !== originalDigest) {
-    throw new Error("state.yaml changed during atomic receipt transition; candidate was not installed.");
-  }
-  writeAtomic(candidatePath, candidate);
-  renameSync(candidatePath, statePath);
-  fsyncDirectory(dirname(statePath));
-  return { ok: true, task_id: options.taskId, added_task_ids: taskCards.map((task) => task.id), hydrated_task_id: hydration ? options.hydrateTaskId : null, hydration_source: hydration?.source ?? null, hydration_sha256: hydration?.sha256 ?? null, status, active_task: nextActive, reverted: false, before_digest: originalDigest, after_digest: sha256(candidate), checker_warnings: checkerReport.warnings || [] };
+  return installValidatedCandidate(context, candidate, {
+    task_id: options.taskId,
+    added_task_ids: taskCards.map((task) => task.id),
+    hydrated_task_id: hydration ? options.hydrateTaskId : null,
+    hydration_source: hydration?.source ?? null,
+    hydration_sha256: hydration?.sha256 ?? null,
+    status,
+    active_task: nextActive,
+  });
 }
 
 export function enterExactHumanWait(options) {
-  const context = loadTransitionContext(options);
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => enterExactHumanWaitUnderLock(options, statePath));
+}
+
+function enterExactHumanWaitUnderLock(options, statePath) {
+  const context = loadTransitionContext(options, statePath);
   const receipt = loadReceipt(options.receiptPath);
   validateExactHumanWaitReceipt(receipt, options.taskId, context.statePath);
   if (context.document.goal?.status !== "active") throw new Error("wait requires goal.status active.");
@@ -174,7 +187,12 @@ export function enterExactHumanWait(options) {
 }
 
 export function resumeExactHumanReply(options) {
-  const context = loadTransitionContext(options);
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => resumeExactHumanReplyUnderLock(options, statePath));
+}
+
+function resumeExactHumanReplyUnderLock(options, statePath) {
+  const context = loadTransitionContext(options, statePath);
   const reply = loadExactReply(options.replyPath);
   if (context.document.goal?.status !== "blocked") throw new Error("reply requires goal.status blocked.");
   if (context.document.active_task !== null) throw new Error("reply requires active_task: null.");
@@ -239,7 +257,12 @@ export function resumeExactHumanReply(options) {
 }
 
 export function completeGoal(options) {
-  const context = loadTransitionContext(options);
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => completeGoalUnderLock(options, statePath));
+}
+
+function completeGoalUnderLock(options, statePath) {
+  const context = loadTransitionContext(options, statePath);
   const receipt = loadReceipt(options.receiptPath);
   if (!Object.hasOwn(receipt, "task_id") || !Object.hasOwn(receipt, "board_path")) {
     throw new Error("complete requires receipt task_id and board_path identity.");
@@ -276,17 +299,71 @@ export function completeGoal(options) {
   });
 }
 
-function loadTransitionContext(options) {
-  const goalRoot = resolve(options.goalRoot);
+export function rebindGoalbuddy(options) {
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => rebindGoalbuddyUnderLock(options, statePath));
+}
+
+function rebindGoalbuddyUnderLock(options, statePath) {
+  const context = loadTransitionContext(options, statePath, { parseDocument: false });
+  const binding = loadGoalbuddyBinding(options.bindingPath, options.installedCheckerPaths);
+  let lines = context.original.replace(/\r\n/g, "\n").split("\n");
+  lines = replaceSectionNode(lines, "checks", "goalbuddy_binding", binding);
+  const candidate = withFinalNewline(lines.join("\n"));
+  return installValidatedCandidate(context, candidate, {
+    mode: "rebind",
+    active_task: stateTopScalar(context.original, "active_task"),
+    binding: {
+      accepted_commit: binding.accepted_commit,
+      checker_sha256: binding.checker_sha256,
+      installed_checker_count: options.installedCheckerPaths.length,
+    },
+  });
+}
+
+function resolveStatePath(goalRootValue) {
+  const goalRoot = resolve(goalRootValue);
   const statePath = basename(goalRoot) === "state.yaml" ? goalRoot : join(goalRoot, "state.yaml");
   if (!existsSync(statePath)) throw new Error(`state file not found: ${statePath}`);
+  return statePath;
+}
+
+function withStateTransitionLock(statePath, transition) {
+  const lockPath = `${dirname(realpathSync(statePath))}.goalbuddy-transition-lock`;
+  try {
+    mkdirSync(lockPath, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(`Another GoalBuddy transition is already in progress for ${statePath}. Wait for it to finish, then resume from a fresh state digest. If no writer is live, remove the stale lock only after verifying board bytes.`);
+    }
+    throw error;
+  }
+
+  try {
+    holdTransitionLockForTest();
+    return transition();
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
+function holdTransitionLockForTest() {
+  const raw = process.env.GOALBUDDY_TEST_HOLD_LOCK_MS;
+  if (raw === undefined) return;
+  if (!/^\d+$/.test(raw) || Number(raw) > 5000) {
+    throw new Error("GOALBUDDY_TEST_HOLD_LOCK_MS must be an integer from 0 through 5000.");
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(raw));
+}
+
+function loadTransitionContext(options, statePath, { parseDocument = true } = {}) {
   const original = readFileSync(statePath, "utf8");
   const originalDigest = sha256(original);
-  if (options.expectedStateDigest !== originalDigest) {
+  if (options.expectedStateDigest && options.expectedStateDigest !== originalDigest) {
     throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${originalDigest}.`);
   }
-  const document = parseGoalStateText(original, { allowFallback: false });
-  return { statePath, original, originalDigest, document };
+  const document = parseDocument ? parseGoalStateText(original, { allowFallback: false }) : null;
+  return { statePath, original, originalDigest, document, allowImmutableHistory: options.allowImmutableHistory === true };
 }
 
 function selectedTask(document, taskId) {
@@ -328,25 +405,182 @@ function loadExactReply(replyPath) {
   return parsed.reply;
 }
 
-function installValidatedCandidate(context, candidate, report) {
-  const check = spawnSync(process.execPath, [join(scriptDir, "check-goal-state.mjs"), context.statePath, "--candidate-stdin"], { encoding: "utf8", input: candidate });
-  let checkerReport = null;
-  try {
-    checkerReport = JSON.parse(check.stdout);
-  } catch {
-    checkerReport = { ok: false, errors: [`checker produced unreadable output: ${(check.stderr || check.stdout || "").slice(0, 300)}`] };
+function loadGoalbuddyBinding(bindingPath, installedCheckerPaths) {
+  const binding = JSON.parse(readFileSync(resolve(bindingPath), "utf8"));
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    throw new Error(`${bindingPath} must contain exactly one GoalBuddy binding object.`);
   }
-  if (!checkerReport.ok) {
-    return { ...report, ok: false, reverted: true, before_digest: context.originalDigest, after_digest: context.originalDigest, checker_errors: checkerReport.errors || [] };
+  const requiredKeys = [
+    "source_root",
+    "accepted_commit",
+    "checker_path",
+    "checker_sha256",
+    "installed_checker_sha256",
+    "runtime_doctor_goal_ready",
+    "cached_marketplace_checker_authoritative",
+  ];
+  const actualKeys = Object.keys(binding);
+  const missing = requiredKeys.filter((key) => !actualKeys.includes(key));
+  const extras = actualKeys.filter((key) => !requiredKeys.includes(key));
+  if (missing.length > 0 || extras.length > 0) {
+    throw new Error(`GoalBuddy binding keys must be exact; missing [${missing.join(", ")}], unexpected [${extras.join(", ")}].`);
+  }
+  if (!isAbsolute(binding.source_root) || !existsSync(binding.source_root) || !statSync(binding.source_root).isDirectory()) {
+    throw new Error("GoalBuddy binding source_root must be an existing absolute directory.");
+  }
+  if (!isAbsolute(binding.checker_path) || !existsSync(binding.checker_path) || !statSync(binding.checker_path).isFile()) {
+    throw new Error("GoalBuddy binding checker_path must be an existing absolute file.");
+  }
+  const sourceRoot = realpathSync(binding.source_root);
+  const checkerPath = realpathSync(binding.checker_path);
+  if (checkerPath !== sourceRoot && !checkerPath.startsWith(`${sourceRoot}${sep}`)) {
+    throw new Error("GoalBuddy binding checker_path must resolve inside source_root.");
+  }
+  const head = spawnSync("git", ["-C", sourceRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
+  if (head.status !== 0) throw new Error("GoalBuddy binding source_root must be a readable Git checkout.");
+  const actualCommit = head.stdout.trim();
+  if (!/^[a-f0-9]{40,64}$/.test(binding.accepted_commit) || binding.accepted_commit !== actualCommit) {
+    throw new Error(`GoalBuddy binding accepted_commit must equal source HEAD ${actualCommit}.`);
+  }
+  const sourceStatus = spawnSync("git", ["-C", sourceRoot, "status", "--porcelain=v1"], { encoding: "utf8" });
+  if (sourceStatus.status !== 0 || sourceStatus.stdout.trim() !== "") {
+    throw new Error("GoalBuddy binding source_root must be clean before it can be accepted.");
+  }
+  if (!/^[a-f0-9]{64}$/.test(binding.checker_sha256) || sha256(readFileSync(checkerPath)) !== binding.checker_sha256) {
+    throw new Error("GoalBuddy binding checker_sha256 does not match checker_path bytes.");
+  }
+  if (binding.installed_checker_sha256 !== binding.checker_sha256) {
+    throw new Error("GoalBuddy binding installed_checker_sha256 must equal checker_sha256.");
+  }
+  for (const installedPath of installedCheckerPaths) {
+    if (!isAbsolute(installedPath) || !existsSync(installedPath) || !statSync(installedPath).isFile()) {
+      throw new Error(`Installed checker must be an existing absolute file: ${installedPath}.`);
+    }
+    if (sha256(readFileSync(realpathSync(installedPath))) !== binding.installed_checker_sha256) {
+      throw new Error(`Installed checker bytes do not match binding: ${installedPath}.`);
+    }
+  }
+  if (binding.runtime_doctor_goal_ready !== true || binding.cached_marketplace_checker_authoritative !== false) {
+    throw new Error("GoalBuddy binding requires runtime_doctor_goal_ready true and cached_marketplace_checker_authoritative false.");
+  }
+  return binding;
+}
+
+function installValidatedCandidate(context, candidate, report) {
+  const checkerReport = runChecker(context.statePath, candidate);
+  const compatibility = checkerReport.ok
+    ? { ok: true, used: false }
+    : context.allowImmutableHistory
+      ? immutableHistoryCompatibility(context, candidate, checkerReport)
+      : { ok: false, reason: "Checker-red history requires explicit --allow-immutable-history after PM full-board review." };
+  if (!checkerReport.ok && !compatibility.ok) {
+    return {
+      ...report,
+      ok: false,
+      reverted: true,
+      before_digest: context.originalDigest,
+      after_digest: context.originalDigest,
+      checker_errors: checkerReport.errors || [],
+      immutable_history_rejection: compatibility.reason,
+    };
   }
   if (sha256(readFileSync(context.statePath)) !== context.originalDigest) {
-    throw new Error("state.yaml changed during atomic exact-human transition; candidate was not installed.");
+    throw new Error("state.yaml changed during the serialized transition; candidate was not installed.");
   }
   const candidatePath = `${context.statePath}.goalbuddy-candidate-${process.pid}`;
   writeAtomic(candidatePath, candidate);
   renameSync(candidatePath, context.statePath);
   fsyncDirectory(dirname(context.statePath));
-  return { ...report, ok: true, reverted: false, before_digest: context.originalDigest, after_digest: sha256(candidate), checker_warnings: checkerReport.warnings || [] };
+  return {
+    ...report,
+    ok: true,
+    reverted: false,
+    before_digest: context.originalDigest,
+    after_digest: sha256(candidate),
+    checker_status: checkerReport.ok ? "pass" : "immutable_history_compatible",
+    checker_warnings: checkerReport.warnings || [],
+    immutable_history: compatibility.used ? compatibility.proof : null,
+  };
+}
+
+function runChecker(statePath, candidate) {
+  const check = spawnSync(process.execPath, [join(scriptDir, "check-goal-state.mjs"), statePath, "--candidate-stdin"], { encoding: "utf8", input: candidate });
+  try {
+    return JSON.parse(check.stdout);
+  } catch {
+    return { ok: false, errors: [`checker produced unreadable output: ${(check.stderr || check.stdout || "").slice(0, 300)}`], warnings: [] };
+  }
+}
+
+function immutableHistoryCompatibility(context, candidate, candidateReport) {
+  const baselineReport = runChecker(context.statePath, context.original);
+  if (baselineReport.ok) return { ok: false, reason: "The current board is checker-green, so candidate checker errors cannot be grandfathered." };
+  if (baselineReport.version !== 2 || candidateReport.version !== 2) {
+    return { ok: false, reason: "Immutable-history compatibility requires version 2 before and after the transition." };
+  }
+  const baselineErrors = Array.isArray(baselineReport.errors) ? baselineReport.errors : [];
+  const candidateErrors = Array.isArray(candidateReport.errors) ? candidateReport.errors : [];
+  if (baselineErrors.length === 0 || !sameStringMultiset(baselineErrors, candidateErrors)) {
+    return { ok: false, reason: "Candidate checker errors differ from the exact pre-transition error set." };
+  }
+
+  const historicalTaskIds = new Set();
+  for (const error of baselineErrors) {
+    const taskIds = [...new Set(String(error).match(/\bT\d{3}\b/g) || [])];
+    if (taskIds.length !== 1) {
+      return { ok: false, reason: `Checker error is not confined to exactly one task: ${error}` };
+    }
+    const taskId = taskIds[0];
+    if (rawTaskStatus(context.original, taskId) !== "done" || rawTaskStatus(candidate, taskId) !== "done") {
+      return { ok: false, reason: `Checker error touches live or missing task ${taskId}.` };
+    }
+    if (rawTaskBlock(context.original, taskId) !== rawTaskBlock(candidate, taskId)) {
+      return { ok: false, reason: `Historical task ${taskId} changed byte content.` };
+    }
+    historicalTaskIds.add(taskId);
+  }
+  return {
+    ok: true,
+    used: true,
+    proof: {
+      baseline_error_count: baselineErrors.length,
+      baseline_error_digest: sha256(JSON.stringify([...baselineErrors].sort())),
+      preserved_task_ids: [...historicalTaskIds].sort(),
+      historical_task_bytes_unchanged: true,
+      live_tail_checker_errors: 0,
+    },
+  };
+}
+
+function sameStringMultiset(left, right) {
+  if (left.length !== right.length) return false;
+  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+}
+
+function rawTaskBlock(text, taskId) {
+  const startPattern = new RegExp(`^  - id:\\s*"?${taskId}"?\\s*(?:\\r?\\n|$)`, "m");
+  const start = startPattern.exec(text);
+  if (!start) return null;
+  const contentStart = start.index + start[0].length;
+  const nextBoundary = /^(?:  - id:|\S)/m.exec(text.slice(contentStart));
+  const end = nextBoundary ? contentStart + nextBoundary.index : text.length;
+  return text.slice(start.index, end);
+}
+
+function rawTaskStatus(text, taskId) {
+  const block = rawTaskBlock(text, taskId);
+  if (block === null) return null;
+  const matches = [...block.matchAll(/^    status:\s*"?([A-Za-z_]+)"?\s*$/gm)];
+  return matches.length === 1 ? matches[0][1] : null;
+}
+
+function stateTopScalar(text, key) {
+  const matches = [...text.matchAll(new RegExp(`^${key}:\\s*(.*?)\\s*$`, "gm"))];
+  if (matches.length !== 1) throw new Error(`state.yaml must contain exactly one top-level ${key}.`);
+  const value = matches[0][1];
+  if (value === "null") return null;
+  if (value.startsWith('"')) return JSON.parse(value);
+  return value;
 }
 
 function loadReceipt(receiptPath) {
@@ -607,6 +841,24 @@ function setNestedScalar(lines, section, key, value) {
     }
   }
   throw new Error(`state.yaml ${section} has no "${key}" field.`);
+}
+
+function replaceSectionNode(lines, section, key, value) {
+  const sectionStart = lines.findIndex((line) => new RegExp(`^${section}:\\s*$`).test(line));
+  if (sectionStart === -1) throw new Error(`state.yaml has no top-level "${section}" section.`);
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^\S/.test(lines[index])) {
+      sectionEnd = index;
+      break;
+    }
+  }
+  const fieldOffset = lines.slice(sectionStart + 1, sectionEnd).findIndex((line) => new RegExp(`^  ${key}:`).test(line));
+  if (fieldOffset === -1) throw new Error(`state.yaml ${section} has no "${key}" field to rebind.`);
+  const fieldStart = sectionStart + 1 + fieldOffset;
+  let fieldEnd = fieldStart + 1;
+  while (fieldEnd < sectionEnd && !/^  \S/.test(lines[fieldEnd])) fieldEnd += 1;
+  return [...lines.slice(0, fieldStart), ...serializeMappingEntry(key, value, 2), ...lines.slice(fieldEnd)];
 }
 
 export function toYamlLines(value, indent) {

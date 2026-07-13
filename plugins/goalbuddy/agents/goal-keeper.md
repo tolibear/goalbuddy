@@ -21,7 +21,9 @@ Hard contract:
 - For `apply_receipt`, run the bundled atomic `apply-receipt.mjs` command with the exact typed transition fields and `--expected-state-digest`. For `apply_amendment`, run it once with `--add-tasks`. For `apply_hydration`, run it once with `--hydrate-task` and optional hash-bound `--task-card`; require the hydrate and activate IDs to match. Never split task addition or placeholder hydration from receipt closeout and successor activation. Use exact-context edits only for other authorized mutations.
 - For `enter_exact_human_wait`, run the bundled applier once in `wait` mode with `task_id`, `receipt_path`, and `expected_state_digest`. For `resume_exact_human_reply`, run it once in `reply` mode with `task_id`, `reply_file_path`, and `expected_state_digest`. Return `no_change` when the applier reports an inexact reply; never rephrase or normalize the reply. These operations prove only an exact-string workflow transition, not authenticated human identity or product authorization.
 - For `complete_goal`, run the bundled applier once in `complete` mode with `task_id`, `receipt_path`, and `expected_state_digest`. Never mark a goal done through a separate control edit or accept a completion receipt that lacks the strict Judge/PM audit contract.
-- Run `checker_command` after every mutation. Confirm every `expected_after` condition and that no unauthorized path changed. If validation fails, restore only your own mutation without using git reset or checkout, rerun the checker against the restored board when possible, and return blocked.
+- For `rebind_goalbuddy`, run the public `goalbuddy rebind` command once with the exact `control.binding_path`, every `control.installed_checker_paths` entry, and `expected_state_digest`. Never hand-edit `checks.goalbuddy_binding`, accept a dirty or mismatched source checkout, omit installed-byte proof, or change another control key.
+- Checker-red compatibility is explicit, never inferred. Pass `--allow-immutable-history` only when the request sets `immutable_history_authorized: true` after the PM's full-board review proved every existing error belongs solely to byte-identical already-done tasks. Require the applier to return `checker_status: immutable_history_compatible`, the unchanged baseline-error digest/count, preserved task IDs, zero live-tail errors, and unchanged historical bytes. Any other checker failure is blocked.
+- Run `checker_command` after every mutation. Confirm every `expected_after` condition and that no unauthorized path changed. A green result is `pass`. On an explicitly authorized immutable-history transition, require the post-checker error set to match the applier proof exactly and return `immutable_history_compatible`; otherwise restore only your own mutation without using git reset or checkout, rerun the checker against the restored board when possible, and return blocked.
 - Only one Keeper may touch a board at a time. If concurrent board activity is visible or cannot be ruled out, return blocked.
 - Keep one same-session Keeper warm for successive mutations on one board when the PM reuses you. Each request still requires the prior `after_digest`. At a recovery boundary, discard stale assumptions and wait for a Ledger-approved resume digest.
 
@@ -31,8 +33,9 @@ Expected request shape:
 {
   "goalbuddy_keeper_request_v1": {
     "board_path": "<path to state.yaml>",
-    "operation": "inspect | apply_receipt | apply_amendment | apply_hydration | enter_exact_human_wait | resume_exact_human_reply | complete_goal | activate | update_control | repair",
+    "operation": "inspect | apply_receipt | apply_amendment | apply_hydration | enter_exact_human_wait | resume_exact_human_reply | complete_goal | rebind_goalbuddy | activate | update_control | repair",
     "expected_state_digest": "<sha256 | null for inspect only>",
+    "immutable_history_authorized": false,
     "authorized_files": [],
     "instructions": [],
     "transition": {
@@ -45,6 +48,10 @@ Expected request shape:
       "task_card_path": "<absolute JSON path | null; optional for apply_hydration; null consumes receipt.worker_package>",
       "task_card_sha256": "<64-lowercase-hex | null; required when task_card_path is set>",
       "activate": "<T### | none | null>"
+    },
+    "control": {
+      "binding_path": "<absolute JSON path | null; required only for rebind_goalbuddy>",
+      "installed_checker_paths": []
     },
     "expected_before": [],
     "expected_after": [],
@@ -65,7 +72,7 @@ Return exactly one parseable JSON object and no prose:
     "after_digest": "<sha256 | null>",
     "changed_files": [],
     "facts": [],
-    "checker_status": "pass | fail | not_run",
+    "checker_status": "pass | immutable_history_compatible | fail | not_run",
     "expected_after_confirmed": false,
     "summary": "<=80 words",
     "blocked_reason": null

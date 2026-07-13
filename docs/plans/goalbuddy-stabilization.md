@@ -28,6 +28,13 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
 - [x] (2026-07-13 02:38Z) Added strict lifecycle, malformed-input, mismatch, replay, final-receipt, checker, CLI, resume, Keeper-policy, and compiler-admission regressions; synchronized canonical plugin mirrors and rebuilt the byte-exact compiler archive.
 - [x] (2026-07-13 02:43Z) Passed the 111-test focused GoalBuddy lane, full 158-test GoalBuddy check, all 50 compiler tests, both compiler runtime validators, mirror check, and archive hygiene gate.
 - [x] (2026-07-13 02:45Z) Created scoped compiler commit `89d9af9b329167e8522f10eff7b2a77ba9996e5b`; the GoalBuddy commit containing this living plan remains the final commit action.
+- [x] (2026-07-13 04:35Z) Ran the requested normal four-seat Council ship gate over final completion. The Chairman rejected the concurrency overclaim: digest rechecking did not serialize two writers that validated the same prior state.
+- [x] (2026-07-13 04:41Z) Serialized every official board mutation with one stable per-board lock held through fresh read, digest check, candidate validation, rename, and directory fsync; added a deterministic same-digest two-writer regression and passed the 54-test focused apply/checker lane.
+- [x] (2026-07-13 04:45Z) Synchronized canonical/plugin mirrors, passed the full 162-test GoalBuddy check, all 50 compiler tests, both runtime preflights, both compiler skill validators, and `git diff --check`.
+- [x] (2026-07-13 04:55Z) Confirmed the paused cloud board has exactly eight checker errors, each tied to an already-done Judge task, while its historical receipt indentation is checker-tolerated but not strict-parser compatible; preserved its exact digest and bytes.
+- [x] (2026-07-13 05:05Z) Added explicit immutable-history admission for receipt transitions, a typed `goalbuddy rebind` control mutation, Keeper request/receipt support, strict installed-checker/source proof, and fail-closed coverage for implicit use, live-tail errors, changed error sets, legacy parser dialect, byte preservation, and bad installed bytes.
+- [x] (2026-07-13 05:07Z) Synchronized all canonical/plugin mirrors and passed the 120-test focused apply/checker/CLI/policy lane.
+- [x] (2026-07-13 05:08Z) Passed the final 167-test GoalBuddy suite, all 50 compiler tests, both compiler skill validators, mirror equality, and `git diff --check` after the complete compatibility correction.
 
 ## Surprises & Discoveries
 
@@ -49,6 +56,10 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
   Evidence: The first full compiler verification failed `test_package_archive.py` because the archive contained six additional directory members. Rebuilding with `zip -FS -D -r` removed directory entries; the focused archive test and the second literal 48-test compiler run passed.
 - Observation: The clean-room canary can validate and project a manually shaped exact-human wait, but the official applier cannot enter that state atomically.
   Evidence: The official terminal-wait application reverted byte-for-byte because it left `goal.status: active`; the preserved board digest is `3994129e221bc9aac2988be3a89afaafeab701bcccb4cfc87ea24716298c94e2`. No official exact-reply reactivation command exists.
+- Observation: A compare-before-rename digest check detects an intervening completed write but does not itself exclude two writers between their shared read and their separate renames.
+  Evidence: The normal Council ship gate traced the public completion path and produced a no-ship Chairman verdict. Both writers could read the same digest, validate distinct candidates, pass their pre-rename checks, and then install sequentially; the second rename would overwrite the first accepted receipt.
+- Observation: The real cloud board's live tail is checker-clean relative to exactly eight frozen decision-vocabulary errors, but the strict board parser rejects a historical indentless sequence at line 3628 that the checker deliberately tolerates.
+  Evidence: The canonical checker reports only T007, T009, T001, T035, T041, T047, T055, and T056 legacy Judge decisions; each task is already `done`. A direct strict parse stops at the preserved `evidence` sequence. Compatibility proof therefore uses the checker plus raw task status/block bytes, never lossy parsed semantics.
 
 ## Decision Log
 
@@ -76,6 +87,15 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
 - Decision: Store completed exact-reply transitions under task-level `transition_evidence.exact_human_replies` and keep the live `receipt` slot free for the task's eventual final receipt.
   Rationale: This preserves the complete wait receipt and compact transition hashes through final receipt replacement without claiming authenticated human identity or product authority.
   Date/Author: 2026-07-13 / Worker T009
+- Decision: Serialize all mutations at the existing `apply-receipt.mjs` persistence boundary with one stable sibling lock per canonical goal directory.
+  Rationale: The lock closes the same-digest overwrite race without a service, database, secondary state, schema migration, or compiler change. Contention fails closed and requires a fresh resume digest; a possibly stale lock is never removed automatically.
+  Date/Author: 2026-07-13 / PM corrective verification
+- Decision: Make legacy-history admission explicit with `--allow-immutable-history`, and accept it only when the exact checker-error multiset survives and every referenced done-task raw block is byte-identical.
+  Rationale: This permits a verified live tail to move without rewriting history, while global, ambiguous, live, malformed, added, removed, or changed errors still fail closed. Raw bytes avoid granting the tolerant parser authority to reinterpret historical receipts.
+  Date/Author: 2026-07-13 / PM compatibility correction
+- Decision: Rebind `checks.goalbuddy_binding` only through typed `goalbuddy rebind` plus Keeper `rebind_goalbuddy`.
+  Rationale: A single locked control mutation can verify exact digest, clean source commit, canonical checker location/hash, and every supplied installed checker copy while changing no task or adjacent control field.
+  Date/Author: 2026-07-13 / PM compatibility correction
 
 ## Outcomes & Retrospective
 
@@ -85,15 +105,25 @@ T009 is complete. Its required outcome was one official atomic wait/reply lifecy
 
 T009 delivered that lifecycle without a new service or migration. Public wait entry and reply resumption share the existing candidate-validated atomic applier; mismatches preserve board bytes and digest; successful replies preserve the complete wait receipt plus deterministic hashes in task-level transition evidence; resume exposes only compact proof. Compiler version 3.1.7 now requires the sixth runtime capability. Compiler commit `89d9af9b329167e8522f10eff7b2a77ba9996e5b` is clean and scoped. The exact GoalBuddy commit hash is recorded in the external Worker receipt because this plan is part of that commit.
 
+The post-completion Council gate found one real correctness gap in the otherwise completed workflow: the word "atomic" overclaimed concurrent-writer safety. The corrective successor keeps the closed board immutable and strengthens the existing persistence boundary instead. Official mutations are now serialized from fresh read through durable install, and a deterministic two-writer regression proves that only the lock holder can install a same-digest candidate. Codex Goal Compiler 3.1.8 and its `atomic_goal_completion` capability contract need no semantic change; the runtime now fully earns the capability it already advertises.
+
+The corrective successor is green before installation: 54 focused apply/checker tests, 162 full GoalBuddy tests, 50 compiler tests, both compiler runtime preflights, both compiler skill validators, byte-exact plugin mirrors, and `git diff --check` all pass. The already-closed stabilization board remains untouched; this plan and the corrective commit are the successor verification artifact.
+
+The cloud-thread compatibility follow-up extends that correction without altering compiler semantics or historical boards. Compatibility must be PM-authorized and digest-bound; the raw checker remains honest, while the applier returns a compact `immutable_history_compatible` proof only when every pre-existing error and referenced history byte survives unchanged. Rebinding is now a separate typed control operation with source and installed-byte evidence. The real cloud board has not been mutated; its exact digest remains the preservation oracle for the post-commit disposable-copy canary.
+
+Final pre-commit evidence for the complete successor is 167/167 GoalBuddy tests, 50/50 compiler tests, both compiler skill validators, byte-exact plugin mirrors, and a clean diff check. The only validator output is the pre-existing `.DS_Store` packaging warning; it is unrelated and unchanged.
+
 ## Context and Orientation
 
 `goalbuddy/scripts/apply-receipt.mjs` is the public transition engine that consumes a receipt JSON object and writes a version 2 `state.yaml`. It must preserve the receipt envelope's identity fields, keep arbitrary evidence inert, and apply amendments or placeholder hydration atomically. `goalbuddy/scripts/check-goal-state.mjs` is the strict validator for persisted boards. `goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs` parses and serializes YAML for the local board and resume surfaces. `internal/cli/goal-maker.mjs` is the package CLI and runtime-capability authority. Canonical skill files under `goalbuddy/` are copied byte-for-byte into `plugins/goalbuddy/skills/goal-prep/` by `internal/cli/sync-skill-tree.mjs`; the Claude Keeper markdown mirror under `plugins/goalbuddy/agents/` is maintained separately.
 
 The Codex Goal Compiler lives in the sibling repository path `/Users/danielalnajjar/Code/skills/shared/skills/codex-goal-compiler/`. Its runtime checker resolves the installed or local GoalBuddy command, validates the hard-coded capability contract, and reports provenance. The tracked `shared/skills/codex-goal-compiler.zip` archive must exactly reflect that skill directory after changes.
 
-A "closed vocabulary" means a fixed set of accepted string values. GoalBuddy's Judge decision set is exactly `approved`, `rejected`, `approve_subgoal`, `reject_subgoal`, `not_complete`, and `complete`. Its runtime capability set is exactly `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, and `atomic_exact_human_wait_resume`. Unknown or missing advertised capabilities fail closed. Human waiting has one shape: `exact_human_reply`; it does not imply an approval class.
+A "closed vocabulary" means a fixed set of accepted string values. GoalBuddy's Judge decision set is exactly `approved`, `rejected`, `approve_subgoal`, `reject_subgoal`, `not_complete`, and `complete`. Its runtime capability set is exactly `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. Unknown or missing advertised capabilities fail closed. Human waiting has one shape: `exact_human_reply`; it does not imply an approval class.
 
 T009 adds `atomic_exact_human_wait_resume` as the sixth and only new capability. Wait entry requires an active selected task and goal, the existing terminal-wait rule, a mandatory expected board digest, and an identity-bound blocked receipt containing the sole exact-human wait shape. Reply compares a one-field JSON string exactly, including case and whitespace. A mismatch is a digest-identical no-op. An exact match reactivates only the waiting task and goal, moves the complete wait receipt into task-level transition evidence, and clears the live receipt.
+
+T011 later adds `atomic_goal_completion` as the seventh capability. The corrective successor does not add another capability; it makes the shared atomicity claim concurrency-safe for all seven mutation surfaces.
 
 ## Plan of Work
 
@@ -173,10 +203,14 @@ T004 recovery and final evidence:
 
 ## Interfaces and Dependencies
 
-No runtime dependency may be added. Receipt application and validation remain dependency-free Node.js modules. `apply-receipt.mjs` must accept the existing receipt envelope and persist the identity fields `task_id` and `board_path` unchanged in the selected task's `receipt`. The runtime capability query must return exactly the six strings named above. The compiler checker remains Python standard-library code and must expose provenance fields that distinguish package version, resolved CLI path, source kind, Git HEAD, and dirty state. Canonical GoalBuddy skill files and tracked plugin mirrors must be byte-identical where `sync-skill-tree.mjs` defines a mirror relationship.
+No runtime dependency may be added. Receipt application and validation remain dependency-free Node.js modules. `apply-receipt.mjs` must accept the existing receipt envelope and persist the identity fields `task_id` and `board_path` unchanged in the selected task's `receipt`. The runtime capability query must return exactly the seven strings named above. The compiler checker remains Python standard-library code and must expose provenance fields that distinguish package version, resolved CLI path, source kind, Git HEAD, and dirty state. Canonical GoalBuddy skill files and tracked plugin mirrors must be byte-identical where `sync-skill-tree.mjs` defines a mirror relationship.
 
 Revision note (2026-07-13 01:25Z): Recorded all T004 verification evidence, the deterministic archive repair, the exact compiler commit, and the completed outcome before the self-containing GoalBuddy commit.
 
 Revision note (2026-07-13 02:05Z): Recorded T009 intake, exact clean bases, the preserved canary failure digest, and the approved atomic wait/reply architecture before behavioral edits.
 
 Revision note (2026-07-13 02:45Z): Recorded T009 implementation, durable evidence decisions, full verification results, the rebuilt compiler archive, and scoped compiler commit before the self-containing GoalBuddy commit.
+
+Revision note (2026-07-13 04:45Z): Recorded the normal Council concurrency finding, the serialized persistence-boundary correction, deterministic two-writer proof, and complete successor verification without reopening the closed board.
+
+Revision note (2026-07-13 05:08Z): Recorded the exact cloud-board compatibility evidence, explicit immutable-history admission, typed runtime rebind, Keeper integration, legacy-dialect proof, and final full-suite results before the corrective commit.

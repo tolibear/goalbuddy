@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
@@ -241,6 +241,8 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(keeper, /sandbox_mode = "workspace-write"/);
   assert.match(keeper, /goalbuddy_keeper_receipt_v1/);
   assert.match(keeper, /Run `checker_command` after every mutation/);
+  assert.match(keeper, /rebind_goalbuddy/);
+  assert.match(keeper, /immutable_history_compatible/);
   assert.match(ledger, /model = "gpt-5\.6-sol"/);
   assert.match(ledger, /model_reasoning_effort = "medium"/);
   assert.match(ledger, /sandbox_mode = "read-only"/);
@@ -1465,7 +1467,7 @@ test("keeper receipt contract is parseable and aligned across both harnesses", (
   const mdSchema = keeperReceiptContractSchema("plugins/goalbuddy/agents/goal-keeper.md");
   assert.deepEqual(mdSchema, tomlSchema);
   assert.equal(tomlSchema.result, "done | no_change | blocked");
-  assert.equal(tomlSchema.checker_status, "pass | fail | not_run");
+  assert.equal(tomlSchema.checker_status, "pass | immutable_history_compatible | fail | not_run");
   assert.equal(tomlSchema.expected_after_confirmed, false);
 });
 
@@ -1742,6 +1744,65 @@ test("complete is exposed through the public CLI and closes an audit-only tail",
     assert.equal(report.mode, "complete");
     assert.equal(report.active_task, null);
     assert.match(readFileSync(statePath, "utf8"), /status: done/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rebind exposes the typed digest-bound GoalBuddy control mutation", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-rebind-cli-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    const initial = readFileSync(statePath, "utf8").replace("checks:\n", `checks:
+  goalbuddy_binding:
+    source_root: "/old/goalbuddy"
+    accepted_commit: "${"0".repeat(40)}"
+    checker_path: "/old/checker.mjs"
+    checker_sha256: "${"0".repeat(64)}"
+    installed_checker_sha256: "${"0".repeat(64)}"
+    runtime_doctor_goal_ready: true
+    cached_marketplace_checker_authoritative: false
+`);
+    writeFileSync(statePath, initial);
+
+    const sourceRoot = join(root, "source");
+    const sourceChecker = join(sourceRoot, "goalbuddy", "scripts", "check-goal-state.mjs");
+    mkdirSync(dirname(sourceChecker), { recursive: true });
+    const checkerBytes = "#!/usr/bin/env node\nconsole.log('cli fixture');\n";
+    writeFileSync(sourceChecker, checkerBytes);
+    for (const gitArgs of [
+      ["init", "-q"],
+      ["add", "goalbuddy/scripts/check-goal-state.mjs"],
+      ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "commit", "-qm", "fixture"],
+    ]) {
+      const git = spawnSync("git", gitArgs, { cwd: sourceRoot, encoding: "utf8" });
+      assert.equal(git.status, 0, git.stderr || git.stdout);
+    }
+    const acceptedCommit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: sourceRoot, encoding: "utf8" }).stdout.trim();
+    const checkerSha256 = createHash("sha256").update(checkerBytes).digest("hex");
+    const installedChecker = join(root, "installed", "check-goal-state.mjs");
+    mkdirSync(dirname(installedChecker), { recursive: true });
+    writeFileSync(installedChecker, checkerBytes);
+    const bindingPath = join(root, "binding.json");
+    writeFileSync(bindingPath, JSON.stringify({
+      source_root: sourceRoot,
+      accepted_commit: acceptedCommit,
+      checker_path: sourceChecker,
+      checker_sha256: checkerSha256,
+      installed_checker_sha256: checkerSha256,
+      runtime_doctor_goal_ready: true,
+      cached_marketplace_checker_authoritative: false,
+    }));
+    const digest = createHash("sha256").update(initial).digest("hex");
+
+    const result = runGoalMaker(["rebind", goalDir, "--binding", bindingPath, "--installed-checker", installedChecker, "--expected-state-digest", digest, "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.mode, "rebind");
+    assert.equal(report.checker_status, "pass");
+    assert.equal(report.binding.accepted_commit, acceptedCommit);
+    assert.match(readFileSync(statePath, "utf8"), new RegExp(`accepted_commit: ${acceptedCommit}`));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

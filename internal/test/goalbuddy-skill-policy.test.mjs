@@ -193,6 +193,10 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /enter_exact_human_wait/);
   assert.match(canonicalKeeper, /resume_exact_human_reply/);
   assert.match(canonicalKeeper, /complete_goal/);
+  assert.match(canonicalKeeper, /rebind_goalbuddy/);
+  assert.match(canonicalKeeper, /immutable_history_authorized/);
+  assert.match(canonicalKeeper, /immutable_history_compatible/);
+  assert.match(canonicalKeeper, /--allow-immutable-history/);
   assert.match(canonicalKeeper, /reply_file_path/);
   assert.match(canonicalKeeper, /not authenticated human identity or product authorization/);
   assert.match(canonicalKeeper, /task_cards_path/);
@@ -206,6 +210,9 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(claudeKeeper, /enter_exact_human_wait/);
   assert.match(claudeKeeper, /resume_exact_human_reply/);
   assert.match(claudeKeeper, /complete_goal/);
+  assert.match(claudeKeeper, /rebind_goalbuddy/);
+  assert.match(claudeKeeper, /immutable_history_authorized/);
+  assert.match(claudeKeeper, /immutable_history_compatible/);
   assert.match(claudeKeeper, /not authenticated human identity or product authorization/);
 });
 

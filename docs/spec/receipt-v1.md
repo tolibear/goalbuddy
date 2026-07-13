@@ -163,7 +163,11 @@ transition_evidence:
 
 This evidence records only a deterministic workflow transition. It is not authenticated-human evidence and conveys no product authorization. Historical tasks without `transition_evidence` remain valid and require no migration.
 
-Final goal completion uses `goalbuddy complete` with a mandatory expected digest and an identity-bound Judge or PM receipt containing `result: done`, `decision: complete`, and `full_outcome_complete: true`. It atomically records the final receipt, sets `goal.status: done`, and clears `active_task` while preserving task-level transition evidence. Invalid, stale, wrong-task, non-audit, incomplete, duplicate, and replayed completion requests cannot mutate the board.
+Final goal completion uses `goalbuddy complete` with a mandatory expected digest and an identity-bound Judge or PM receipt containing `result: done`, `decision: complete`, and `full_outcome_complete: true`. It atomically records the final receipt, sets `goal.status: done`, and clears `active_task` while preserving task-level transition evidence. Every official state mutation is serialized by one stable per-board lock held across the fresh read, digest check, candidate validation, rename, and directory fsync. A competing same-digest writer fails closed and must recover from a fresh resume projection; it cannot overwrite the accepted receipt. Invalid, stale, wrong-task, non-audit, incomplete, duplicate, and replayed completion requests cannot mutate the board.
+
+For a reviewed version 2 board whose only checker errors are frozen completed-task history, the PM may explicitly add `--allow-immutable-history`. Admission requires an identical pre/post checker-error multiset, exactly one already-done task ID per error, and byte-identical raw YAML for every referenced task. Global, live-tail, new, changed, ambiguous, or malformed errors fail closed. A successful report uses `checker_status: immutable_history_compatible` and carries only a compact error digest/count and preserved task IDs; it does not rewrite receipts or claim that the raw checker passed.
+
+`goalbuddy rebind` is the sole typed mutation for `checks.goalbuddy_binding`. It requires the expected board digest, an exact seven-field binding JSON object, a clean source checkout at the accepted commit, matching source-checker bytes, and one or more byte-identical installed checker paths. It changes no task or other control field and uses the same lock, checker, and optional immutable-history proof as receipt transitions.
 
 ## The honesty invariant
 
