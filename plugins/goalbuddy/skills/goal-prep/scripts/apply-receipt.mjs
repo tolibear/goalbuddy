@@ -2,10 +2,10 @@
 // Apply a receipt, task status, and active_task transition to state.yaml atomically.
 // Fail-closed: the result is validated with check-goal-state.mjs and reverted on errors.
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { immutableHistoryCompatibility, sha256 } from "./immutable-history-proof.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -471,7 +471,12 @@ function installValidatedCandidate(context, candidate, report) {
   const compatibility = checkerReport.ok
     ? { ok: true, used: false }
     : context.allowImmutableHistory
-      ? immutableHistoryCompatibility(context, candidate, checkerReport)
+      ? immutableHistoryCompatibility({
+        original: context.original,
+        candidate,
+        baselineReport: runChecker(context.statePath, context.original),
+        candidateReport: checkerReport,
+      })
       : { ok: false, reason: "Checker-red history requires explicit --allow-immutable-history after PM full-board review." };
   if (!checkerReport.ok && !compatibility.ok) {
     return {
@@ -510,68 +515,6 @@ function runChecker(statePath, candidate) {
   } catch {
     return { ok: false, errors: [`checker produced unreadable output: ${(check.stderr || check.stdout || "").slice(0, 300)}`], warnings: [] };
   }
-}
-
-function immutableHistoryCompatibility(context, candidate, candidateReport) {
-  const baselineReport = runChecker(context.statePath, context.original);
-  if (baselineReport.ok) return { ok: false, reason: "The current board is checker-green, so candidate checker errors cannot be grandfathered." };
-  if (baselineReport.version !== 2 || candidateReport.version !== 2) {
-    return { ok: false, reason: "Immutable-history compatibility requires version 2 before and after the transition." };
-  }
-  const baselineErrors = Array.isArray(baselineReport.errors) ? baselineReport.errors : [];
-  const candidateErrors = Array.isArray(candidateReport.errors) ? candidateReport.errors : [];
-  if (baselineErrors.length === 0 || !sameStringMultiset(baselineErrors, candidateErrors)) {
-    return { ok: false, reason: "Candidate checker errors differ from the exact pre-transition error set." };
-  }
-
-  const historicalTaskIds = new Set();
-  for (const error of baselineErrors) {
-    const taskIds = [...new Set(String(error).match(/\bT\d{3}\b/g) || [])];
-    if (taskIds.length !== 1) {
-      return { ok: false, reason: `Checker error is not confined to exactly one task: ${error}` };
-    }
-    const taskId = taskIds[0];
-    if (rawTaskStatus(context.original, taskId) !== "done" || rawTaskStatus(candidate, taskId) !== "done") {
-      return { ok: false, reason: `Checker error touches live or missing task ${taskId}.` };
-    }
-    if (rawTaskBlock(context.original, taskId) !== rawTaskBlock(candidate, taskId)) {
-      return { ok: false, reason: `Historical task ${taskId} changed byte content.` };
-    }
-    historicalTaskIds.add(taskId);
-  }
-  return {
-    ok: true,
-    used: true,
-    proof: {
-      baseline_error_count: baselineErrors.length,
-      baseline_error_digest: sha256(JSON.stringify([...baselineErrors].sort())),
-      preserved_task_ids: [...historicalTaskIds].sort(),
-      historical_task_bytes_unchanged: true,
-      live_tail_checker_errors: 0,
-    },
-  };
-}
-
-function sameStringMultiset(left, right) {
-  if (left.length !== right.length) return false;
-  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
-}
-
-function rawTaskBlock(text, taskId) {
-  const startPattern = new RegExp(`^  - id:\\s*"?${taskId}"?\\s*(?:\\r?\\n|$)`, "m");
-  const start = startPattern.exec(text);
-  if (!start) return null;
-  const contentStart = start.index + start[0].length;
-  const nextBoundary = /^(?:  - id:|\S)/m.exec(text.slice(contentStart));
-  const end = nextBoundary ? contentStart + nextBoundary.index : text.length;
-  return text.slice(start.index, end);
-}
-
-function rawTaskStatus(text, taskId) {
-  const block = rawTaskBlock(text, taskId);
-  if (block === null) return null;
-  const matches = [...block.matchAll(/^    status:\s*"?([A-Za-z_]+)"?\s*$/gm)];
-  return matches.length === 1 ? matches[0][1] : null;
 }
 
 function stateTopScalar(text, key) {
@@ -749,10 +692,6 @@ function upsertTaskNode(lines, taskId, key, value, { beforeKey = "receipt" } = {
   const before = lines.slice(start, end).findIndex((candidate) => new RegExp(`^    ${beforeKey}:`).test(candidate));
   const insertion = before === -1 ? end : start + before;
   return [...lines.slice(0, insertion), ...serialized, ...lines.slice(insertion)];
-}
-
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function appendTaskCards(lines, taskCards) {

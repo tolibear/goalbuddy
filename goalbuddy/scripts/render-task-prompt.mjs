@@ -1,8 +1,12 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
 
 const ROLE_DEFAULTS = {
   scout: { agent: "goal_scout", reasoning: "medium", sandbox: "read-only" },
@@ -27,7 +31,7 @@ if (isDirectRun()) {
 
 export function renderTaskPrompt(options) {
   const boardPath = resolveBoardPath(options);
-  const board = loadBoard(boardPath);
+  const board = loadBoard(boardPath, options);
   const task = selectTask(board, options.taskId);
   const role = normalizeRole(task.type);
   const defaults = ROLE_DEFAULTS[role] || ROLE_DEFAULTS.pm;
@@ -45,6 +49,10 @@ export function renderTaskPrompt(options) {
         sandbox: defaults.sandbox,
         fork_context_allowed: role !== "worker",
         board_path: board.path,
+        state_digest: board.stateDigest,
+        projection_mode: board.projection.mode,
+        checker_status: board.projection.checkerStatus,
+        immutable_history: board.projection.immutableHistory,
         child_board_paths: childBoardPaths(board),
         goal_oracle: board.goal.oracle || null,
         slice_policy: board.document.rules?.slice_policy || null,
@@ -71,7 +79,14 @@ export function renderTaskPrompt(options) {
 }
 
 export function parseArgs(args) {
-  const options = { goalRoot: "", boardPath: "", taskId: "", json: false };
+  const options = {
+    goalRoot: "",
+    boardPath: "",
+    taskId: "",
+    expectedStateDigest: "",
+    allowImmutableHistory: false,
+    json: false,
+  };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
@@ -84,6 +99,12 @@ export function parseArgs(args) {
       options.boardPath = args[++index] || "";
     } else if (arg.startsWith("--board=")) {
       options.boardPath = arg.slice("--board=".length);
+    } else if (arg === "--expected-state-digest") {
+      options.expectedStateDigest = args[++index] || "";
+    } else if (arg.startsWith("--expected-state-digest=")) {
+      options.expectedStateDigest = arg.slice("--expected-state-digest=".length);
+    } else if (arg === "--allow-immutable-history") {
+      options.allowImmutableHistory = true;
     } else if (arg === "--parallel-plan") {
       options.parallelPlan = true;
     } else if (arg.startsWith("-")) {
@@ -95,14 +116,71 @@ export function parseArgs(args) {
     }
   }
   if (!options.goalRoot && !options.boardPath) {
-    throw new Error("Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml]");
+    throw new Error(promptUsage());
+  }
+  if (options.allowImmutableHistory && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
+    throw new Error("--allow-immutable-history requires --expected-state-digest with exactly 64 lowercase hex characters.");
+  }
+  if (options.expectedStateDigest && !options.allowImmutableHistory) {
+    throw new Error("--expected-state-digest is valid only with --allow-immutable-history.");
   }
   return options;
 }
 
-export function loadBoard(boardPath) {
+export function loadBoard(boardPath, options = {}) {
   if (!existsSync(boardPath)) throw new Error(`state file not found: ${boardPath}`);
-  const document = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+  const stateText = readFileSync(boardPath, "utf8");
+  const stateDigest = sha256(stateText);
+  if (!options.allowImmutableHistory) {
+    return boardFromDocument(boardPath, stateText, parseGoalStateText(stateText, { allowFallback: false }), {
+      mode: "strict_full_state",
+      checkerStatus: null,
+      immutableHistory: null,
+    });
+  }
+  if (options.expectedStateDigest !== stateDigest) {
+    throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${stateDigest}.`);
+  }
+
+  const checker = checkExactSnapshot(boardPath, stateText);
+  if (checker.state_digest !== stateDigest) {
+    throw new Error("GoalBuddy checker did not validate the exact state.yaml snapshot supplied to prompt rendering.");
+  }
+  const stateAfterCheck = readFileSync(boardPath, "utf8");
+  if (stateAfterCheck !== stateText) {
+    throw new Error("state.yaml changed while GoalBuddy was validating the immutable-history prompt projection.");
+  }
+
+  if (checker.ok === true) {
+    return boardFromDocument(boardPath, stateText, parseGoalStateText(stateText, { allowFallback: false }), {
+      mode: "strict_full_state",
+      checkerStatus: "pass",
+      immutableHistory: null,
+    });
+  }
+
+  const compatibility = immutableHistoryCompatibility({
+    original: stateText,
+    candidate: stateAfterCheck,
+    baselineReport: checker,
+    candidateReport: checker,
+  });
+  if (!compatibility.ok) {
+    throw new Error(`Immutable-history prompt projection rejected: ${compatibility.reason}`);
+  }
+  if (options.taskId && options.taskId !== checker.active_task) {
+    throw new Error(`Immutable-history prompt projection may render only active task ${checker.active_task}; got ${options.taskId}.`);
+  }
+
+  const document = parseActiveTaskProjection(stateText, checker.active_task);
+  return boardFromDocument(boardPath, stateText, document, {
+    mode: "immutable_history_active_task",
+    checkerStatus: "immutable_history_compatible",
+    immutableHistory: compatibility.proof,
+  });
+}
+
+function boardFromDocument(boardPath, stateText, document, projection) {
   if (!document || Number(document.version) !== 2) {
     throw new Error(`unsupported GoalBuddy state version in ${boardPath}: expected top-level "version: 2". Start from templates/state.yaml bundled with the goal-prep skill.`);
   }
@@ -114,7 +192,66 @@ export function loadBoard(boardPath) {
     tasks: document.tasks,
     goal: document.goal || {},
     activeTask: document.active_task || "",
+    stateDigest: sha256(stateText),
+    projection,
   };
+}
+
+function checkExactSnapshot(boardPath, stateText) {
+  const checkerPath = resolve(scriptDir, "check-goal-state.mjs");
+  const result = spawnSync(process.execPath, [checkerPath, boardPath, "--snapshot-stdin"], {
+    encoding: "utf8",
+    input: stateText,
+  });
+  let report;
+  try {
+    report = JSON.parse(result.stdout || "");
+  } catch {
+    throw new Error(`GoalBuddy checker produced unreadable output: ${(result.stderr || result.stdout || "").slice(0, 300)}`);
+  }
+  if (!report || typeof report !== "object" || !Array.isArray(report.errors)) {
+    throw new Error("GoalBuddy checker returned an incomplete immutable-history report.");
+  }
+  return report;
+}
+
+function parseActiveTaskProjection(stateText, activeTaskId) {
+  if (!/^T\d{3}$/.test(activeTaskId || "")) {
+    throw new Error(`Immutable-history prompt projection requires one valid active T### task; got ${activeTaskId || "null"}.`);
+  }
+  const taskSections = [...stateText.matchAll(/^tasks:\s*$/gm)];
+  if (taskSections.length !== 1) {
+    throw new Error(`Immutable-history prompt projection requires exactly one top-level tasks section; found ${taskSections.length}.`);
+  }
+  const tasksHeader = taskSections[0];
+  const contentStart = stateText.indexOf("\n", tasksHeader.index + tasksHeader[0].length);
+  if (contentStart === -1) throw new Error("Immutable-history prompt projection found an empty tasks section.");
+  const taskContentStart = contentStart + 1;
+  const nextTopLevel = /^\S/m.exec(stateText.slice(taskContentStart));
+  const taskSectionEnd = nextTopLevel ? taskContentStart + nextTopLevel.index : stateText.length;
+  const activeTaskBlock = rawTaskBlock(stateText, activeTaskId);
+  if (activeTaskBlock === null) {
+    throw new Error(`Immutable-history prompt projection could not locate exact raw task block ${activeTaskId}.`);
+  }
+  const activeTaskOffset = stateText.indexOf(activeTaskBlock);
+  if (activeTaskOffset < taskContentStart || activeTaskOffset >= taskSectionEnd) {
+    throw new Error(`Immutable-history prompt projection found ${activeTaskId} outside the unique tasks section.`);
+  }
+
+  const projectedText = `${stateText.slice(0, tasksHeader.index)}tasks:\n${activeTaskBlock}${stateText.slice(taskSectionEnd)}`;
+  const document = parseGoalStateText(projectedText, { allowFallback: false });
+  if (!Array.isArray(document.tasks) || document.tasks.length !== 1) {
+    throw new Error("Immutable-history prompt projection did not strictly parse exactly one active task.");
+  }
+  const task = document.tasks[0];
+  if (document.active_task !== activeTaskId || task?.id !== activeTaskId || task?.status !== "active") {
+    throw new Error(`Immutable-history prompt projection active-task mismatch for ${activeTaskId}.`);
+  }
+  return document;
+}
+
+function promptUsage() {
+  return "Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml] [--expected-state-digest <sha256> --allow-immutable-history]";
 }
 
 export function resolveBoardPath(options) {

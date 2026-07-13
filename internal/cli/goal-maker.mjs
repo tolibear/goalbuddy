@@ -62,6 +62,7 @@ const optionsWithValues = new Set([
   "--target",
   "--task",
   "--board",
+  "--expected-state-digest",
 ]);
 const pathOptions = new Set(["--board", "--goal"]);
 
@@ -328,7 +329,7 @@ Usage:
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} rebind <docs/goals/slug> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <sha256> [--allow-immutable-history] [--json]
-  ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
+  ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--expected-state-digest <sha256> --allow-immutable-history] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
 Targets: by default, install/update prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the command.
