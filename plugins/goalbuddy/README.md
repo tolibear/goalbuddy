@@ -1,16 +1,17 @@
 # GoalBuddy Plugin (Codex + Claude Code)
 
-GoalBuddy packages the canonical `goal-prep` skill as a plugin so teams can install the reusable workflow in **Codex** and **Claude Code**, while keeping the npm CLI for local setup, doctor checks, and the built-in local board surface.
+GoalBuddy packages the canonical `codex-goal-compiler` front door and `goal-prep` backend for **Codex** and **Claude Code**, with the local CLI providing install, contract, doctor, recovery, and board surfaces.
 
-Version 0.3.9 keeps the Goalmaxxed core and hardens marketplace installs, local board rendering, and PM runtime guidance for approval waits and board-health checks.
+Version 0.5.0 unifies compiler and runtime ownership without changing the board schema or rewriting existing boards.
 
 ## What It Contains
 
 - `.codex-plugin/plugin.json`: Codex plugin manifest and Codex UI copy.
 - `.claude-plugin/plugin.json`: Claude Code plugin manifest.
-- `skills/goalbuddy/`: the installable GoalBuddy skill payload (shared by both platforms).
+- `skills/codex-goal-compiler/`: the user-facing route compiler.
+- `skills/goal-prep/`: the GoalBuddy board-preparation and execution backend.
 - `agents/`: Claude Code task-agent definitions (`goal-scout.md`, `goal-judge.md`, `goal-worker.md`) plus the execution-time `goal-keeper.md` and recovery-only `goal-ledger.md` control-plane agents.
-- `skills/goalbuddy/SKILL.md`: canonical `$goal-prep` / `/goal-prep` entry point.
+- `skills/codex-goal-compiler/SKILL.md`: canonical `$codex-goal-compiler` / `/codex-goal-compiler` entry point.
 - `assets/goalbuddy-icon.svg`: lightweight plugin icon.
 
 ## Local Testing
@@ -19,41 +20,41 @@ From the repo root:
 
 ```bash
 npm run check
-npx goalbuddy doctor
-npx goalbuddy check-update
+goalbuddy contract --target codex --json
+goalbuddy doctor --target codex --goal-ready
 ```
 
 ## Install Both Targets
 
 ```bash
-npx goalbuddy
+goalbuddy install
 ```
 
-This installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill, Scout/Judge/Worker task agents, Board Keeper, and Ledger recovery auditor into `~/.claude/`. The skill surfaces `/goal-prep` in Claude Code.
+This installs and enables the native Codex plugin, then installs the same compiler/backend pair, Scout/Judge/Worker task agents, Board Keeper, Ledger recovery auditor, and `/goal` command into Claude Code.
 
 ## Install One Target
 
 ```bash
-npx goalbuddy --target codex
-npx goalbuddy --target claude
+goalbuddy install --target codex
+goalbuddy install --target claude
 ```
 
 This installs the GoalBuddy skill, the three Scout/Judge/Worker task agents, the low-reasoning Board Keeper, and the recovery-only Ledger Auditor into `~/.claude/`. Restart Claude Code, then run:
 
 ```text
-/goal-prep
+/codex-goal-compiler
 ```
 
-Or install the npm package globally:
+Install this private package from its local checkout:
 
 ```bash
-npm i -g goalbuddy
+bun add -g "$PWD"
 goalbuddy                  # installs for Codex and Claude Code
 goalbuddy --target codex   # installs for Codex only
 goalbuddy --target claude  # installs for Claude Code only
 ```
 
-For local CLI testing before npm publish:
+For local CLI testing before activation:
 
 ```bash
 node internal/cli/goal-maker.mjs
@@ -63,4 +64,4 @@ node internal/cli/goal-maker.mjs board docs/goals/<slug> --once --json
 
 ## Release Notes
 
-The plugin is prepared for the `tolibear/goalbuddy` repo and `goalbuddy` npm package. Keep `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` aligned with `package.json` before publishing a new package release.
+The plugin is owned by the `Danielalnajjar/goalbuddy` fork and installed from the local checkout. Keep both manifests aligned with `package.json`; do not publish this fork over the upstream npm package.

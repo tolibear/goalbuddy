@@ -38,8 +38,9 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /During a `\$goal-prep` turn, do not perform the user's requested work/);
     assert.match(text, /Do not refresh or load named skills/);
     assert.match(text, /Do not load that skill, browse that repo, or generate those assets during `\$goal-prep`/);
-    assert.match(text, /check whether GoalBuddy itself is stale/);
-    assert.match(text, /GoalBuddy <latest_version> is available/);
+    assert.match(text, /read GoalBuddy's update ownership/);
+    assert.match(text, /check_status: managed_local/);
+    assert.match(text, /must not consult or recommend the upstream npm package/);
     assert.match(text, /Intent -> Oracle -> Surface -> Loop -> Proof/);
     assert.match(text, /No oracle, no serious goal/);
     assert.match(text, /Do you want the local GoalBuddy board for this goal\?/);
@@ -49,7 +50,6 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /do not assume the existing process is stale and do not stop it/);
     assert.match(text, /First check `http:\/\/127\.0\.0\.1:41737\/api\/boards`/);
     assert.match(text, /shared multi-board hub/);
-    assert.match(text, /update through the channel that installed GoalBuddy/);
     assert.match(text, /run the GoalBuddy CLI through the user's install channel/);
     assert.match(text, /Codex in-app Browser/);
     assert.match(text, /do not install a GoalBuddy catalog item/);

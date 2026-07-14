@@ -2,10 +2,9 @@
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "goalbuddy",
   "owner": {
-    "name": "tolibear",
-    "email": "support@tolibear.com"
+    "name": "Daniel Alnajjar"
   },
-  "description": "GoalBuddy /goal-prep skill plus Scout/Judge/Worker subagents for pressured /goal runs.",
+  "description": "GoalBuddy compiler, Goal Prep backend, and execution agents for durable /goal runs.",
   "plugins": [
     {
       "name": "goalbuddy",

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -23,7 +23,7 @@ test("GoalBuddy plugin is exposed through a Codex marketplace manifest", () => {
 
 test("GoalBuddy plugin is exposed through a Claude marketplace manifest", () => {
   assert.equal(claudeMarketplace.name, "goalbuddy");
-  assert.equal(claudeMarketplace.owner.name, "tolibear");
+  assert.equal(claudeMarketplace.owner.name, "Daniel Alnajjar");
   assert.equal(claudeMarketplace.plugins.length, 1);
 
   const [entry] = claudeMarketplace.plugins;
@@ -35,8 +35,15 @@ test("GoalBuddy plugin is exposed through a Claude marketplace manifest", () => 
 test("GoalBuddy plugin metadata tracks the package release", () => {
   assert.equal(plugin.name, pkg.name);
   assert.equal(plugin.version, pkg.version);
-  assert.equal(plugin.repository, "https://github.com/tolibear/goalbuddy");
+  assert.equal(plugin.repository, "https://github.com/Danielalnajjar/goalbuddy");
   assert.equal(plugin.skills, "./skills/");
+});
+
+test("the personal distribution is fork-owned and cannot publish over upstream npm", () => {
+  assert.equal(pkg.private, true);
+  assert.equal(pkg.repository.url, "git+https://github.com/Danielalnajjar/goalbuddy.git");
+  assert.equal(pkg.publishConfig, undefined);
+  assert.equal(existsSync(".github/workflows/npm-publish.yml"), false);
 });
 
 test("Claude plugin metadata stays aligned with package release", () => {
@@ -46,8 +53,8 @@ test("Claude plugin metadata stays aligned with package release", () => {
   assert.ok(!claudePlugin.keywords.includes("extensions"));
 });
 
-test("GoalBuddy plugin delegates composer invocation to Goal Prep", () => {
+test("GoalBuddy plugin delegates composer invocation to Codex Goal Compiler", () => {
   assert.deepEqual(plugin.interface.defaultPrompt, [
-    "$goal-prep prepare a GoalBuddy board for this goal",
+    "$codex-goal-compiler determine and compile the correct goal route for this work",
   ]);
 });

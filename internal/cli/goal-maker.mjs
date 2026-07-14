@@ -22,9 +22,14 @@ const canonicalCliName = "goalbuddy";
 const pluginName = "goalbuddy";
 const canonicalSkillName = "goal-prep";
 const canonicalSkillDirectory = "goalbuddy";
+const compilerSkillName = "codex-goal-compiler";
+const compilerSkillDirectory = "codex-goal-compiler";
+const compilerContractVersion = 1;
+const boardSchemaVersion = 2;
 const legacyCliName = "goal-maker";
 const legacySkillName = "goal-maker";
 const skillSource = join(packageRoot, canonicalSkillDirectory);
+const compilerSkillSource = join(packageRoot, compilerSkillDirectory);
 const claudePluginSource = join(packageRoot, "plugins", "goalbuddy");
 const packageInfo = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 const runtimeCapabilities = Object.freeze({
@@ -69,9 +74,11 @@ const pathOptions = new Set(["--board", "--goal"]);
 const args = process.argv.slice(2);
 const command = args[0] === "--help" || args[0] === "-h"
   ? "help"
-  : args[0] && !args[0].startsWith("-")
-    ? args[0]
-    : "default";
+  : args[0] === "--version" || args[0] === "-v"
+    ? "version"
+    : args[0] && !args[0].startsWith("-")
+      ? args[0]
+      : "default";
 const invokedAs = invokedCommandName();
 
 main().catch((error) => {
@@ -126,6 +133,13 @@ async function main() {
       } else {
         doctorClaude();
       }
+      break;
+    case "contract":
+      if (wantsHelp()) {
+        usage();
+        break;
+      }
+      compilerContract();
       break;
     case "reset":
       if (wantsHelp()) {
@@ -201,6 +215,9 @@ async function main() {
     case "-h":
       usage();
       break;
+    case "version":
+      console.log(packageInfo.version);
+      break;
     default:
       if (!hasFlag("--json")) usage();
       argumentError(`Unknown command: ${command}`);
@@ -219,7 +236,7 @@ function invokedThroughLegacyName() {
 function maybePrintLegacyNotice() {
   if (!invokedThroughLegacyName() || hasFlag("--json")) return;
   console.error(`${legacyCliName} has been rebranded to ${canonicalCliName}.`);
-  console.error(`Use: npx ${canonicalCliName}`);
+  console.error(`Use: ${canonicalCliName}`);
   console.error(`${legacyCliName} remains available temporarily for compatibility.`);
   console.error("");
 }
@@ -318,6 +335,7 @@ Usage:
   ${canonicalCliName} update [--target claude|codex] [--source <marketplace-source>] [--claude-home <path>] [--codex-home <path>] [--json]
   ${canonicalCliName} agents [--target claude|codex] [--claude-home <path>] [--codex-home <path>] [--force]
   ${canonicalCliName} doctor [--target claude|codex] [--claude-home <path>] [--codex-home <path>] [--goal-ready]
+  ${canonicalCliName} contract --target claude|codex [--claude-home <path>] [--codex-home <path>] [--json]
   ${canonicalCliName} reset --target codex [--codex-home <path>] [--json]
   ${canonicalCliName} check-update [--json]
   ${canonicalCliName} board <docs/goals/slug> [--host <host>] [--port <port>] [--once] [--json]
@@ -335,12 +353,12 @@ Usage:
 Targets: by default, install/update prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the command.
 
 Default:
-  ${canonicalCliName}                  Installs and enables Codex, then installs Claude Code skill + agents (skill surfaces /goal-prep).
-  ${canonicalCliName} --target claude  Installs ${canonicalProductName} for Claude Code (skill + agents; skill surfaces /goal-prep).
+  ${canonicalCliName}                  Installs Codex Goal Compiler, Goal Prep, and agents for both harnesses.
+  ${canonicalCliName} --target claude  Installs ${canonicalProductName} compiler, backend, command, and agents for Claude Code.
   ${canonicalCliName} --target codex   Installs and enables the native Codex plugin.
 
 Compatibility:
-  ${legacyCliName} remains a temporary alias and prints the new npx command for human-facing use.
+  ${legacyCliName} remains an inherited temporary alias and prints the canonical local command for human-facing use.
 
 Environment:
   CODEX_HOME                         Overrides the default ~/.codex target.
@@ -390,6 +408,10 @@ function claudeSkillRoot() {
   return join(claudeHome(), "skills", canonicalSkillName);
 }
 
+function claudeCompilerSkillRoot() {
+  return join(claudeHome(), "skills", compilerSkillName);
+}
+
 function legacyClaudeSkillRoot() {
   return join(claudeHome(), "skills", canonicalSkillDirectory);
 }
@@ -436,6 +458,36 @@ function installClaudeSkill({ quiet = false } = {}) {
     previous_version: previousMetadata?.package_version || "",
     current_version: packageInfo.version,
     removed_legacy_skill_path: legacyRemoved ? legacyTarget : "",
+  };
+}
+
+function installClaudeCompilerSkill({ quiet = false } = {}) {
+  const target = claudeCompilerSkillRoot();
+  if (!existsSync(compilerSkillSource)) {
+    throw new Error(`Compiler skill payload not found: ${compilerSkillSource}`);
+  }
+
+  const previousMetadata = readInstallMetadata(target);
+  const previousFingerprint = existsSync(target)
+    ? directoryFingerprint(target, { exclude: installFingerprintExcludes() })
+    : "";
+
+  mkdirSync(dirname(target), { recursive: true });
+  rmSync(target, { recursive: true, force: true });
+  cpSync(compilerSkillSource, target, { recursive: true });
+  writeInstallMetadata(target, previousMetadata);
+
+  const currentFingerprint = directoryFingerprint(target, { exclude: installFingerprintExcludes() });
+  const status = previousFingerprint
+    ? previousFingerprint === currentFingerprint ? "unchanged" : "updated"
+    : "installed";
+  if (!quiet) console.log(`Installed Claude Code ${compilerSkillName} skill to ${target}`);
+
+  return {
+    status,
+    path: target,
+    previous_version: previousMetadata?.package_version || "",
+    current_version: packageInfo.version,
   };
 }
 
@@ -501,6 +553,7 @@ async function buildClaudeInstallReport() {
     },
     claude_home: claudeHome(),
     skill: installClaudeSkill({ quiet }),
+    compiler_skill: installClaudeCompilerSkill({ quiet }),
     agents: installClaudeAgents({ quiet }),
     goal_command: installClaudeGoalCommand({ quiet }),
     legacy_commands_cleanup: cleanupLegacyClaudeCommands({ quiet }),
@@ -558,10 +611,15 @@ async function installEverywhere() {
   if (!report.ok) process.exit(1);
 }
 
-function doctorClaude() {
+function buildClaudeDoctorReport() {
   const skillPath = join(claudeSkillRoot(), "SKILL.md");
+  const compilerSkillPath = join(claudeCompilerSkillRoot(), "SKILL.md");
   const agentsPath = claudeAgentsRoot();
   const installed = existsSync(skillPath);
+  const compilerInstalled = existsSync(compilerSkillPath);
+  const skillStale = installed && skillTreeFingerprint(claudeSkillRoot()) !== skillTreeFingerprint(skillSource);
+  const compilerSkillStale = compilerInstalled
+    && skillTreeFingerprint(claudeCompilerSkillRoot()) !== skillTreeFingerprint(compilerSkillSource);
   const agents = existsSync(agentsPath)
     ? readdirSync(agentsPath).filter((file) => file.startsWith("goal-") && file.endsWith(".md"))
     : [];
@@ -578,13 +636,27 @@ function doctorClaude() {
   const legacySkillPresent = existsSync(legacySkillPath);
   const goalCommandPath = claudeGoalCommandPath();
   const goalCommandPresent = existsSync(goalCommandPath);
+  const errors = [];
+  if (!installed) errors.push("Claude Goal Prep skill is not installed.");
+  if (!compilerInstalled) errors.push("Claude Codex Goal Compiler skill is not installed.");
+  if (skillStale) errors.push("Claude Goal Prep skill is stale; run `goalbuddy update --target claude`.");
+  if (compilerSkillStale) errors.push("Claude Codex Goal Compiler skill is stale; run `goalbuddy update --target claude`.");
+  for (const file of missingAgents) errors.push(`Missing GoalBuddy Claude agent: ${file}.`);
+  for (const file of staleAgents) errors.push(`Stale GoalBuddy Claude agent: ${file}.`);
+  if (!goalCommandPresent) errors.push("Claude /goal command is missing.");
+  if (legacyCommandPresent) errors.push("Claude legacy Goal Prep command is still present.");
+  if (legacySkillPresent) errors.push("Claude legacy GoalBuddy skill is still present.");
 
-  console.log(JSON.stringify({
+  const report = {
     target: "claude",
     capabilities: installedRuntimeCapabilities(),
     claude_home: claudeHome(),
     skill_installed: installed,
     skill_path: skillPath,
+    skill_stale: skillStale,
+    compiler_skill_installed: compilerInstalled,
+    compiler_skill_path: compilerSkillPath,
+    compiler_skill_stale: compilerSkillStale,
     installed_agents: agents,
     missing_agents: missingAgents,
     stale_agents: staleAgents,
@@ -594,10 +666,16 @@ function doctorClaude() {
     legacy_command_path: legacyCommandPath,
     legacy_skill_present: legacySkillPresent,
     legacy_skill_path: legacySkillPath,
-  }, null, 2));
+    errors,
+  };
 
-  const installOk = installed && missingAgents.length === 0 && staleAgents.length === 0 && goalCommandPresent && !legacyCommandPresent && !legacySkillPresent;
-  process.exit(installOk ? 0 : 1);
+  return { report, ok: errors.length === 0 };
+}
+
+function doctorClaude() {
+  const result = buildClaudeDoctorReport();
+  console.log(JSON.stringify(result.report, null, 2));
+  process.exit(result.ok ? 0 : 1);
 }
 
 function printClaudeInstallReport(report) {
@@ -609,6 +687,7 @@ function printClaudeInstallReport(report) {
   console.log(`${verb} ${canonicalProductName} for Claude Code${previous}`);
   console.log("");
   console.log(`Skill: ${report.skill.status} at ${report.skill.path}`);
+  console.log(`Compiler: ${report.compiler_skill.status} at ${report.compiler_skill.path}`);
   console.log(`Agents: ${summarizeStatuses(report.agents)}`);
   console.log(`Command: /goal ${report.goal_command.status} at ${report.goal_command.path}`);
   if (report.legacy_commands_cleanup?.removed) {
@@ -616,11 +695,11 @@ function printClaudeInstallReport(report) {
   }
   console.log("");
   console.log("Next:");
-  console.log(`  Restart Claude Code, then run: /goal-prep`);
-  console.log(`  Or invoke the skill: ${canonicalSkillName}`);
+  console.log(`  Restart Claude Code, then run: /${compilerSkillName}`);
+  console.log(`  Goal Prep remains available explicitly as: /${canonicalSkillName}`);
   console.log("");
   console.log("Also available for Codex:");
-  console.log(`  npx ${canonicalCliName} --target codex`);
+  console.log(`  ${canonicalCliName} install --target codex`);
 }
 
 function installSkill({ force = true, quiet = false } = {}) {
@@ -740,13 +819,15 @@ async function installAll() {
   }
 }
 
-function doctor() {
+function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
   const skillPath = join(installedSkillRoot(), "SKILL.md");
   const legacySkillPath = join(legacyInstalledSkillRoot(), "SKILL.md");
+  const standaloneCompilerPath = join(homedir(), ".agents", "skills", compilerSkillName);
   const plugin = installedCodexPlugin();
   const agentsPath = join(codexHome(), "agents");
   const installed = existsSync(skillPath);
   const legacyInstalled = existsSync(legacySkillPath);
+  const standaloneCompilerPresent = existsSync(join(standaloneCompilerPath, "SKILL.md"));
   const agents = existsSync(agentsPath)
     ? readdirSync(agentsPath).filter((file) => file.startsWith("goal_") && file.endsWith(".toml"))
     : [];
@@ -776,33 +857,48 @@ function doctor() {
     warnings.push("native Codex /goal runtime is not ready; run `codex login` and `codex features enable goals` before using /goal.");
   }
   if (runtimeState === "fully-removed") {
-    errors.push("Codex GoalBuddy is fully removed; run `npx goalbuddy --target codex` to install.");
+    errors.push("Codex GoalBuddy is fully removed; run `goalbuddy install --target codex` to install.");
   } else if (runtimeState === "residual-agents-only") {
     errors.push(`Residual GoalBuddy Codex agents remain without plugin cache/config: ${residualAgents.join(", ")}; run a GoalBuddy reset/cleanup before treating it as removed.`);
   } else if (!plugin.skill_installed && !installed) {
-    errors.push("Codex GoalBuddy plugin is not installed; run `npx goalbuddy --target codex`.");
+    errors.push("Codex GoalBuddy plugin is not installed; run `goalbuddy install --target codex`.");
   }
   if (plugin.skill_installed && !plugin.enabled) {
-    errors.push("Codex GoalBuddy plugin cache exists but is not enabled in config.toml; run `npx goalbuddy --target codex`.");
+    errors.push("Codex GoalBuddy plugin cache exists but is not enabled in config.toml; run `goalbuddy install --target codex`.");
+  }
+  if (plugin.skill_installed && !plugin.compiler_skill_installed) {
+    errors.push("Codex GoalBuddy plugin is missing the bundled Codex Goal Compiler; run `goalbuddy update --target codex`.");
+  }
+  if (plugin.goal_prep_stale) {
+    errors.push("Codex Goal Prep plugin skill is stale; run `goalbuddy update --target codex`.");
+  }
+  if (plugin.compiler_skill_stale) {
+    errors.push("Codex Goal Compiler plugin skill is stale; run `goalbuddy update --target codex`.");
+  }
+  if (standaloneCompilerPresent) {
+    errors.push(`Standalone Codex Goal Compiler shadows the GoalBuddy plugin copy: ${standaloneCompilerPath}`);
   }
   for (const file of missingAgents) {
-    errors.push(`Missing GoalBuddy Codex agent: ${file}; run \`npx goalbuddy --target codex\`.`);
+    errors.push(`Missing GoalBuddy Codex agent: ${file}; run \`goalbuddy install --target codex\`.`);
   }
   for (const file of staleAgents) {
-    errors.push(`Stale GoalBuddy Codex agent: ${file}; run \`npx goalbuddy update --target codex\`.`);
+    errors.push(`Stale GoalBuddy Codex agent: ${file}; run \`goalbuddy update --target codex\`.`);
   }
-  if (hasFlag("--goal-ready") && !goalRuntime.ready) {
+  if (requireGoalReady && !goalRuntime.ready) {
     errors.push("Native Codex /goal runtime is not ready. GoalBuddy $goal-prep and local boards are separate from OpenAI-gated native /goal.");
   }
 
-  console.log(JSON.stringify({
+  const report = {
     codex_home: codexHome(),
+    target: "codex",
     codex_install_model: "plugin",
     capabilities: installedRuntimeCapabilities(),
     expected_state: {
       plugin_cache: true,
       bundled_skill: "$goal-prep",
+      compiler_skill: "$codex-goal-compiler",
       standalone_personal_skill: false,
+      standalone_compiler_skill: false,
       compatibility_skill: false,
       agents: requiredAgentFiles,
       native_goal: "separate OpenAI-gated Codex feature",
@@ -812,6 +908,8 @@ function doctor() {
     skill_path: skillPath,
     compatibility_skill_installed: legacyInstalled,
     compatibility_skill_path: legacySkillPath,
+    standalone_compiler_skill_present: standaloneCompilerPresent,
+    standalone_compiler_skill_path: standaloneCompilerPath,
     runtime_state: runtimeState,
     installed_agents: agents,
     residual_agents: residualAgents,
@@ -820,17 +918,101 @@ function doctor() {
     goal_runtime: goalRuntime,
     warnings,
     errors,
-  }, null, 2));
+  };
 
   const pluginOk = plugin.skill_installed && plugin.enabled;
   const legacySkillOk = installed;
-  const installOk = (pluginOk || legacySkillOk) && missingAgents.length === 0 && staleAgents.length === 0;
-  const goalReadyOk = !hasFlag("--goal-ready") || goalRuntime.ready;
-  process.exit(installOk && goalReadyOk && errors.length === 0 ? 0 : 1);
+  const installOk = (pluginOk || legacySkillOk)
+    && plugin.compiler_skill_installed
+    && !plugin.goal_prep_stale
+    && !plugin.compiler_skill_stale
+    && !standaloneCompilerPresent
+    && missingAgents.length === 0
+    && staleAgents.length === 0;
+  const goalReadyOk = !requireGoalReady || goalRuntime.ready;
+  return { report, ok: installOk && goalReadyOk && errors.length === 0 };
+}
+
+function doctor() {
+  const result = buildCodexDoctorReport({ requireGoalReady: hasFlag("--goal-ready") });
+  console.log(JSON.stringify(result.report, null, 2));
+  process.exit(result.ok ? 0 : 1);
 }
 
 function installedRuntimeCapabilities() {
   return { ...runtimeCapabilities };
+}
+
+function compilerContract() {
+  const target = requestedTarget();
+  if (!target) argumentError("contract requires --target codex or --target claude");
+
+  const runtime = target === "codex"
+    ? buildCodexDoctorReport({ requireGoalReady: true })
+    : buildClaudeDoctorReport();
+  const report = runtime.report;
+  const targetReport = target === "codex"
+    ? {
+        name: "codex",
+        ready: runtime.ok,
+        install_model: "plugin",
+        goal_prep_installed: report.plugin.skill_installed,
+        compiler_installed: report.plugin.compiler_skill_installed,
+        agents_ready: report.missing_agents.length === 0 && report.stale_agents.length === 0,
+        native_goal_ready: report.goal_runtime.ready,
+        duplicate_compiler_present: report.standalone_compiler_skill_present,
+      }
+    : {
+        name: "claude",
+        ready: runtime.ok,
+        install_model: "personal-skills-and-agents",
+        goal_prep_installed: report.skill_installed,
+        compiler_installed: report.compiler_skill_installed,
+        agents_ready: report.missing_agents.length === 0 && report.stale_agents.length === 0,
+        goal_command_ready: report.goal_command_present,
+      };
+  const payload = {
+    ok: runtime.ok,
+    contract_version: compilerContractVersion,
+    product_version: packageInfo.version,
+    board_schema_version: boardSchemaVersion,
+    capabilities: Object.entries(runtimeCapabilities)
+      .filter(([, supported]) => supported === true)
+      .map(([capability]) => capability)
+      .sort(),
+    source: sourceMetadata(),
+    target: targetReport,
+    errors: [...report.errors],
+  };
+
+  if (hasFlag("--json")) {
+    printJson(payload);
+  } else if (payload.ok) {
+    console.log(`${canonicalProductName} compiler contract v${compilerContractVersion} for ${target}: pass`);
+  } else {
+    console.log(`${canonicalProductName} compiler contract v${compilerContractVersion} for ${target}: blocked`);
+    for (const error of payload.errors) console.log(`- ${error}`);
+  }
+  process.exit(payload.ok ? 0 : 1);
+}
+
+function sourceMetadata() {
+  const head = spawnSync("git", ["-C", packageRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", packageRoot, "status", "--porcelain=v1"], { encoding: "utf8" });
+  if (head.status === 0 && status.status === 0) {
+    return {
+      kind: "local_git_checkout",
+      root: packageRoot,
+      commit: head.stdout.trim(),
+      dirty: status.stdout.trim() !== "",
+    };
+  }
+  return {
+    kind: "package_install",
+    root: packageRoot,
+    commit: null,
+    dirty: null,
+  };
 }
 
 function codexInstallState({ plugin, installed, legacyInstalled, residualAgents, missingAgents, staleAgents }) {
@@ -855,7 +1037,10 @@ function checkUpdate() {
     return;
   }
 
-  if (report.check_status !== "ok") {
+  if (report.check_status === "managed_local") {
+    console.log(`GoalBuddy ${report.current_version} is managed from the reviewed local checkout.`);
+    console.log(`Update policy: ${report.update_command}`);
+  } else if (report.check_status !== "ok") {
     console.log(`GoalBuddy update check unavailable: ${report.error}`);
   } else if (report.update_available) {
     console.log(`GoalBuddy ${report.latest_version} is available; installed version is ${report.current_version}.`);
@@ -866,43 +1051,21 @@ function checkUpdate() {
 }
 
 function updateReport() {
-  const report = {
+  return {
     package: packageInfo.name,
     current_version: normalizeVersion(packageInfo.version),
     latest_version: null,
     update_available: false,
-    check_status: "unknown",
+    check_status: "managed_local",
+    update_mode: "reviewed_local_checkout",
     update_command: detectUpdateCommand(),
   };
-
-  try {
-    report.latest_version = latestPublishedVersion();
-    report.update_available = compareVersions(report.current_version, report.latest_version) < 0;
-    report.check_status = "ok";
-  } catch (error) {
-    report.check_status = "unavailable";
-    report.error = error.message;
-  }
-
-  return report;
 }
 
 function detectUpdateCommand() {
   if (process.env.GOALBUDDY_TEST_UPDATE_COMMAND) return process.env.GOALBUDDY_TEST_UPDATE_COMMAND;
   if (process.env.GOALBUDDY_UPDATE_COMMAND) return process.env.GOALBUDDY_UPDATE_COMMAND;
-  if (process.env.CLAUDE_PLUGIN_ROOT || normalizedPath(__dirname).includes("/.claude/")) return `/plugin update ${pluginName}@${pluginName}`;
-
-  const userAgent = process.env.npm_config_user_agent || "";
-  if (/^pnpm\//.test(userAgent)) return `pnpm update -g ${canonicalCliName}`;
-  if (/^bun\//.test(userAgent)) return `bun update -g ${canonicalCliName}`;
-  if (process.env.MISE_EXE || process.env.MISE_SHELL || process.env.MISE_PROJECT_ROOT) return `mise upgrade npm:${canonicalCliName}`;
-  if (/^npm\//.test(userAgent)) return `npx ${canonicalCliName}@latest`;
-
-  return `use the install channel that installed ${canonicalProductName}`;
-}
-
-function normalizedPath(path) {
-  return String(path).replace(/\\/g, "/");
+  return "review the local GoalBuddy checkout, pass its isolated gates, then run goalbuddy update";
 }
 
 function plugin() {
@@ -934,7 +1097,7 @@ Usage:
   ${canonicalCliName} plugin install [--source <marketplace-source>] [--codex-home <path>] [--json]
 
 Default source:
-  Existing [marketplaces.goalbuddy] source, otherwise tolibear/goalbuddy
+  Existing [marketplaces.goalbuddy] source, otherwise this local GoalBuddy checkout
 `);
 }
 
@@ -969,6 +1132,8 @@ function installPlugin({ quiet = false } = {}) {
     marketplace_source: source,
     cache_path: pluginCachePath,
     config_path: configPath,
+    compiler_skill_path: join(pluginCachePath, "skills", compilerSkillName),
+    goal_prep_skill_path: join(pluginCachePath, "skills", canonicalSkillName),
     agents,
     removed_legacy_skill_paths: removedLegacySkillPaths,
   };
@@ -990,10 +1155,11 @@ function installPlugin({ quiet = false } = {}) {
   }
   console.log("");
   console.log("Restart Codex, then use:");
-  console.log(`  $${canonicalSkillName}`);
+  console.log(`  $${compilerSkillName}`);
+  console.log(`  $${canonicalSkillName} remains the explicit GoalBuddy board backend.`);
   console.log("");
   console.log("Goal surface:");
-  console.log(`  npx ${canonicalCliName} board docs/goals/<slug>`);
+  console.log(`  ${canonicalCliName} board docs/goals/<slug>`);
   return report;
 }
 
@@ -1002,7 +1168,7 @@ function resolveMarketplaceSource() {
   if (explicit) return explicit;
 
   const configPath = join(codexHome(), "config.toml");
-  if (!existsSync(configPath)) return "tolibear/goalbuddy";
+  if (!existsSync(configPath)) return packageRoot;
   const lines = readFileSync(configPath, "utf8").split(/\r?\n/);
   let inGoalBuddyMarketplace = false;
 
@@ -1025,7 +1191,7 @@ function resolveMarketplaceSource() {
     return match[1].slice(1, -1);
   }
 
-  return "tolibear/goalbuddy";
+  return packageRoot;
 }
 
 function legacyCodexSkillRoots() {
@@ -1423,6 +1589,10 @@ function installedCodexPlugin() {
     manifest_path: "",
     skill_installed: false,
     skill_path: "",
+    goal_prep_stale: false,
+    compiler_skill_installed: false,
+    compiler_skill_path: "",
+    compiler_skill_stale: false,
     config_path: configPath,
   };
   if (!existsSync(root)) return base;
@@ -1437,8 +1607,10 @@ function installedCodexPlugin() {
     const skillPath = [canonicalSkillName, canonicalSkillDirectory]
       .map((name) => join(cachePath, "skills", name))
       .find((path) => existsSync(join(path, "SKILL.md"))) || join(cachePath, "skills", canonicalSkillName);
+    const compilerSkillPath = join(cachePath, "skills", compilerSkillName);
     const manifestPath = join(cachePath, ".codex-plugin", "plugin.json");
     if (existsSync(join(skillPath, "SKILL.md"))) {
+      const compilerSkillInstalled = existsSync(join(compilerSkillPath, "SKILL.md"));
       return {
         ...base,
         installed: true,
@@ -1447,6 +1619,11 @@ function installedCodexPlugin() {
         manifest_path: manifestPath,
         skill_installed: true,
         skill_path: skillPath,
+        goal_prep_stale: skillTreeFingerprint(skillPath) !== skillTreeFingerprint(skillSource),
+        compiler_skill_installed: compilerSkillInstalled,
+        compiler_skill_path: compilerSkillPath,
+        compiler_skill_stale: compilerSkillInstalled
+          && skillTreeFingerprint(compilerSkillPath) !== skillTreeFingerprint(compilerSkillSource),
       };
     }
   }
@@ -1488,9 +1665,18 @@ function directoryFingerprint(root, { exclude = new Set() } = {}) {
   return hash.digest("hex");
 }
 
+function skillTreeFingerprint(root) {
+  return directoryFingerprint(root, {
+    exclude: new Set([...installFingerprintExcludes(), ".DS_Store", ".goalbuddy-board", "__pycache__"]),
+  });
+}
+
 function listFiles(root, { exclude = new Set(), prefix = "" } = {}) {
   const entries = readdirSync(join(root, prefix), { withFileTypes: true })
-    .filter((entry) => !exclude.has(prefix ? `${prefix}/${entry.name}` : entry.name))
+    .filter((entry) => {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      return !exclude.has(relative) && !exclude.has(entry.name);
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
   const files = [];
   for (const entry of entries) {
@@ -1573,6 +1759,7 @@ function printEverywhereInstallReport(report) {
     console.log(`Claude Code: not completed (${report.claude.error})`);
   } else if (report.claude) {
     console.log(`Claude Code: skill ${report.claude.skill.status} at ${report.claude.skill.path}`);
+    console.log(`Claude Code compiler: ${report.claude.compiler_skill.status} at ${report.claude.compiler_skill.path}`);
     console.log(`Claude Code agents: ${summarizeStatuses(report.claude.agents)}`);
     if (report.claude.legacy_commands_cleanup?.removed) {
       console.log(`Claude Code: removed legacy command at ${report.claude.legacy_commands_cleanup.path}`);
@@ -1587,8 +1774,8 @@ function printEverywhereInstallReport(report) {
 
   console.log("");
   console.log("Next:");
-  console.log(`  Restart Codex, then use: $${canonicalSkillName}`);
-  console.log("  Restart Claude Code, then run: /goal-prep");
+  console.log(`  Restart Codex, then use: $${compilerSkillName}`);
+  console.log(`  Restart Claude Code, then run: /${compilerSkillName}`);
 }
 
 function summarizeStatuses(items) {
@@ -1599,31 +1786,6 @@ function summarizeStatuses(items) {
   return Object.entries(counts)
     .map(([status, count]) => `${count} ${status}`)
     .join(", ");
-}
-
-function latestPublishedVersion() {
-  if (process.env.GOALBUDDY_TEST_NPM_LATEST_VERSION) {
-    return normalizeVersion(process.env.GOALBUDDY_TEST_NPM_LATEST_VERSION);
-  }
-
-  const result = spawnSync("npm", ["view", packageInfo.name, "version"], {
-    cwd: packageRoot,
-    encoding: "utf8",
-    shell: process.platform === "win32",
-    timeout: 5000,
-    env: {
-      ...process.env,
-      npm_config_update_notifier: "false",
-    },
-  });
-
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    const output = `${result.stderr || ""}${result.stdout || ""}`.trim();
-    throw new Error(output || `npm view exited with status ${result.status}`);
-  }
-
-  return normalizeVersion(result.stdout);
 }
 
 function normalizeVersion(value) {

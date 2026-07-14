@@ -1,14 +1,13 @@
 {
   "name": "goalbuddy",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Turn broad Codex and Claude Code work into pressured /goal runs with oracles, local boards, receipts, and verification.",
   "author": {
-    "name": "tolibear",
-    "email": "support@tolibear.com",
-    "url": "https://github.com/tolibear"
+    "name": "Daniel Alnajjar",
+    "url": "https://github.com/Danielalnajjar"
   },
-  "homepage": "https://goalbuddy.dev",
-  "repository": "https://github.com/tolibear/goalbuddy",
+  "homepage": "https://github.com/Danielalnajjar/goalbuddy#readme",
+  "repository": "https://github.com/Danielalnajjar/goalbuddy",
   "license": "MIT",
   "keywords": [
     "claude-code",

@@ -25,5 +25,5 @@ if (result.status === 0) {
 console.error("");
 console.error("GoalBuddy installed globally, but setup did not complete for every target.");
 console.error("Run this after Codex and Claude Code are available:");
-console.error("  goalbuddy");
+console.error("  goalbuddy install");
 process.exit(0);

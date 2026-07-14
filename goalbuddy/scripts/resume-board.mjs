@@ -104,7 +104,7 @@ function discoverBoards(options) {
       console.log(`  Active task: ${board.active_task.id} (${board.active_task.type}) ${board.active_task.objective}`);
       console.log("  Resume in any harness (Codex or Claude Code):");
       console.log(`    ${board.run_command}`);
-      console.log(`  Full task prompt: npx goalbuddy prompt ${board.path}`);
+      console.log(`  Full task prompt: goalbuddy prompt ${board.path}`);
     } else {
       console.log("  No active task.");
     }

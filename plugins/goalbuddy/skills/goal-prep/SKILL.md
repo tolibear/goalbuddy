@@ -42,7 +42,7 @@ During a `$goal-prep` turn, do not perform the user's requested work, even if th
 
 Allowed `$goal-prep` actions:
 
-- run the bundled GoalBuddy update checker and mention a newer version if one is available;
+- run the bundled GoalBuddy update checker to confirm reviewed-local-checkout ownership;
 - ask diagnostic intake questions and wait when required;
 - create or repair only `docs/goals/<slug>/goal.md`, `docs/goals/<slug>/state.yaml`, `docs/goals/<slug>/notes/`, and the generated `.goalbuddy-board/` visual board artifact;
 - create and open the built-in local GoalBuddy board surface for the goal unless the user opts out;
@@ -55,19 +55,19 @@ If the prompt names another skill or tool, such as "use the taste skill", "refre
 
 ## Update Check
 
-At the start of a `$goal-prep` turn, check whether GoalBuddy itself is stale. Run the bundled checker from the installed skill directory when available:
+At the start of a `$goal-prep` turn, read GoalBuddy's update ownership. Run the bundled checker from the installed skill directory when available:
 
 ```bash
 node <skill-path>/scripts/check-update.mjs --json
 ```
 
-If the checker reports `update_available: true`, tell the user once before continuing:
+This personal distribution is managed from a reviewed local checkout. The checker must report `check_status: managed_local` and must not consult or recommend the upstream npm package. Continue without an update message during ordinary Goal Prep. If the checker reports any other ownership mode, mention the mismatch once without changing the installation.
 
 ```text
-GoalBuddy <latest_version> is available. After this turn, update through the channel that installed GoalBuddy: `/plugin update goalbuddy@goalbuddy`, `npx goalbuddy@latest`, `npm i -g goalbuddy`, `pnpm update -g goalbuddy`, `bun update -g goalbuddy`, or `mise upgrade npm:goalbuddy`.
+GoalBuddy update ownership does not match the reviewed-local-checkout policy. Preserve the current installation and inspect the local GoalBuddy source before updating.
 ```
 
-Do not block intake or board creation on update checking. If the checker is missing, cannot find npm, or network access fails, continue silently unless the user asked about updates.
+Do not block intake or board creation on update checking. If the checker is missing or fails, continue silently unless the user asked about updates.
 
 ## Intake Compiler
 

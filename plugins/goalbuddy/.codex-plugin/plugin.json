@@ -1,14 +1,13 @@
 {
   "name": "goalbuddy",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Turn broad Codex and Claude Code work into pressured /goal runs with oracles, local boards, receipts, and verification.",
   "author": {
-    "name": "tolibear",
-    "email": "support@tolibear.com",
-    "url": "https://github.com/tolibear"
+    "name": "Daniel Alnajjar",
+    "url": "https://github.com/Danielalnajjar"
   },
-  "homepage": "https://github.com/tolibear/goalbuddy#readme",
-  "repository": "https://github.com/tolibear/goalbuddy",
+  "homepage": "https://github.com/Danielalnajjar/goalbuddy#readme",
+  "repository": "https://github.com/Danielalnajjar/goalbuddy",
   "license": "MIT",
   "keywords": [
     "goalbuddy",
@@ -25,18 +24,18 @@
     "displayName": "GoalBuddy",
     "shortDescription": "Goal oracles, local boards, receipts, and proof loops for /goal",
     "longDescription": "GoalBuddy packages a structured goal workflow for broad, long-running, or ambiguous engineering work in Codex or Claude Code. It creates durable goal charters, goal oracles, task boards, optional depth-1 subgoals, local board surfaces, parallel-agent-ready handoffs, receipts, verification gates, and compatibility guidance for teams moving from goal-maker.",
-    "developerName": "tolibear",
+    "developerName": "Daniel Alnajjar",
     "category": "Coding",
     "capabilities": [
       "Interactive",
       "Read",
       "Write"
     ],
-    "websiteURL": "https://github.com/tolibear/goalbuddy",
-    "privacyPolicyURL": "https://github.com/tolibear/goalbuddy#privacy",
-    "termsOfServiceURL": "https://github.com/tolibear/goalbuddy#license",
+    "websiteURL": "https://github.com/Danielalnajjar/goalbuddy",
+    "privacyPolicyURL": "https://github.com/Danielalnajjar/goalbuddy#privacy",
+    "termsOfServiceURL": "https://github.com/Danielalnajjar/goalbuddy#license",
     "defaultPrompt": [
-      "$goal-prep prepare a GoalBuddy board for this goal"
+      "$codex-goal-compiler determine and compile the correct goal route for this work"
     ],
     "brandColor": "#2563EB",
     "composerIcon": "./assets/goalbuddy-icon.svg",

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Codex Goal Compiler"
+  short_description: "Agreed work to the right Codex goal route"
+  default_prompt: "Use $codex-goal-compiler to turn agreed context into the correct goal route. Choose among direct work, planning, a standalone native /goal goal.md, GoalBuddy, and recurring automation. Default one bounded post-board review/remediation round to a standalone goal. Preserve accepted decisions, define observable completion and verification, and require exact GoalBuddy runtime preflight. When GoalBuddy wins, explicitly load Goal Prep as the internal board-preparation dependency directly in the current compiler context instead of relying on its implicit invocation; do not implement or start execution unless explicitly requested."
+policy:
+  allow_implicit_invocation: true

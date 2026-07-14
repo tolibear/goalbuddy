@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — Integrated Goal Compiler (2026-07-14)
+
+- **One installed product now owns goal routing and GoalBuddy execution.** Codex Goal Compiler moved into GoalBuddy as the public front door, while Goal Prep remains its explicit/manual board backend. Both canonical skills install into Codex and Claude and are guarded by byte-exact plugin mirrors.
+- **Compiler/runtime coupling now has a versioned boundary.** `goalbuddy contract --target codex|claude --json` reports compiler contract v1, board schema v2, named capabilities, source provenance, and target readiness. Compiler preflight requires its capability subset while accepting additive runtime evolution; it no longer parses GoalBuddy's doctor internals, exact version, agent count, or file topology.
+- **The personal fork cannot accidentally publish over upstream.** Package metadata points to `Danielalnajjar/goalbuddy`, the package is private, and upstream npm publication automation is removed. Existing boards, checker bytes, and runtime transition semantics remain unchanged.
 
 - **Every shipped parallel-work fallback now preserves recovery identity.** Claude's `/goal` fallback and the generated agent-instruction template no longer advertise same-board multi-writer exceptions. Each concurrent product-writing lane must use its own depth-one child board, pairwise-disjoint structured scope, and `parallel-plan`; a worktree isolates bytes but never substitutes for board identity or recovery checks.
 - **Out-of-scope receipt failures now teach the safe recovery path.** Atomic receipt rejection preserves the checker's compatibility-sensitive error bytes while adding explicit guidance to block the current task and use Keeper's typed `apply_amendment` or `apply_hydration` transition for a fully scoped successor. Rendered Worker prompts repeat the same rule beside `stop_if`, so prose or retroactive `allowed_files` widening is no longer the path of least resistance.

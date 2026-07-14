@@ -1,6 +1,7 @@
 {
   "name": "goalbuddy",
-  "version": "0.4.0",
+  "version": "0.5.0",
+  "private": true,
   "description": "A /goal operating loop for Codex and Claude Code: goal oracles, local boards, receipts, and verification.",
   "type": "module",
   "bin": {
@@ -17,6 +18,11 @@
     "plugins/goalbuddy",
     "internal/assets",
     "internal/cli",
+    "codex-goal-compiler/SKILL.md",
+    "codex-goal-compiler/agents",
+    "codex-goal-compiler/assets",
+    "codex-goal-compiler/references",
+    "codex-goal-compiler/scripts/*.py",
     "goalbuddy/SKILL.md",
     "goalbuddy/agents",
     "goalbuddy/scripts",
@@ -24,17 +30,15 @@
     "goalbuddy/templates"
   ],
   "scripts": {
-    "check": "node --check internal/cli/*.mjs goalbuddy/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/lib/*.mjs && node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs",
-    "test": "node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs",
+    "check": "node --check internal/cli/*.mjs goalbuddy/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/lib/*.mjs && node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs && python3 -B -m unittest discover -s internal/test/codex-goal-compiler -p 'test_*.py'",
+    "test": "node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs && python3 -B -m unittest discover -s internal/test/codex-goal-compiler -p 'test_*.py'",
     "pack:dry-run": "npm pack --dry-run",
     "sync:plugin": "node internal/cli/sync-skill-tree.mjs --write",
-    "postinstall": "node internal/cli/postinstall.mjs",
-    "publish:check": "node internal/cli/check-publish-version.mjs && npm run pack:dry-run",
-    "prepublishOnly": "node internal/cli/check-publish-version.mjs"
+    "postinstall": "node internal/cli/postinstall.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tolibear/goalbuddy.git"
+    "url": "git+https://github.com/Danielalnajjar/goalbuddy.git"
   },
   "keywords": [
     "codex",
@@ -55,16 +59,16 @@
     "agent",
     "verification"
   ],
-  "author": "tolibear",
+  "author": "Daniel Alnajjar",
+  "contributors": [
+    "tolibear (original GoalBuddy author)"
+  ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/tolibear/goalbuddy/issues"
+    "url": "https://github.com/Danielalnajjar/goalbuddy/issues"
   },
-  "homepage": "https://github.com/tolibear/goalbuddy#readme",
+  "homepage": "https://github.com/Danielalnajjar/goalbuddy#readme",
   "engines": {
     "node": ">=18"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

@@ -14,7 +14,7 @@ The surface keeps `state.yaml` authoritative. It writes static web app files int
 ## Generate And Serve
 
 ```bash
-npx goalbuddy board docs/goals/<slug>
+goalbuddy board docs/goals/<slug>
 ```
 
 The generated app includes the bundled `assets/goalbuddy-mark.png`, so the board keeps the GoalBuddy mark anywhere the package is installed.
@@ -33,7 +33,7 @@ Then it starts or reuses the shared local board hub at `http://goalbuddy.localho
 ## Check Without A Long-Running Server
 
 ```bash
-npx goalbuddy board docs/goals/<slug> \
+goalbuddy board docs/goals/<slug> \
   --once \
   --json
 ```

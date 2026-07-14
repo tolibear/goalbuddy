@@ -742,7 +742,7 @@ test("unregistered board paths explain hub reuse instead of stale-port cleanup",
       assert.match(message, /board path is not registered/i);
       assert.match(message, /multi-board hub/i);
       assert.match(message, /Do not stop it just because a \/<slug>\/ board URL returned 404/);
-      assert.match(message, /npx goalbuddy board <goal-dir>/);
+      assert.match(message, /goalbuddy board <goal-dir>/);
       assert.match(message, /First Goal/);
       assert.match(message, /\/api\/boards/);
     } finally {

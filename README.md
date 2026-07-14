@@ -1,9 +1,7 @@
 # GoalBuddy
 
 <p align="center">
-  <a href="https://goalbuddy.dev">
-    <img src="internal/assets/goalbuddy-readme-hero.png" alt="GoalBuddy local board and agent workflow." width="100%">
-  </a>
+  <img src="internal/assets/goalbuddy-readme-hero.png" alt="GoalBuddy local board and agent workflow." width="100%">
 </p>
 
 <p align="center">
@@ -11,38 +9,37 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/goalbuddy"><img alt="npm" src="https://img.shields.io/npm/v/goalbuddy?style=flat-square&color=684cff"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-071236?style=flat-square"></a>
-  <a href="https://goalbuddy.dev"><img alt="goalbuddy.dev" src="https://img.shields.io/badge/site-goalbuddy.dev-684cff?style=flat-square"></a>
 </p>
 
-GoalBuddy helps Codex and Claude Code stay oriented during long coding tasks by giving native `/goal` a finish line, a live work surface, and a proof loop.
+GoalBuddy helps Codex and Claude Code stay oriented during long coding tasks by giving native `/goal` a finish line, a live work surface, and a proof loop. This repository is Daniel Alnajjar's private local distribution, derived from [tolibear's original GoalBuddy](https://github.com/tolibear/goalbuddy).
 
 It gives `/goal` a small local workspace: a charter, a goal oracle, a board, notes, receipts, and a clear next task. The work stays in your repo, so a run can pause, resume, verify, and keep going without re-inventing the plan every turn.
 
 ## Start Here
 
-Run one command:
+Install this checkout as the local Bun-owned package, then install both harness surfaces:
 
 ```bash
-npx goalbuddy
+bun add -g "$PWD"
+goalbuddy install
 ```
 
 Restart Codex or Claude Code.
 
-Then prepare a goal:
+Then compile an agreed plan, spec, or conversation into the right goal route:
 
 ```text
-$goal-prep
+$codex-goal-compiler
 ```
 
 In Claude Code, use:
 
 ```text
-/goal-prep
+/codex-goal-compiler
 ```
 
-Goal Prep creates the board and prints the exact `/goal` command to run next. That is the whole path.
+Codex Goal Compiler chooses direct work, planning, a standalone native goal, GoalBuddy, or recurring automation. When it selects GoalBuddy, it explicitly loads Goal Prep as the board backend. `$goal-prep` and `/goal-prep` remain available for intentional manual board intake or repair, not as competing routers.
 
 In Claude Code, GoalBuddy installs a real `/goal` command that runs the execution loop. In Codex, native `/goal` is the separate OpenAI-gated feature GoalBuddy prepares boards for.
 
@@ -55,7 +52,7 @@ In Claude Code, GoalBuddy installs a real `/goal` command that runs the executio
 Harnesses churn; repos persist. A GoalBuddy board lives in your repo as plain files, so the goal outlives whichever tool started it: begin a goal in Codex, resume it in Claude Code tomorrow — or the other way around — with the same command.
 
 ```bash
-npx goalbuddy resume
+goalbuddy resume
 ```
 
 `resume` lists every live board in the repo with its status, active task, and the exact `/goal Follow docs/goals/<slug>/goal.md.` command to continue, which is identical in both harnesses. Receipts can record which harness performed each task, so the board's history survives the handoff intact.
@@ -63,7 +60,7 @@ npx goalbuddy resume
 When a specific board actually resumes, GoalBuddy validates it and uses the strict parser to render a bounded continuation projection:
 
 ```bash
-npx goalbuddy resume docs/goals/<slug> --json
+goalbuddy resume docs/goals/<slug> --json
 ```
 
 The PM then invokes GoalBuddy's read-only Ledger Auditor (`goal_ledger` in Codex, `goal-ledger` in Claude Code) with the response's board digest. Ledger independently reruns resume, reads the complete board, and reconciles it with repository, worktree, receipt, verification, approval-gate, and visible Worker evidence. A successful projection permits continuation only on `congruent` with the same pre/post digest. Checker or strict-parser failure returns no partial projection and no continuation authority; it routes the PM to full-board review. Current `version: 2` boards whose checker errors are confined to immutable completed-task history may remain untouched, but only the PM may authorize that compatibility path after direct review. Once authorized, `goalbuddy prompt <board> --expected-state-digest <sha256> --allow-immutable-history` reuses the transition layer's exact compatibility proof and strictly parses only the exact active-task block plus unchanged top-level goal/control sections. It rejects digest drift, changed or live-tail errors, malformed active bytes, and task mismatch; it never invokes the board UI's lossy fallback or rewrites history. The projection is not a second ledger, and an active task is never treated as proof that its Worker is still alive.
@@ -73,7 +70,7 @@ After recovery, GoalBuddy's Board Keeper (`goal_keeper` in Codex, `goal-keeper` 
 Boards can also mix vendors within a single run — a Claude judge and a Codex worker on the same board:
 
 ```bash
-npx goalbuddy dispatch docs/goals/<slug> --to codex
+goalbuddy dispatch docs/goals/<slug> --to codex
 ```
 
 `dispatch` renders the active task's prompt, runs the target CLI headless (`codex` or `claude-code`), extracts the returned receipt, and verifies write scope mechanically with git: worker changes must stay inside the task's `allowed_files`, and read-only roles must change nothing. The dispatcher never edits the board — the PM gives the stamped receipt and exact successor decision to Keeper for validated recording.
@@ -91,18 +88,19 @@ For Codex, the canonical install is the native plugin plus bundled agents:
 ~/.codex/agents/goal_worker.toml
 ```
 
-The Codex plugin bundles `$goal-prep`; a clean Codex install should not need personal `~/.codex/skills/goalbuddy` or `~/.codex/skills/goal-maker` folders. Native Codex `/goal` is a separate OpenAI-gated feature. GoalBuddy prepares local boards and handoff prompts for it, but it does not enable or replace native `/goal`.
+The Codex plugin bundles both `$codex-goal-compiler` and `$goal-prep`; a clean install has no standalone compiler or personal `~/.codex/skills/goalbuddy` / `goal-maker` folders. Claude receives the same compiler and backend as personal skills. Native Codex `/goal` is a separate OpenAI-gated feature. GoalBuddy prepares local boards and handoff prompts for it, but it does not enable or replace native `/goal`.
 
 To verify a Codex install:
 
 ```bash
-npx goalbuddy doctor --target codex --goal-ready
+goalbuddy contract --target codex --json
+goalbuddy doctor --target codex --goal-ready
 ```
 
 To remove GoalBuddy-owned Codex runtime surfaces:
 
 ```bash
-npx goalbuddy reset --target codex
+goalbuddy reset --target codex
 ```
 
 Native `codex plugin remove goalbuddy@goalbuddy` only removes the native plugin surface. GoalBuddy also owns the `goal_*.toml` agent files it installed, its Codex plugin cache, its marketplace entry, and old personal skill folders from earlier installs. Use `goalbuddy reset --target codex` when you want those GoalBuddy-owned files removed too.
@@ -175,12 +173,24 @@ GoalBuddy can prepare safe parallel work; it does not run a parallel org chart o
 
 Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy task agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. `goal_keeper` and `goal_ledger` are separate control-plane roles: Keeper handles exact board operations during execution, while Ledger runs only at genuine recovery boundaries. Neither receives a board task. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
 
+## Product Boundary
+
+GoalBuddy owns both canonical skill trees, installation topology, execution agents, board schema, runtime commands, and a stable compiler-facing contract:
+
+```text
+codex-goal-compiler  -> chooses and validates the route
+goal-prep            -> compiles GoalBuddy boards when selected
+goalbuddy contract   -> reports target readiness and runtime capabilities
+```
+
+The compiler requires contract v1, board schema v2, and a named capability subset. It accepts additive capabilities, so GoalBuddy may evolve internally without forcing the compiler to learn file paths, agent counts, doctor output, or exact product versions again.
+
 ## Update
 
-When a new GoalBuddy version ships:
+Updates are reviewed and activated from this local checkout; registry GoalBuddy is not the authority for this fork:
 
 ```bash
-npx goalbuddy update
+goalbuddy update
 ```
 
 That updates both Codex and Claude Code. If Codex already points its GoalBuddy marketplace at a local checkout, update preserves that source; pass `--source` only when you intentionally want to change it.
@@ -193,7 +203,7 @@ Multiple local boards reuse one readable `goalbuddy.localhost` hub with an in-he
 
 Custom external integrations should be built as ordinary repo work with a concrete implementation plan, not installed from a GoalBuddy catalog.
 
-See [GoalBuddy 0.4.0: Cross-Harness Goals](docs/releases/0.4.0.md) for the latest release notes.
+See [GoalBuddy 0.5.0: Integrated Goal Compiler](docs/releases/0.5.0.md) for the latest release notes.
 
 <p align="center">
   <img src="internal/assets/goalbuddy-live-board.jpg" alt="GoalBuddy local live board open next to Codex while Scout, Judge, and Worker tasks populate." width="100%">
@@ -209,21 +219,11 @@ See [GoalBuddy 0.4.0: Cross-Harness Goals](docs/releases/0.4.0.md) for the lates
 
 ## For This Repo
 
-GoalBuddy is MIT licensed and published on npm.
+GoalBuddy is MIT licensed. This personal distribution is installed from the local Git checkout and is deliberately marked private so it cannot overwrite the upstream npm package.
 
-The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Goal Prep, then let `/goal` work from the generated files.
+The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Codex Goal Compiler, then let the selected route work from the generated artifact.
 
 For release process details, see [docs/releases](docs/releases/README.md).
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=tolibear%2Fgoalbuddy&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tolibear/goalbuddy&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tolibear/goalbuddy&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tolibear/goalbuddy&type=date&legend=top-left" />
- </picture>
-</a>
 
 ## License
 
