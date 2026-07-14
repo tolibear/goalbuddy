@@ -25,6 +25,7 @@
     "codex-goal-compiler/scripts/*.py",
     "goalbuddy/SKILL.md",
     "goalbuddy/agents",
+    "goalbuddy/references",
     "goalbuddy/scripts",
     "goalbuddy/surfaces",
     "goalbuddy/templates"
@@ -33,8 +34,7 @@
     "check": "node --check internal/cli/*.mjs goalbuddy/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/*.mjs goalbuddy/surfaces/local-goal-board/scripts/lib/*.mjs && node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs && python3 -B -m unittest discover -s internal/test/codex-goal-compiler -p 'test_*.py'",
     "test": "node --test internal/test/*.test.mjs goalbuddy/surfaces/local-goal-board/test/*.test.mjs && python3 -B -m unittest discover -s internal/test/codex-goal-compiler -p 'test_*.py'",
     "pack:dry-run": "npm pack --dry-run",
-    "sync:plugin": "node internal/cli/sync-skill-tree.mjs --write",
-    "postinstall": "node internal/cli/postinstall.mjs"
+    "sync:plugin": "node internal/cli/sync-skill-tree.mjs --write"
   },
   "repository": {
     "type": "git",

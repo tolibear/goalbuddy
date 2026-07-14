@@ -2,17 +2,22 @@
 import {
   cpSync,
   existsSync,
+  lstatSync,
+  mkdtempSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { basename, dirname, join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -82,7 +87,11 @@ const command = args[0] === "--help" || args[0] === "-h"
 const invokedAs = invokedCommandName();
 
 main().catch((error) => {
-  console.error(error.message);
+  if (hasFlag("--json")) {
+    console.error(JSON.stringify({ ok: false, error: error.message }, null, 2));
+  } else {
+    console.error(error.message);
+  }
   process.exitCode = 1;
 });
 
@@ -90,13 +99,7 @@ async function main() {
   maybePrintLegacyNotice();
   switch (command) {
     case "default":
-      if (installTargetMode() === "all") {
-        await installEverywhere();
-      } else if (installTargetMode() === "codex") {
-        installPlugin();
-      } else {
-        await installClaudeAll();
-      }
+      usage();
       break;
     case "install":
     case "update":
@@ -104,13 +107,7 @@ async function main() {
         usage();
         break;
       }
-      if (installTargetMode() === "all") {
-        await installEverywhere();
-      } else if (installTargetMode() === "codex") {
-        installPlugin();
-      } else {
-        await installClaudeAll();
-      }
+      await installTransaction(installTargetMode());
       break;
     case "agents":
       if (wantsHelp()) {
@@ -161,7 +158,7 @@ async function main() {
         pluginUsage();
         break;
       }
-      plugin();
+      await plugin();
       break;
     case "board":
       await board();
@@ -329,7 +326,7 @@ function usage() {
   console.log(`${canonicalProductName} for Claude Code and Codex
 
 Usage:
-  ${canonicalCliName} [--target claude|codex] [--claude-home <path>] [--codex-home <path>] [--json]
+  ${canonicalCliName}
   ${canonicalCliName} plugin install [--source <marketplace-source>] [--codex-home <path>] [--json]
   ${canonicalCliName} install [--target claude|codex] [--claude-home <path>] [--codex-home <path>] [--force] [--json]
   ${canonicalCliName} update [--target claude|codex] [--source <marketplace-source>] [--claude-home <path>] [--codex-home <path>] [--json]
@@ -350,19 +347,20 @@ Usage:
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--expected-state-digest <sha256> --allow-immutable-history] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
-Targets: by default, install/update prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the command.
+Targets: install/update transactionally prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the transaction.
 
 Default:
-  ${canonicalCliName}                  Installs Codex Goal Compiler, Goal Prep, and agents for both harnesses.
-  ${canonicalCliName} --target claude  Installs ${canonicalProductName} compiler, backend, command, and agents for Claude Code.
-  ${canonicalCliName} --target codex   Installs and enables the native Codex plugin.
+  ${canonicalCliName}                  Shows this help without changing runtime state.
+  ${canonicalCliName} install          Installs Codex Goal Compiler, Goal Prep, and agents for both harnesses as one rollback-safe transaction.
+  ${canonicalCliName} install --target claude  Installs ${canonicalProductName} compiler, backend, command, and agents for Claude Code.
+  ${canonicalCliName} install --target codex   Installs and enables the native Codex plugin.
 
 Compatibility:
   ${legacyCliName} remains an inherited temporary alias and prints the canonical local command for human-facing use.
 
 Environment:
   CODEX_HOME                         Overrides the default ~/.codex target.
-  CLAUDE_HOME                        Overrides the default ~/.claude target (and selects Claude Code unless --target codex is set).
+  CLAUDE_HOME                        Overrides the default ~/.claude path. For doctor/contract it selects Claude unless --target is explicit; install/update still default to both targets.
 `);
 }
 
@@ -400,7 +398,6 @@ function installTargetMode() {
   const hasClaudeHomeOption = Boolean(optionValue("--claude-home"));
   if (hasCodexHomeOption && !hasClaudeHomeOption) return "codex";
   if (hasClaudeHomeOption && !hasCodexHomeOption) return "claude";
-  if (process.env.CLAUDE_HOME && !hasCodexHomeOption) return "claude";
   return "all";
 }
 
@@ -410,6 +407,10 @@ function claudeSkillRoot() {
 
 function claudeCompilerSkillRoot() {
   return join(claudeHome(), "skills", compilerSkillName);
+}
+
+function standaloneCompilerRoot() {
+  return join(homedir(), ".agents", "skills", compilerSkillName);
 }
 
 function legacyClaudeSkillRoot() {
@@ -427,8 +428,7 @@ function legacyClaudeCommandPath() {
 function installClaudeSkill({ quiet = false } = {}) {
   const target = claudeSkillRoot();
   if (!existsSync(skillSource)) {
-    console.error(`Skill payload not found: ${skillSource}`);
-    process.exit(1);
+    throw new Error(`Skill payload not found: ${skillSource}`);
   }
 
   const legacyTarget = legacyClaudeSkillRoot();
@@ -521,8 +521,12 @@ function claudeGoalCommandPath() {
   return join(claudeHome(), "commands", "goal.md");
 }
 
+function claudeGoalCommandSource() {
+  return join(claudePluginSource, "commands", "goal.md");
+}
+
 function installClaudeGoalCommand({ quiet = false } = {}) {
-  const source = join(claudePluginSource, "commands", "goal.md");
+  const source = claudeGoalCommandSource();
   const target = claudeGoalCommandPath();
   if (!existsSync(source)) return { status: "missing_source", path: target };
   const sourceHash = sha256(readFileSync(source));
@@ -564,54 +568,258 @@ async function buildClaudeInstallReport() {
   return report;
 }
 
-async function installClaudeAll() {
-  const report = await buildClaudeInstallReport();
+async function installTransaction(mode) {
+  const targets = mode === "all" ? ["codex", "claude"] : [mode];
+  preflightInstallTransaction(targets);
+  const snapshot = createInstallSnapshot(installationOwnedPaths(targets));
 
-  if (hasFlag("--json")) {
-    printJson(report);
-  } else {
-    printClaudeInstallReport(report);
+  try {
+    const codex = targets.includes("codex") ? installPlugin({ quiet: true }) : null;
+    activationCheckpoint("codex");
+    const claude = targets.includes("claude") ? await buildClaudeInstallReport() : null;
+    activationCheckpoint("claude");
+    const compilerCleanup = targets.includes("codex")
+      ? retireStandaloneCompilerLink()
+      : { status: "not_applicable", path: standaloneCompilerRoot() };
+    activationCheckpoint("compiler_retirement");
+
+    const verification = verifyInstalledTargets(targets);
+    activationCheckpoint("verification");
+    const transaction = {
+      status: "committed",
+      targets,
+      rollback_performed: false,
+      verified: true,
+    };
+    const report = installTransactionReport({ mode, codex, claude, compilerCleanup, verification, transaction });
+    discardInstallSnapshot(snapshot);
+    printInstallTransactionReport(mode, report);
+    return report;
+  } catch (error) {
+    let rollbackError = null;
+    try {
+      restoreInstallSnapshot(snapshot);
+    } catch (restoreError) {
+      rollbackError = restoreError;
+    }
+
+    const failure = {
+      ok: false,
+      command,
+      target_mode: mode,
+      error: error.message,
+      transaction: {
+        status: rollbackError ? "rollback_failed" : "rolled_back",
+        targets,
+        rollback_performed: !rollbackError,
+        verified: false,
+        recovery_snapshot: rollbackError ? snapshot.root : null,
+        rollback_error: rollbackError?.message || null,
+      },
+    };
+    if (hasFlag("--json")) {
+      console.error(JSON.stringify(failure, null, 2));
+    } else if (rollbackError) {
+      console.error(`GoalBuddy activation failed and rollback also failed: ${error.message}`);
+      console.error(`Recovery snapshot: ${snapshot.root}`);
+      console.error(`Rollback error: ${rollbackError.message}`);
+    } else {
+      console.error(`GoalBuddy activation failed; previous runtime surfaces were restored: ${error.message}`);
+    }
+    process.exitCode = 1;
+    return failure;
   }
 }
 
-async function installEverywhere() {
-  const report = {
+function installTransactionReport({ mode, codex, claude, compilerCleanup, verification, transaction }) {
+  if (mode === "codex") {
+    return {
+      ...codex,
+      ok: true,
+      standalone_compiler_cleanup: compilerCleanup,
+      verification,
+      transaction,
+    };
+  }
+  if (mode === "claude") {
+    return {
+      ...claude,
+      ok: true,
+      verification,
+      transaction,
+    };
+  }
+  return {
     command,
     package: {
       name: packageInfo.name,
       current_version: packageInfo.version,
     },
-    codex: null,
-    claude: null,
+    codex,
+    claude,
+    standalone_compiler_cleanup: compilerCleanup,
+    verification,
     errors: [],
+    ok: true,
+    transaction,
   };
+}
 
-  try {
-    report.codex = installPlugin({ quiet: true });
-  } catch (error) {
-    report.errors.push({ target: "codex", error: error.message });
-    report.codex = { target: "codex", ok: false, error: error.message };
-  }
-
-  try {
-    report.claude = await buildClaudeInstallReport();
-  } catch (error) {
-    report.errors.push({ target: "claude", error: error.message });
-    report.claude = { target: "claude", ok: false, error: error.message };
-  }
-
-  report.ok = report.errors.length === 0;
-
+function printInstallTransactionReport(mode, report) {
   if (hasFlag("--json")) {
     printJson(report);
+  } else if (mode === "codex") {
+    printCodexInstallReport(report);
+  } else if (mode === "claude") {
+    printClaudeInstallReport(report);
   } else {
     printEverywhereInstallReport(report);
   }
+}
 
-  if (!report.ok) process.exit(1);
+function preflightInstallTransaction(targets) {
+  const source = sourceMetadata();
+  if (!source.verified) {
+    throw new Error("GoalBuddy package bytes do not match a verified local Git checkout; refresh the Bun package before activation.");
+  }
+  const requiredPaths = [
+    join(packageRoot, "package.json"),
+    join(compilerSkillSource, "SKILL.md"),
+    join(skillSource, "SKILL.md"),
+  ];
+  if (targets.includes("codex")) {
+    requiredPaths.push(join(claudePluginSource, ".codex-plugin", "plugin.json"));
+    requiredPaths.push(...requiredAgentFiles.map((file) => join(skillSource, "agents", file)));
+    const standalone = lstatSync(standaloneCompilerRoot(), { throwIfNoEntry: false });
+    if (standalone && !standalone.isSymbolicLink()) {
+      throw new Error(`Standalone Codex Goal Compiler is not a symlink and cannot be retired automatically: ${standaloneCompilerRoot()}`);
+    }
+  }
+  if (targets.includes("claude")) {
+    requiredPaths.push(join(claudePluginSource, "commands", "goal.md"));
+    requiredPaths.push(...requiredClaudeAgentFiles.map((file) => join(claudePluginSource, "agents", file)));
+  }
+  const missing = requiredPaths.filter((path) => !existsSync(path));
+  if (missing.length) throw new Error(`Activation payload is incomplete: ${missing.join(", ")}`);
+}
+
+function installationOwnedPaths(targets) {
+  const paths = [];
+  if (targets.includes("codex")) {
+    paths.push(join(codexHome(), "config.toml"));
+    paths.push(pluginCacheOwnerRoot());
+    paths.push(...requiredAgentFiles.map((file) => join(codexHome(), "agents", file)));
+    paths.push(...legacyCodexSkillRoots());
+    paths.push(standaloneCompilerRoot());
+  }
+  if (targets.includes("claude")) {
+    paths.push(claudeSkillRoot(), claudeCompilerSkillRoot(), legacyClaudeSkillRoot());
+    paths.push(...requiredClaudeAgentFiles.map((file) => join(claudeAgentsRoot(), file)));
+    paths.push(claudeGoalCommandPath(), legacyClaudeCommandPath());
+  }
+  return [...new Set(paths)];
+}
+
+function createInstallSnapshot(paths) {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-activation-"));
+  const missingDirectories = new Set();
+  const entries = paths.map((path, index) => {
+    const present = pathEntryExists(path);
+    const backup = join(root, String(index));
+    if (present) copyPathEntry(path, backup);
+    recordMissingParentDirectories(path, missingDirectories);
+    return { path, present, backup };
+  });
+  return { root, entries, missing_directories: [...missingDirectories] };
+}
+
+function restoreInstallSnapshot(snapshot) {
+  for (const entry of snapshot.entries) {
+    removePathEntry(entry.path);
+    if (entry.present) copyPathEntry(entry.backup, entry.path);
+  }
+  removeTransactionCreatedDirectories(snapshot.missing_directories);
+  discardInstallSnapshot(snapshot);
+}
+
+function discardInstallSnapshot(snapshot) {
+  rmSync(snapshot.root, { recursive: true, force: true });
+}
+
+function copyPathEntry(source, target) {
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(source, target, {
+    recursive: true,
+    dereference: false,
+    verbatimSymlinks: true,
+  });
+}
+
+function removePathEntry(path) {
+  const entry = lstatSync(path, { throwIfNoEntry: false });
+  if (!entry) return;
+  rmSync(path, { recursive: entry.isDirectory() && !entry.isSymbolicLink(), force: true });
+}
+
+function pathEntryExists(path) {
+  return Boolean(lstatSync(path, { throwIfNoEntry: false }));
+}
+
+function recordMissingParentDirectories(path, missingDirectories) {
+  let current = dirname(path);
+  while (current !== dirname(current) && !pathEntryExists(current)) {
+    missingDirectories.add(current);
+    current = dirname(current);
+  }
+}
+
+function removeTransactionCreatedDirectories(paths = []) {
+  const deepestFirst = [...paths].sort((left, right) => right.length - left.length);
+  for (const path of deepestFirst) {
+    try {
+      rmdirSync(path);
+    } catch (error) {
+      if (error?.code === "ENOENT" || error?.code === "ENOTEMPTY") continue;
+      throw error;
+    }
+  }
+}
+
+function retireStandaloneCompilerLink() {
+  const path = standaloneCompilerRoot();
+  const entry = lstatSync(path, { throwIfNoEntry: false });
+  if (!entry) return { status: "absent", path, previous_target: null };
+  if (!entry.isSymbolicLink()) {
+    throw new Error(`Refusing to remove non-symlink standalone compiler: ${path}`);
+  }
+  const previousTarget = readlinkSync(path);
+  rmSync(path, { force: true });
+  return { status: "removed_symlink", path, previous_target: previousTarget };
+}
+
+function verifyInstalledTargets(targets) {
+  const result = {};
+  if (targets.includes("codex")) {
+    const codex = buildCodexDoctorReport();
+    if (!codex.ok) throw new Error(`Codex verification failed: ${codex.report.errors.join(" ")}`);
+    result.codex = "pass";
+  }
+  if (targets.includes("claude")) {
+    const claude = buildClaudeDoctorReport();
+    if (!claude.ok) throw new Error(`Claude verification failed: ${claude.report.errors.join(" ")}`);
+    result.claude = "pass";
+  }
+  return result;
+}
+
+function activationCheckpoint(name) {
+  if (process.env.GOALBUDDY_TEST_FAIL_AFTER === name) {
+    throw new Error(`Injected activation failure after ${name}`);
+  }
 }
 
 function buildClaudeDoctorReport() {
+  const source = sourceMetadata();
   const skillPath = join(claudeSkillRoot(), "SKILL.md");
   const compilerSkillPath = join(claudeCompilerSkillRoot(), "SKILL.md");
   const agentsPath = claudeAgentsRoot();
@@ -636,7 +844,13 @@ function buildClaudeDoctorReport() {
   const legacySkillPresent = existsSync(legacySkillPath);
   const goalCommandPath = claudeGoalCommandPath();
   const goalCommandPresent = existsSync(goalCommandPath);
+  const goalCommandStale = goalCommandPresent
+    && existsSync(claudeGoalCommandSource())
+    && sha256(readFileSync(goalCommandPath)) !== sha256(readFileSync(claudeGoalCommandSource()));
   const errors = [];
+  if (!source.verified) {
+    errors.push("GoalBuddy package bytes do not match a verified local Git checkout; refresh the Bun package before activation.");
+  }
   if (!installed) errors.push("Claude Goal Prep skill is not installed.");
   if (!compilerInstalled) errors.push("Claude Codex Goal Compiler skill is not installed.");
   if (skillStale) errors.push("Claude Goal Prep skill is stale; run `goalbuddy update --target claude`.");
@@ -644,11 +858,13 @@ function buildClaudeDoctorReport() {
   for (const file of missingAgents) errors.push(`Missing GoalBuddy Claude agent: ${file}.`);
   for (const file of staleAgents) errors.push(`Stale GoalBuddy Claude agent: ${file}.`);
   if (!goalCommandPresent) errors.push("Claude /goal command is missing.");
+  if (goalCommandStale) errors.push("Claude /goal command is stale; run `goalbuddy update --target claude`.");
   if (legacyCommandPresent) errors.push("Claude legacy Goal Prep command is still present.");
   if (legacySkillPresent) errors.push("Claude legacy GoalBuddy skill is still present.");
 
   const report = {
     target: "claude",
+    source,
     capabilities: installedRuntimeCapabilities(),
     claude_home: claudeHome(),
     skill_installed: installed,
@@ -662,6 +878,7 @@ function buildClaudeDoctorReport() {
     stale_agents: staleAgents,
     goal_command_present: goalCommandPresent,
     goal_command_path: goalCommandPath,
+    goal_command_stale: goalCommandStale,
     legacy_command_present: legacyCommandPresent,
     legacy_command_path: legacyCommandPath,
     legacy_skill_present: legacySkillPresent,
@@ -820,14 +1037,19 @@ async function installAll() {
 }
 
 function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
+  const source = sourceMetadata();
   const skillPath = join(installedSkillRoot(), "SKILL.md");
   const legacySkillPath = join(legacyInstalledSkillRoot(), "SKILL.md");
   const standaloneCompilerPath = join(homedir(), ".agents", "skills", compilerSkillName);
   const plugin = installedCodexPlugin();
+  const marketplaceSource = marketplaceSourceFromConfig();
+  const marketplaceSourceMatches = marketplaceSource === source.root;
   const agentsPath = join(codexHome(), "agents");
   const installed = existsSync(skillPath);
   const legacyInstalled = existsSync(legacySkillPath);
-  const standaloneCompilerPresent = existsSync(join(standaloneCompilerPath, "SKILL.md"));
+  const standaloneCompilerPresent = pathEntryExists(standaloneCompilerPath);
+  const standaloneCompilerDangling = standaloneCompilerPresent
+    && !existsSync(join(standaloneCompilerPath, "SKILL.md"));
   const agents = existsSync(agentsPath)
     ? readdirSync(agentsPath).filter((file) => file.startsWith("goal_") && file.endsWith(".toml"))
     : [];
@@ -853,6 +1075,9 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
   const goalRuntime = codexGoalRuntimeStatus();
   const warnings = [];
   const errors = [];
+  if (!source.verified) {
+    errors.push("GoalBuddy package bytes do not match a verified local Git checkout; refresh the Bun package before activation.");
+  }
   if (!goalRuntime.ready) {
     warnings.push("native Codex /goal runtime is not ready; run `codex login` and `codex features enable goals` before using /goal.");
   }
@@ -866,6 +1091,9 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
   if (plugin.skill_installed && !plugin.enabled) {
     errors.push("Codex GoalBuddy plugin cache exists but is not enabled in config.toml; run `goalbuddy install --target codex`.");
   }
+  if (plugin.skill_installed && !marketplaceSourceMatches) {
+    errors.push(`Codex GoalBuddy marketplace source is ${marketplaceSource || "missing"}; expected verified local checkout ${source.root}.`);
+  }
   if (plugin.skill_installed && !plugin.compiler_skill_installed) {
     errors.push("Codex GoalBuddy plugin is missing the bundled Codex Goal Compiler; run `goalbuddy update --target codex`.");
   }
@@ -876,7 +1104,8 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
     errors.push("Codex Goal Compiler plugin skill is stale; run `goalbuddy update --target codex`.");
   }
   if (standaloneCompilerPresent) {
-    errors.push(`Standalone Codex Goal Compiler shadows the GoalBuddy plugin copy: ${standaloneCompilerPath}`);
+    const state = standaloneCompilerDangling ? "dangling entry" : "shadowing entry";
+    errors.push(`Standalone Codex Goal Compiler ${state} remains at ${standaloneCompilerPath}; run \`goalbuddy install --target codex\` to retire a symlink safely.`);
   }
   for (const file of missingAgents) {
     errors.push(`Missing GoalBuddy Codex agent: ${file}; run \`goalbuddy install --target codex\`.`);
@@ -891,6 +1120,7 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
   const report = {
     codex_home: codexHome(),
     target: "codex",
+    source,
     codex_install_model: "plugin",
     capabilities: installedRuntimeCapabilities(),
     expected_state: {
@@ -904,11 +1134,14 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
       native_goal: "separate OpenAI-gated Codex feature",
     },
     plugin,
+    marketplace_source: marketplaceSource,
+    marketplace_source_matches: marketplaceSourceMatches,
     skill_installed: installed,
     skill_path: skillPath,
     compatibility_skill_installed: legacyInstalled,
     compatibility_skill_path: legacySkillPath,
     standalone_compiler_skill_present: standaloneCompilerPresent,
+    standalone_compiler_skill_dangling: standaloneCompilerDangling,
     standalone_compiler_skill_path: standaloneCompilerPath,
     runtime_state: runtimeState,
     installed_agents: agents,
@@ -927,6 +1160,8 @@ function buildCodexDoctorReport({ requireGoalReady = false } = {}) {
     && !plugin.goal_prep_stale
     && !plugin.compiler_skill_stale
     && !standaloneCompilerPresent
+    && source.verified
+    && marketplaceSourceMatches
     && missingAgents.length === 0
     && staleAgents.length === 0;
   const goalReadyOk = !requireGoalReady || goalRuntime.ready;
@@ -961,6 +1196,7 @@ function compilerContract() {
         agents_ready: report.missing_agents.length === 0 && report.stale_agents.length === 0,
         native_goal_ready: report.goal_runtime.ready,
         duplicate_compiler_present: report.standalone_compiler_skill_present,
+        source_ready: report.source.verified && report.marketplace_source_matches,
       }
     : {
         name: "claude",
@@ -969,7 +1205,8 @@ function compilerContract() {
         goal_prep_installed: report.skill_installed,
         compiler_installed: report.compiler_skill_installed,
         agents_ready: report.missing_agents.length === 0 && report.stale_agents.length === 0,
-        goal_command_ready: report.goal_command_present,
+        goal_command_ready: report.goal_command_present && !report.goal_command_stale,
+        source_ready: report.source.verified,
       };
   const payload = {
     ok: runtime.ok,
@@ -980,7 +1217,7 @@ function compilerContract() {
       .filter(([, supported]) => supported === true)
       .map(([capability]) => capability)
       .sort(),
-    source: sourceMetadata(),
+    source: report.source,
     target: targetReport,
     errors: [...report.errors],
   };
@@ -997,22 +1234,99 @@ function compilerContract() {
 }
 
 function sourceMetadata() {
-  const head = spawnSync("git", ["-C", packageRoot, "rev-parse", "HEAD"], { encoding: "utf8" });
-  const status = spawnSync("git", ["-C", packageRoot, "status", "--porcelain=v1"], { encoding: "utf8" });
-  if (head.status === 0 && status.status === 0) {
-    return {
-      kind: "local_git_checkout",
-      root: packageRoot,
-      commit: head.stdout.trim(),
-      dirty: status.stdout.trim() !== "",
-    };
-  }
+  const root = canonicalSourceRoot();
+  const git = gitCheckoutMetadata(root);
+  const sourceFingerprint = distributionFingerprint(root);
+  const installedFingerprint = distributionFingerprint(packageRoot);
+  const installedBytesMatch = Boolean(sourceFingerprint)
+    && sourceFingerprint === installedFingerprint;
   return {
-    kind: "package_install",
-    root: packageRoot,
-    commit: null,
-    dirty: null,
+    kind: git ? "local_git_checkout" : "local_checkout",
+    root,
+    installed_root: packageRoot,
+    commit: git?.commit || null,
+    dirty: git?.dirty ?? null,
+    source_payload_fingerprint: sourceFingerprint || null,
+    installed_payload_fingerprint: installedFingerprint || null,
+    installed_bytes_match: installedBytesMatch,
+    verified: Boolean(git && installedBytesMatch),
   };
+}
+
+function canonicalSourceRoot() {
+  if (gitCheckoutMetadata(packageRoot)) return realpathSync(packageRoot);
+  const bunSource = bunDependencySourceRoot();
+  return bunSource || realpathSync(packageRoot);
+}
+
+function bunDependencySourceRoot() {
+  const bunRoot = process.env.BUN_INSTALL || join(homedir(), ".bun");
+  const manifestPath = join(bunRoot, "install", "global", "package.json");
+  if (!existsSync(manifestPath)) return "";
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const raw = manifest.dependencies?.[packageInfo.name] || manifest.devDependencies?.[packageInfo.name];
+    if (typeof raw !== "string") return "";
+    const candidate = raw.startsWith("file:") ? raw.slice("file:".length) : raw;
+    if (!isAbsolute(candidate)) return "";
+    const root = realpathSync(candidate);
+    const candidatePackage = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    return candidatePackage.name === packageInfo.name ? root : "";
+  } catch {
+    return "";
+  }
+}
+
+function gitCheckoutMetadata(root) {
+  const top = spawnSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  if (top.status !== 0) return null;
+  let topLevel;
+  try {
+    topLevel = realpathSync(top.stdout.trim());
+  } catch {
+    return null;
+  }
+  if (topLevel !== realpathSync(root)) return null;
+  const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", root, "status", "--porcelain=v1"], { encoding: "utf8" });
+  if (head.status !== 0 || status.status !== 0) return null;
+  return {
+    commit: head.stdout.trim(),
+    dirty: status.stdout.trim() !== "",
+  };
+}
+
+function distributionFingerprint(root) {
+  const entries = [
+    "package.json",
+    compilerSkillDirectory,
+    canonicalSkillDirectory,
+    "plugins/goalbuddy",
+    "internal/cli",
+  ];
+  const hash = createHash("sha256");
+  for (const entry of entries) {
+    const path = join(root, entry);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (!stat) return "";
+    if (stat.isDirectory()) {
+      for (const file of listFiles(path, { exclude: new Set([".DS_Store", "__pycache__"]) })) {
+        if (/\.py[co]$/.test(file)) continue;
+        hash.update(`${entry}/${file}`);
+        hash.update("\0");
+        hash.update(readFileSync(join(path, file)));
+        hash.update("\0");
+      }
+    } else if (stat.isFile()) {
+      hash.update(entry);
+      hash.update("\0");
+      hash.update(readFileSync(path));
+      hash.update("\0");
+    } else {
+      return "";
+    }
+  }
+  return hash.digest("hex");
 }
 
 function codexInstallState({ plugin, installed, legacyInstalled, residualAgents, missingAgents, staleAgents }) {
@@ -1038,8 +1352,15 @@ function checkUpdate() {
   }
 
   if (report.check_status === "managed_local") {
-    console.log(`GoalBuddy ${report.current_version} is managed from the reviewed local checkout.`);
+    const state = report.source.dirty ? "with uncommitted source changes" : `at commit ${report.source.commit}`;
+    console.log(`GoalBuddy ${report.current_version} is bound to ${report.source.root} ${state}.`);
+    console.log("Installed package bytes match that checkout.");
     console.log(`Update policy: ${report.update_command}`);
+  } else if (report.check_status === "source_mismatch") {
+    console.log("GoalBuddy local source provenance is not verified.");
+    console.log(`Source: ${report.source.root}`);
+    console.log(`Installed package: ${report.source.installed_root}`);
+    console.log(`Recovery: ${report.update_command}`);
   } else if (report.check_status !== "ok") {
     console.log(`GoalBuddy update check unavailable: ${report.error}`);
   } else if (report.update_available) {
@@ -1051,24 +1372,26 @@ function checkUpdate() {
 }
 
 function updateReport() {
+  const source = sourceMetadata();
   return {
     package: packageInfo.name,
     current_version: normalizeVersion(packageInfo.version),
     latest_version: null,
-    update_available: false,
-    check_status: "managed_local",
-    update_mode: "reviewed_local_checkout",
+    update_available: !source.installed_bytes_match,
+    check_status: source.verified ? "managed_local" : "source_mismatch",
+    update_mode: "local_checkout",
     update_command: detectUpdateCommand(),
+    source,
   };
 }
 
 function detectUpdateCommand() {
   if (process.env.GOALBUDDY_TEST_UPDATE_COMMAND) return process.env.GOALBUDDY_TEST_UPDATE_COMMAND;
   if (process.env.GOALBUDDY_UPDATE_COMMAND) return process.env.GOALBUDDY_UPDATE_COMMAND;
-  return "review the local GoalBuddy checkout, pass its isolated gates, then run goalbuddy update";
+  return "review and commit the local GoalBuddy checkout, refresh the Bun global package from that path, then run goalbuddy update";
 }
 
-function plugin() {
+async function plugin() {
   const subcommand = positional(1) || "";
   if (wantsHelp()) {
     pluginUsage();
@@ -1076,7 +1399,7 @@ function plugin() {
   }
   switch (subcommand) {
     case "install":
-      installPlugin();
+      await installTransaction("codex");
       break;
     case "help":
     case "--help":
@@ -1097,7 +1420,7 @@ Usage:
   ${canonicalCliName} plugin install [--source <marketplace-source>] [--codex-home <path>] [--json]
 
 Default source:
-  Existing [marketplaces.goalbuddy] source, otherwise this local GoalBuddy checkout
+  The verified local GoalBuddy checkout that owns the installed package
 `);
 }
 
@@ -1111,10 +1434,12 @@ function installPlugin({ quiet = false } = {}) {
 
   const pluginManifest = JSON.parse(readFileSync(pluginManifestPath, "utf8"));
   const pluginCachePath = pluginCacheRoot(pluginManifest.version);
+  mkdirSync(codexHome(), { recursive: true });
   const marketplace = runCodex(["plugin", "marketplace", "add", source]);
   if (!marketplace.ok) {
     throw new Error(`Failed to add Codex plugin marketplace: ${firstLine(marketplace.stderr || marketplace.stdout)}`);
   }
+  enableMarketplaceConfig(source);
 
   mkdirSync(dirname(pluginCachePath), { recursive: true });
   rmSync(pluginCachePath, { recursive: true, force: true });
@@ -1164,11 +1489,26 @@ function installPlugin({ quiet = false } = {}) {
 }
 
 function resolveMarketplaceSource() {
+  const expected = canonicalSourceRoot();
   const explicit = optionValue("--source");
-  if (explicit) return explicit;
+  if (!explicit) return expected;
+  if (!isAbsolute(explicit)) {
+    throw new Error(`GoalBuddy's personal distribution requires a local marketplace path, not: ${explicit}`);
+  }
+  let actual;
+  try {
+    actual = realpathSync(explicit);
+  } catch {
+    throw new Error(`GoalBuddy marketplace source does not exist: ${explicit}`);
+  }
+  if (actual !== expected) {
+    throw new Error(`GoalBuddy marketplace source must match the package's verified local checkout: ${expected}`);
+  }
+  return actual;
+}
 
-  const configPath = join(codexHome(), "config.toml");
-  if (!existsSync(configPath)) return packageRoot;
+function marketplaceSourceFromConfig(configPath = join(codexHome(), "config.toml")) {
+  if (!existsSync(configPath)) return "";
   const lines = readFileSync(configPath, "utf8").split(/\r?\n/);
   let inGoalBuddyMarketplace = false;
 
@@ -1191,7 +1531,7 @@ function resolveMarketplaceSource() {
     return match[1].slice(1, -1);
   }
 
-  return packageRoot;
+  return "";
 }
 
 function legacyCodexSkillRoots() {
@@ -1297,6 +1637,18 @@ function pluginCacheOwnerRoot() {
 
 function pluginCacheRoot(version) {
   return join(pluginCacheOwnerRoot(), pluginName, version);
+}
+
+function enableMarketplaceConfig(source) {
+  const configPath = join(codexHome(), "config.toml");
+  mkdirSync(dirname(configPath), { recursive: true });
+  const header = `[marketplaces.${pluginName}]`;
+  const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  const withoutGoalBuddy = removeTomlTable(existing, header);
+  const prefix = withoutGoalBuddy.trim() ? `${withoutGoalBuddy.replace(/\n*$/, "\n")}\n` : "";
+  const updated = `${prefix}${header}\nsource = ${JSON.stringify(source)}\nsource_type = "local"\n`;
+  writeFileAtomic(configPath, updated);
+  return configPath;
 }
 
 function enablePluginConfig() {
@@ -1741,6 +2093,28 @@ function printInstallReport(report) {
   console.log(`  $${canonicalSkillName}`);
   console.log(`  ${canonicalCliName} board docs/goals/<slug>`);
   console.log(`  ${legacyCliName} remains a temporary compatibility alias.`);
+}
+
+function printCodexInstallReport(report) {
+  console.log("");
+  console.log(`Installed ${canonicalProductName} Codex plugin ${report.version}`);
+  console.log(`Marketplace: ${report.marketplace_source}`);
+  console.log(`Cache: ${report.cache_path}`);
+  console.log(`Config: ${report.config_path}`);
+  console.log(`Agents: ${summarizeStatuses(report.agents)}`);
+  if (report.removed_legacy_skill_paths.length) {
+    console.log(`Removed legacy personal skills: ${report.removed_legacy_skill_paths.join(", ")}`);
+  }
+  if (report.standalone_compiler_cleanup?.status === "removed_symlink") {
+    console.log(`Removed superseded compiler link: ${report.standalone_compiler_cleanup.path}`);
+  }
+  console.log("");
+  console.log("Restart Codex, then use:");
+  console.log(`  $${compilerSkillName}`);
+  console.log(`  $${canonicalSkillName} remains the explicit GoalBuddy board backend.`);
+  console.log("");
+  console.log("Goal surface:");
+  console.log(`  ${canonicalCliName} board docs/goals/<slug>`);
 }
 
 function printEverywhereInstallReport(report) {

@@ -6,7 +6,7 @@ This directory contains skill metadata and bundled agent definitions for Codex a
 
 - `openai.yaml` stays with the skill as metadata.
 - `goal_scout.toml`, `goal_judge.toml`, `goal_worker.toml` — Codex task-agent configs. `goal_keeper.toml` is the execution-time Board Keeper and `goal_ledger.toml` is the recovery-only Ledger Auditor. Copy them into `.codex/agents/` for project-scoped agents or `~/.codex/agents/` for personal agents.
-- Claude Code agent markdown lives in `plugins/goalbuddy/agents/` (installed to `~/.claude/agents/` by `goalbuddy --target claude`).
+- Claude Code agent markdown lives in `plugins/goalbuddy/agents/` (installed to `~/.claude/agents/` by `goalbuddy install --target claude`).
 
 ## Agent Matrix
 

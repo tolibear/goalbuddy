@@ -44,7 +44,7 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /Intent -> Oracle -> Surface -> Loop -> Proof/);
     assert.match(text, /No oracle, no serious goal/);
     assert.match(text, /Do you want the local GoalBuddy board for this goal\?/);
-    assert.match(text, /Use the local GoalBuddy board as the default work surface/);
+    assert.match(text, /use the local GoalBuddy board as the default work surface/i);
     assert.match(text, /start the local board before filling the task list/);
     assert.match(text, /node <skill-path>\/surfaces\/local-goal-board\/scripts\/local-goal-board\.mjs --goal docs\/goals\/<slug>/);
     assert.match(text, /do not assume the existing process is stale and do not stop it/);
@@ -73,6 +73,9 @@ test("Goal Prep is explicit or compiler-internal across Codex and Claude", () =>
     assert.match(text, /Do not select it implicitly for generic requests to goalize, route, or compile work/);
     assert.match(text, /Codex Goal Compiler selects the GoalBuddy route/);
     assert.match(text, /explicitly load this `SKILL\.md` as its declared board-preparation dependency/);
+    assert.match(text, /Compiler-internal invocation:[\s\S]*default is file-only/);
+    assert.match(text, /Direct `\$goal-prep` or `\/goal-prep` invocation:[\s\S]*local GoalBuddy board as the default work surface/);
+    assert.match(text, /for compiler-internal invocation, preserve the compiler-supplied surface and default to file-only/);
   }
   for (const text of [canonicalOpenAI, pluginOpenAI]) {
     assert.match(text, /^\s*allow_implicit_invocation: false$/m);

@@ -30,7 +30,7 @@ goalbuddy doctor --target codex --goal-ready
 goalbuddy install
 ```
 
-This installs and enables the native Codex plugin, then installs the same compiler/backend pair, Scout/Judge/Worker task agents, Board Keeper, Ledger recovery auditor, and `/goal` command into Claude Code.
+This runs one rollback-safe transaction: it snapshots GoalBuddy-owned surfaces, installs and verifies both harnesses, retires only a recognized standalone compiler symlink, and restores the snapshot if any stage fails.
 
 ## Install One Target
 
@@ -39,7 +39,7 @@ goalbuddy install --target codex
 goalbuddy install --target claude
 ```
 
-This installs the GoalBuddy skill, the three Scout/Judge/Worker task agents, the low-reasoning Board Keeper, and the recovery-only Ledger Auditor into `~/.claude/`. Restart Claude Code, then run:
+The Claude target installs the compiler/backend pair, Scout/Judge/Worker task agents, the low-reasoning Board Keeper, the recovery-only Ledger Auditor, and `/goal`. Restart Claude Code, then run:
 
 ```text
 /codex-goal-compiler
@@ -48,17 +48,19 @@ This installs the GoalBuddy skill, the three Scout/Judge/Worker task agents, the
 Install this private package from its local checkout:
 
 ```bash
-bun add -g "$PWD"
-goalbuddy                  # installs for Codex and Claude Code
-goalbuddy --target codex   # installs for Codex only
-goalbuddy --target claude  # installs for Claude Code only
+bun add -g "$PWD" --ignore-scripts
+goalbuddy install                  # installs both targets transactionally
+goalbuddy install --target codex   # installs Codex only
+goalbuddy install --target claude  # installs Claude Code only
 ```
+
+The package step has no install lifecycle hook and cannot activate either harness. Bare `goalbuddy` shows help only.
 
 For local CLI testing before activation:
 
 ```bash
 node internal/cli/goal-maker.mjs
-node internal/cli/goal-maker.mjs doctor
+node internal/cli/goal-maker.mjs doctor --target codex
 node internal/cli/goal-maker.mjs board docs/goals/<slug> --once --json
 ```
 

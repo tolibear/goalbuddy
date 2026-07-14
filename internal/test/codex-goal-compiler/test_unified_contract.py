@@ -131,6 +131,11 @@ class UnifiedContractTests(unittest.TestCase):
         self.assertIn("must not run unrelated repository-wide product or source suites", combined)
         self.assertIn("does not restrict intended Scout, Judge, Worker, Keeper, Ledger, Council", combined)
 
+    def test_claude_handoff_never_invents_a_turn_budget(self):
+        self.assertIn("until a final receipt with full_outcome_complete: true is surfaced", self.goalbuddy)
+        self.assertIn("only when the user supplied that exact turn limit", self.goalbuddy)
+        self.assertIn("Never invent a cap", self.goalbuddy)
+
 
 if __name__ == "__main__":
     unittest.main()

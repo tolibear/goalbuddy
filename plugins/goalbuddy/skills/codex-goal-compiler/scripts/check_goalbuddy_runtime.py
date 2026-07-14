@@ -115,10 +115,14 @@ def contract_semantic_errors(target: str, contract: dict[str, Any]) -> list[str]
     if not isinstance(source, dict):
         errors.append("GoalBuddy contract source must be an object")
     else:
-        if source.get("kind") not in {"local_git_checkout", "package_install"}:
+        if source.get("kind") != "local_git_checkout":
             errors.append(f"GoalBuddy contract source.kind is invalid: {source.get('kind')!r}")
         if not isinstance(source.get("root"), str) or not source.get("root"):
             errors.append("GoalBuddy contract source.root must be a non-empty string")
+        if source.get("verified") is not True:
+            errors.append("GoalBuddy contract source must be verified")
+        if source.get("installed_bytes_match") is not True:
+            errors.append("GoalBuddy installed package bytes must match the local checkout")
 
     target_report = contract.get("target")
     if not isinstance(target_report, dict):
@@ -132,7 +136,7 @@ def contract_semantic_errors(target: str, contract: dict[str, Any]) -> list[str]
                 f"GoalBuddy {target} install model must be {expected_install_model!r}; "
                 f"found {target_report.get('install_model')!r}"
             )
-        for field in ("ready", "goal_prep_installed", "compiler_installed", "agents_ready"):
+        for field in ("ready", "goal_prep_installed", "compiler_installed", "agents_ready", "source_ready"):
             if target_report.get(field) is not True:
                 errors.append(f"GoalBuddy {target} target.{field} must be true")
         if target == "codex":

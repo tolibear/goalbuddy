@@ -28,6 +28,7 @@ def valid_contract(target: str) -> dict[str, object]:
         "goal_prep_installed": True,
         "compiler_installed": True,
         "agents_ready": True,
+        "source_ready": True,
     }
     if target == "codex":
         target_report.update(native_goal_ready=True, duplicate_compiler_present=False)
@@ -44,6 +45,8 @@ def valid_contract(target: str) -> dict[str, object]:
             "root": "/tmp/goalbuddy",
             "commit": "a" * 40,
             "dirty": False,
+            "installed_bytes_match": True,
+            "verified": True,
         },
         "target": target_report,
         "errors": [],

@@ -44,6 +44,7 @@ if len(args) == 4 and args[:2] == ['contract', '--target'] and args[3] == '--jso
         'goal_prep_installed': True,
         'compiler_installed': True,
         'agents_ready': True,
+        'source_ready': True,
     }
     if target == 'codex':
         target_report.update(native_goal_ready=True, duplicate_compiler_present=False)
@@ -55,7 +56,7 @@ if len(args) == 4 and args[:2] == ['contract', '--target'] and args[3] == '--jso
         'product_version': '0.5.0',
         'board_schema_version': 2,
         'capabilities': capabilities,
-        'source': {'kind': 'local_git_checkout', 'root': '/tmp/goalbuddy', 'commit': 'a' * 40, 'dirty': False},
+        'source': {'kind': 'local_git_checkout', 'root': '/tmp/goalbuddy', 'commit': 'a' * 40, 'dirty': False, 'installed_bytes_match': True, 'verified': True},
         'target': target_report,
         'errors': [],
     }
@@ -67,7 +68,7 @@ if len(args) == 4 and args[:2] == ['contract', '--target'] and args[3] == '--jso
     if mode == 'wrong-target': payload['target']['name'] = 'claude' if target == 'codex' else 'codex'
     if mode == 'missing-compiler': payload['target']['compiler_installed'] = False
     if mode == 'duplicate' and target == 'codex': payload['target']['duplicate_compiler_present'] = True
-    if mode == 'bad-source': payload['source']['kind'] = 'mystery'
+    if mode == 'bad-source': payload['source'].update(kind='mystery', verified=False)
     if mode == 'declared-error': payload.update(ok=False, errors=['declared runtime error'])
     print(json.dumps(payload))
     raise SystemExit(int(os.environ.get('FAKE_CONTRACT_EXIT', '0')))

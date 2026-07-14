@@ -42,7 +42,7 @@ During a `$goal-prep` turn, do not perform the user's requested work, even if th
 
 Allowed `$goal-prep` actions:
 
-- run the bundled GoalBuddy update checker to confirm reviewed-local-checkout ownership;
+- run the GoalBuddy CLI provenance check to confirm verified local-checkout ownership;
 - ask diagnostic intake questions and wait when required;
 - create or repair only `docs/goals/<slug>/goal.md`, `docs/goals/<slug>/state.yaml`, `docs/goals/<slug>/notes/`, and the generated `.goalbuddy-board/` visual board artifact;
 - create and open the built-in local GoalBuddy board surface for the goal unless the user opts out;
@@ -55,16 +55,16 @@ If the prompt names another skill or tool, such as "use the taste skill", "refre
 
 ## Update Check
 
-At the start of a `$goal-prep` turn, read GoalBuddy's update ownership. Run the bundled checker from the installed skill directory when available:
+At the start of a `$goal-prep` turn, read GoalBuddy's update ownership. Run the GoalBuddy CLI when available:
 
 ```bash
-node <skill-path>/scripts/check-update.mjs --json
+goalbuddy check-update --json
 ```
 
-This personal distribution is managed from a reviewed local checkout. The checker must report `check_status: managed_local` and must not consult or recommend the upstream npm package. Continue without an update message during ordinary Goal Prep. If the checker reports any other ownership mode, mention the mismatch once without changing the installation.
+This personal distribution is bound to a local checkout. The checker must report `check_status: managed_local`, `source.verified: true`, and `source.installed_bytes_match: true`; it must not consult or recommend the upstream npm package. Continue without an update message during ordinary Goal Prep. If provenance does not match, mention the mismatch once without changing the installation.
 
 ```text
-GoalBuddy update ownership does not match the reviewed-local-checkout policy. Preserve the current installation and inspect the local GoalBuddy source before updating.
+GoalBuddy update ownership does not match the verified-local-checkout policy. Preserve the current installation and inspect the local GoalBuddy source before updating.
 ```
 
 Do not block intake or board creation on update checking. If the checker is missing or fails, continue silently unless the user asked about updates.
@@ -88,7 +88,10 @@ Extract:
 - blind spots: important risks, choices, or success dimensions the user may not have named yet;
 - existing plan facts: user-provided steps, files, constraints, or sequencing that must be preserved but still validated.
 
-Use the local GoalBuddy board as the default work surface for broad GoalBuddy runs. Ask only when the user has not already implied they want the default local surface, the goal is unusually quick/private, or board setup would materially distract from the requested prep:
+Choose the board surface from the invocation boundary before asking anything:
+
+- **Compiler-internal invocation:** obey the compiler handoff exactly. Its default is file-only; do not ask a board-surface question, start the local server, or open a browser unless the handoff explicitly requests visual tracking.
+- **Direct `$goal-prep` or `/goal-prep` invocation:** use the local GoalBuddy board as the default work surface for broad runs. Ask only when the user has not already implied they want the default local surface, the goal is unusually quick/private, or board setup would materially distract from the requested prep:
 
 ```text
 Do you want the local GoalBuddy board for this goal?
@@ -150,7 +153,7 @@ Stop after each question. Do not create files, repair an existing board, run che
 
 Minimum diagnostic ladder for vague, strategic, or improvement-oriented goals:
 
-1. Goal surface: use the local live board by default, or ask "Do you want the local GoalBuddy board for this goal?" when board handling is unresolved.
+1. Goal surface: use the compiler-supplied surface for compiler-internal preparation; otherwise use the local live board by default or ask "Do you want the local GoalBuddy board for this goal?" when direct-invocation board handling is unresolved.
 2. Intent target: what kind of improvement or outcome matters most?
 3. Success proof: what evidence would convince the user this worked?
 4. Scope and non-goals: what should remain untouched or explicitly out of scope?
@@ -175,7 +178,7 @@ Do:
 - inventory the repo's verify-style scripts once and record which are gate suites for this goal versus pre-existing red repo-health suites, so the oracle is honest about what this goal owns;
 - create or repair `docs/goals/<slug>/`;
 - create `goal.md`, `state.yaml`, and `notes/`;
-- start the local board immediately and open it in the AI coding agent's in-app browser (Codex in-app Browser, Claude Code preview, or the user's regular browser) before filling the task list, unless the user opts out;
+- for direct invocation, start the local board immediately and open it in the AI coding agent's in-app browser before filling the task list unless the user opts out; for compiler-internal invocation, preserve the compiler-supplied surface and default to file-only;
 - seed a role-tagged task board that matches the input shape;
 - make the first active task safe;
 - verify Scout, Worker, and Judge agent availability or record an explicit truthful state;

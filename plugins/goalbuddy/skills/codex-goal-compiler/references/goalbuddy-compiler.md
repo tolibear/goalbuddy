@@ -158,14 +158,13 @@ Do not call or mention Codex goal tools. Print:
 /goal Follow docs/goals/<slug>/goal.md.
 ```
 
-For a walk-away run, also print the bounded form and say why: Claude's native
-`/goal` loop judges completion from the conversation transcript with no
-implicit turn cap, so a measurable completion clause plus a bound protects
-against runaway continuation:
+For a walk-away run, add the measurable completion clause:
 
 ```text
-/goal Follow docs/goals/<slug>/goal.md until a final receipt with full_outcome_complete: true is surfaced; stop after <N> turns if blocked.
+/goal Follow docs/goals/<slug>/goal.md until a final receipt with full_outcome_complete: true is surfaced.
 ```
+
+Append `stop after <N> turns if blocked` only when the user supplied that exact turn limit. Never invent a cap or ask for one merely to render this handoff; GoalBuddy's exact-human wait, no-safe-work, and full-outcome completion rules already define the unbounded stop conditions.
 
 Do not auto-execute production-sensitive work. The user starts the installed Claude `/goal` command after reviewing the checkpoint.
 

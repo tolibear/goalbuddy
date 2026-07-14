@@ -21,9 +21,11 @@ It gives `/goal` a small local workspace: a charter, a goal oracle, a board, not
 Install this checkout as the local Bun-owned package, then install both harness surfaces:
 
 ```bash
-bun add -g "$PWD"
+bun add -g "$PWD" --ignore-scripts
 goalbuddy install
 ```
+
+The package has no install lifecycle hook, so the package step cannot change Codex or Claude Code. Bare `goalbuddy` only shows help. `goalbuddy install` and `goalbuddy update` are the explicit mutation boundary: they snapshot GoalBuddy-owned surfaces, verify the resulting target set, and restore the snapshot on failure.
 
 Restart Codex or Claude Code.
 
@@ -193,7 +195,7 @@ Updates are reviewed and activated from this local checkout; registry GoalBuddy 
 goalbuddy update
 ```
 
-That updates both Codex and Claude Code. If Codex already points its GoalBuddy marketplace at a local checkout, update preserves that source; pass `--source` only when you intentionally want to change it.
+That updates both Codex and Claude Code and rewrites the GoalBuddy marketplace binding to the verified local checkout that owns the installed package. `--source` is accepted only when it resolves to that same checkout; another local path or a remote repository is rejected.
 
 ## Live Boards
 
