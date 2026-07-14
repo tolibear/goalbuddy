@@ -180,6 +180,14 @@ export function loadBoard(boardPath, options = {}) {
   });
 }
 
+export function loadBoardSnapshot(boardPath, stateText) {
+  return boardFromDocument(boardPath, stateText, parseGoalStateText(stateText, { allowFallback: false }), {
+    mode: "checker_validated_snapshot",
+    checkerStatus: "pass",
+    immutableHistory: null,
+  });
+}
+
 function boardFromDocument(boardPath, stateText, document, projection) {
   if (!document || Number(document.version) !== 2) {
     throw new Error(`unsupported GoalBuddy state version in ${boardPath}: expected top-level "version: 2". Start from templates/state.yaml bundled with the goal-prep skill.`);

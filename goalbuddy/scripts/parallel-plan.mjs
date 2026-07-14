@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { childBoardPaths, loadBoard, parseArgs, resolveBoardPath, selectTask } from "./render-task-prompt.mjs";
+import { assertBoardTreeSnapshotsCurrent, runResumeChecker } from "./resume-board.mjs";
+import { loadBoardSnapshot, parseArgs, resolveBoardPath, selectTask } from "./render-task-prompt.mjs";
 
 if (isDirectRun()) {
   try {
@@ -21,15 +21,22 @@ if (isDirectRun()) {
 
 export function createParallelPlan(options) {
   const rootBoardPath = resolveBoardPath(options);
-  const boards = [loadBoard(rootBoardPath)];
-  for (const childPath of childBoardPaths(boards[0])) {
-    if (existsSync(childPath)) boards.push(loadBoard(childPath));
+  const validation = runResumeChecker(dirname(rootBoardPath));
+  if (!validation.checker.ok || validation.boardTreeError) {
+    const detail = validation.boardTreeError || validation.checker.errors.join("; ") || "checker rejected the board tree";
+    throw new Error(`GoalBuddy parallel plan requires a checker-valid board tree: ${detail}`);
   }
+  const boards = validation.boardSnapshots
+    .map((snapshot) => loadBoardSnapshot(snapshot.state_path, snapshot.text))
+    .filter((board) => board.activeTask);
 
   const candidates = boards.map((board) => candidateForBoard(board));
   const workerCandidates = candidates.filter((candidate) => candidate.role === "worker");
-  return {
+  const plan = {
     root_board_path: rootBoardPath,
+    board_tree_version: validation.checker.board_tree_version,
+    board_tree_digest: validation.checker.board_tree_digest,
+    boards: validation.boardSnapshots.map(({ text: _text, ...snapshot }) => snapshot),
     mutated: false,
     spawned_agents: false,
     candidates: candidates.map((candidate) => ({
@@ -39,6 +46,8 @@ export function createParallelPlan(options) {
       render_prompt_command: promptCommand(candidate),
     })),
   };
+  assertBoardTreeSnapshotsCurrent(validation.boardSnapshots);
+  return plan;
 }
 
 function candidateForBoard(board) {
@@ -163,6 +172,7 @@ function formatPlan(plan) {
     "GoalBuddy parallel plan",
     "",
     `Root board: ${plan.root_board_path}`,
+    `Board tree digest: ${plan.board_tree_digest} (${plan.boards.length} board(s))`,
     "Mutates state: no",
     "Spawns agents: no",
     "",

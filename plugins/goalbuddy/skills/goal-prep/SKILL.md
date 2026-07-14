@@ -36,7 +36,7 @@ There are two different modes:
 
 This boundary is strict. `$goal-prep` is not a lightweight `/goal`; it is a board compiler.
 
-This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; exactly one active task unless disjoint write scopes are proven; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; the PM owns semantic board decisions while the Board Keeper performs normal execution-time board inspection and mutation; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
+This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; each board has at most one active task; explicitly requested parallel lanes use depth-one child boards and the bundled `parallel-plan` safety projection; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; the PM owns semantic board decisions while the Board Keeper performs normal execution-time board inspection and mutation; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
 
 During a `$goal-prep` turn, do not perform the user's requested work, even if the work looks read-only, preparatory, or obviously useful. Do not refresh or load named skills, inspect implementation files, browse reference repos, research design inspiration, generate design plans, generate images/assets, run app-specific checks, or edit product files. Put those actions into Scout, Judge, Worker, or PM tasks for the later `/goal` run.
 
@@ -224,7 +224,7 @@ Scout and Judge tasks may identify optional publishing, reporting, integration, 
 
 1. **Charter**: `goal.md` says what the current tranche is trying to accomplish and what constraints matter.
 2. **Board**: `state.yaml` is the rolling task list and machine truth.
-3. **Task**: exactly one active task may be worked at a time.
+3. **Task**: exactly one active task may be worked at a time on each board; explicitly requested parallel lanes live on depth-one child boards, never as multiple active tasks on one board.
 4. **Receipt**: every completed, blocked, or escalated task leaves a compact durable result on the task card.
 
 Agents are not a separate primitive. They are the assignee type on a task.

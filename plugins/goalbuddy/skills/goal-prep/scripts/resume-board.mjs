@@ -5,6 +5,12 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  BOARD_TREE_VERSION,
+  boardTreeDigest,
+  normalizeBoardTreeEntries,
+  normalizeBoardTreePath,
+} from "./board-tree.mjs";
+import {
   createBoardPayload,
   normalizeGoalBoard,
   parseGoalStateText,
@@ -55,9 +61,17 @@ function resumeBoard(goalDir, options) {
     printResumeFailure(goalDir, validation.checker, options, { stateText: validation.stateText });
     return 1;
   }
+  if (validation.boardTreeError) {
+    printResumeFailure(goalDir, validation.checker, options, {
+      stateText: validation.stateText,
+      projectionError: validation.boardTreeError,
+    });
+    return 1;
+  }
 
   try {
-    const projection = createResumeProjection(goalDir, validation.checker, validation.stateText);
+    const projection = createResumeProjection(goalDir, validation.checker, validation.boardSnapshots);
+    assertBoardTreeSnapshotsCurrent(validation.boardSnapshots);
     if (options.json) printJson(projection);
     else printResumeProjection(projection);
     return 0;
@@ -153,6 +167,22 @@ export function runResumeChecker(goalDir) {
     errors.push("state.yaml no longer matches the snapshot GoalBuddy validated; rerun resume after the board write completes.");
   }
 
+  let boardTree = null;
+  let boardTreeError = "";
+  if (
+    report?.ok === true
+    && stateBefore !== null
+    && stateAfter !== null
+    && stateBefore === stateAfter
+    && report.state_digest === stateBeforeDigest
+  ) {
+    try {
+      boardTree = captureBoardTreeSnapshots(goalDir, report, stateAfter, { checkerScript });
+    } catch (error) {
+      boardTreeError = error.message;
+    }
+  }
+
   return {
     checker: {
       ok: result.status === 0 && report?.ok === true && errors.length === 0,
@@ -160,6 +190,9 @@ export function runResumeChecker(goalDir) {
       version: report?.version ?? null,
       state_path: report?.state_path || statePath,
       state_digest: report?.state_digest || null,
+      board_tree_version: boardTree?.version ?? null,
+      board_tree_digest: boardTree?.digest ?? null,
+      board_tree: boardTree?.entries ?? [],
       goal_status: report?.goal_status || "",
       active_task: report?.active_task ?? null,
       task_count: report?.task_count ?? null,
@@ -171,7 +204,128 @@ export function runResumeChecker(goalDir) {
       && report?.state_digest === stateBeforeDigest
       ? stateAfter
       : null,
+    boardSnapshots: errors.length === 0 && !boardTreeError ? (boardTree?.snapshots ?? []) : [],
+    boardTreeError,
   };
+}
+
+export function captureBoardTreeSnapshots(goalDir, rootReport, rootStateText, { checkerScript = join(skillRoot, "scripts", "check-goal-state.mjs") } = {}) {
+  const root = resolve(goalDir);
+  const rootDigest = sha256(rootStateText);
+  if (rootReport?.ok !== true || rootReport?.version !== 2 || rootReport?.state_digest !== rootDigest) {
+    throw new Error("GoalBuddy board tree requires the exact checker-valid root state snapshot.");
+  }
+
+  let rootDocument;
+  try {
+    rootDocument = parseGoalStateText(rootStateText, { allowFallback: false });
+  } catch (error) {
+    throw new Error(`GoalBuddy board tree could not strictly parse root state.yaml: ${error.message}`);
+  }
+  if (!Array.isArray(rootDocument.tasks)) {
+    throw new Error("GoalBuddy board tree root state.yaml has no tasks array.");
+  }
+
+  const snapshots = [{
+    path: "state.yaml",
+    state_path: join(root, "state.yaml"),
+    state_digest: rootDigest,
+    goal_status: rootReport.goal_status,
+    active_task: rootReport.active_task,
+    task_count: rootReport.task_count,
+    text: rootStateText,
+  }];
+  const childPaths = rootDocument.tasks
+    .map((task) => task?.subgoal?.path)
+    .filter((path) => path !== undefined && path !== null && path !== "")
+    .map(normalizeBoardTreePath);
+
+  for (const childPath of childPaths) {
+    if (childPath === "state.yaml") {
+      throw new Error("GoalBuddy child board path may not reuse the root state.yaml.");
+    }
+    const statePath = resolve(root, childPath);
+    if (!statePath.startsWith(`${root}${sep}`)) {
+      throw new Error(`GoalBuddy board tree path escapes the goal root: ${childPath}`);
+    }
+    let stateBefore;
+    try {
+      stateBefore = readFileSync(statePath, "utf8");
+    } catch (error) {
+      throw new Error(`GoalBuddy child board state is unreadable: ${childPath}: ${error.message}`);
+    }
+    const stateDigest = sha256(stateBefore);
+    const result = spawnSync(process.execPath, [checkerScript, statePath, "--child", "--snapshot-stdin"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: process.env,
+      input: stateBefore,
+    });
+    let report = null;
+    try {
+      report = JSON.parse(result.stdout || "");
+    } catch {
+      // The fail-closed error below preserves the relevant process output.
+    }
+    if (result.error) {
+      throw new Error(`GoalBuddy child board checker failed for ${childPath}: ${result.error.message}`);
+    }
+    if (result.status !== 0 || report?.ok !== true) {
+      const detail = Array.isArray(report?.errors) && report.errors.length > 0
+        ? report.errors.join("; ")
+        : result.stderr?.trim() || result.stdout?.trim() || "checker returned no valid report";
+      throw new Error(`GoalBuddy child board is not checker-valid: ${childPath}: ${detail}`);
+    }
+    if (report.version !== 2 || report.state_digest !== stateDigest) {
+      throw new Error(`GoalBuddy child checker did not validate the exact version 2 snapshot: ${childPath}`);
+    }
+    let stateAfter;
+    try {
+      stateAfter = readFileSync(statePath, "utf8");
+    } catch (error) {
+      throw new Error(`GoalBuddy child board disappeared after validation: ${childPath}: ${error.message}`);
+    }
+    if (stateAfter !== stateBefore) {
+      throw new Error(`GoalBuddy child board changed while being validated: ${childPath}.`);
+    }
+    try {
+      parseGoalStateText(stateBefore, { allowFallback: false });
+    } catch (error) {
+      throw new Error(`GoalBuddy child board could not be strictly projected: ${childPath}: ${error.message}`);
+    }
+    snapshots.push({
+      path: childPath,
+      state_path: statePath,
+      state_digest: stateDigest,
+      goal_status: report.goal_status,
+      active_task: report.active_task,
+      task_count: report.task_count,
+      text: stateBefore,
+    });
+  }
+
+  const entries = normalizeBoardTreeEntries(snapshots.map(({ text: _text, state_path: _statePath, ...entry }) => entry));
+  const snapshotsByPath = new Map(snapshots.map((snapshot) => [snapshot.path, snapshot]));
+  return {
+    version: BOARD_TREE_VERSION,
+    digest: boardTreeDigest(entries),
+    entries,
+    snapshots: entries.map((entry) => ({ ...entry, ...snapshotsByPath.get(entry.path) })),
+  };
+}
+
+export function assertBoardTreeSnapshotsCurrent(snapshots) {
+  for (const snapshot of snapshots) {
+    let current;
+    try {
+      current = readFileSync(snapshot.state_path, "utf8");
+    } catch (error) {
+      throw new Error(`GoalBuddy board tree state is unavailable before projection output: ${snapshot.path}: ${error.message}`);
+    }
+    if (sha256(current) !== snapshot.state_digest) {
+      throw new Error(`GoalBuddy board tree changed while rendering recovery state: ${snapshot.path}.`);
+    }
+  }
 }
 
 function printResumeFailure(goalDir, checker, options, { stateText = null, projectionError = "" } = {}) {
@@ -222,11 +376,13 @@ function printResumeFailure(goalDir, checker, options, { stateText = null, proje
   console.error("Do not continue from compact state. Inspect the complete board and independent evidence.");
 }
 
-function createResumeProjection(goalDir, checker, stateText) {
+function createResumeProjection(goalDir, checker, boardSnapshots) {
   const root = resolve(goalDir);
   const statePath = join(root, "state.yaml");
   const goalPath = join(root, "goal.md");
-  if (stateText === null) throw new Error("Validated state text is unavailable.");
+  const rootSnapshot = boardSnapshots.find((snapshot) => snapshot.path === "state.yaml");
+  if (!rootSnapshot) throw new Error("Validated root state snapshot is unavailable.");
+  const stateText = rootSnapshot.text;
   const document = parseGoalStateText(stateText, { allowFallback: false });
   const board = normalizeGoalBoard(document, root);
   const rawTasks = Array.isArray(document.tasks) ? document.tasks : [];
@@ -259,6 +415,9 @@ function createResumeProjection(goalDir, checker, stateText) {
     ? checks.last_verification
     : {};
   const path = displayGoalPath(root);
+  const activeLanes = boardSnapshots
+    .map((snapshot) => projectActiveLane(snapshot))
+    .filter(Boolean);
 
   return {
     ok: true,
@@ -269,6 +428,12 @@ function createResumeProjection(goalDir, checker, stateText) {
       state_path: statePath,
       state_digest: sha256(stateText),
       state_digest_status: "checker_validated",
+      tree: {
+        version: checker.board_tree_version,
+        digest: checker.board_tree_digest,
+        digest_status: "checker_validated",
+        boards: boardSnapshots.map(({ text: _text, ...snapshot }) => snapshot),
+      },
       goal_path: goalPath,
       title: resumeText(goal.title || board.title),
       slug: resumeText(goal.slug || board.slug),
@@ -296,6 +461,7 @@ function createResumeProjection(goalDir, checker, stateText) {
         completed: board.tasks.filter((task) => task.status === "done").length,
       },
       active_task: activeTask,
+      active_lanes: activeLanes,
       recent_receipt: recentReceiptTask ? projectRecentReceipt(recentReceiptTask) : null,
       last_verification: {
         result: resumeText(lastVerification.result || "unknown"),
@@ -315,11 +481,12 @@ function createResumeProjection(goalDir, checker, stateText) {
       on_uncertain: "main_agent_review",
       on_timeout_or_unavailable: "main_agent_review",
       worker_liveness: "unknown",
+      active_lane_count: activeLanes.length,
       continuation_allowed_after_audit: Boolean(activeTask && resumeText(goal.status) === "active"),
       instructions: [
         "Run the read-only Goal Ledger Auditor at this genuine recovery boundary.",
-        "The Auditor must compare board claims with independent repository, worktree, receipt, verification, gate, and visible Worker evidence.",
-        "An active task does not prove a Worker is alive; never auto-redispatch during recovery.",
+        "The Auditor must rerun resume, match board.tree.digest, and reconcile every board.active_lanes entry against independent repository, worktree, receipt, verification, gate, and visible Worker evidence.",
+        "An active lane does not prove its Worker is alive; never auto-redispatch any root or child lane during recovery.",
         "Do not load the full board into the main PM unless the Auditor reports discrepant or uncertain, times out, is unavailable, or names evidence requiring direct review.",
       ],
     },
@@ -327,7 +494,30 @@ function createResumeProjection(goalDir, checker, stateText) {
       resume: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --json`,
       run: `/goal Follow ${path}/goal.md.`,
       prompt: activeTask ? `goalbuddy prompt ${path}` : null,
+      parallel_plan: activeLanes.length > 1 ? `goalbuddy parallel-plan ${path}` : null,
     },
+  };
+}
+
+function projectActiveLane(snapshot) {
+  const document = parseGoalStateText(snapshot.text, { allowFallback: false });
+  const board = normalizeGoalBoard(document, dirname(snapshot.state_path));
+  const rawTasks = Array.isArray(document.tasks) ? document.tasks : [];
+  const activeRaw = rawTasks.find((task) => resumeText(task?.id) === resumeText(document.active_task))
+    || rawTasks.find((task) => resumeText(task?.status) === "active")
+    || null;
+  if (!activeRaw) return null;
+  const normalized = board.tasks.find((task) => task.id === resumeText(activeRaw.id));
+  const activeTask = projectResumeTask(activeRaw, normalized);
+  return {
+    kind: snapshot.path === "state.yaml" ? "root" : "child",
+    path: snapshot.path,
+    board_path: displayGoalPath(dirname(snapshot.state_path)),
+    state_path: snapshot.state_path,
+    state_digest: snapshot.state_digest,
+    goal_status: resumeText(document.goal?.status),
+    active_task: activeTask,
+    prompt: `goalbuddy prompt --board ${shellArgument(snapshot.state_path)} --task ${activeTask.id}`,
   };
 }
 
@@ -461,11 +651,18 @@ function printResumeProjection(projection) {
   console.log(`${board.title} — ${board.status} (${board.path})`);
   console.log(`  Checker: pass (${checker.task_count} tasks)`);
   console.log(`  State digest: ${board.state_digest}`);
+  console.log(`  Board tree digest: ${board.tree.digest} (${board.tree.boards.length} board(s))`);
   if (board.active_task) {
     console.log(`  Active task: ${board.active_task.id} (${board.active_task.type}) ${board.active_task.objective}`);
     console.log(`  Verify: ${board.active_task.verify.length} command(s); stop_if: ${board.active_task.stop_if.length}; allowed_files: ${board.active_task.allowed_files.length}`);
   } else {
     console.log("  Active task: none");
+  }
+  if (board.active_lanes.length > 1) {
+    console.log("  Active child lanes:");
+    for (const lane of board.active_lanes.filter((candidate) => candidate.kind === "child")) {
+      console.log(`    ${lane.path}: ${lane.active_task.id} (${lane.active_task.type}) ${lane.active_task.objective}`);
+    }
   }
   if (board.approval_gates.length) {
     console.log("  Approval gates:");
@@ -480,6 +677,7 @@ function printResumeProjection(projection) {
   console.log("");
   console.log(`Resume projection: ${commands.resume}`);
   if (commands.prompt) console.log(`Active task prompt: ${commands.prompt}`);
+  if (commands.parallel_plan) console.log(`Parallel plan: ${commands.parallel_plan}`);
   console.log(`Run command: ${commands.run}`);
 }
 

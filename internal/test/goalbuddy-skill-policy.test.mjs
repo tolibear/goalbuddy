@@ -53,6 +53,8 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /A good task is the largest safe useful slice/);
     assert.match(text, /Safe does not mean small/);
     assert.match(text, /references\/goal-execution\.md/);
+    assert.match(text, /each board has at most one active task/);
+    assert.match(text, /depth-one child boards/);
     assert.match(text, /Task ids must match the `T###` shape/);
     assert.match(text, /explicitly invokes `\$goal-prep` on a one-change task/);
     assert.match(text, /Always start `state\.yaml` from `templates\/state\.yaml`/);
@@ -82,6 +84,12 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /node <skill-path>\/scripts\/render-task-prompt\.mjs docs\/goals\/<slug>/);
     assert.match(text, /node <skill-path>\/scripts\/resume-board\.mjs docs\/goals\/<slug> --json/);
     assert.match(text, /node <skill-path>\/scripts\/parallel-plan\.mjs docs\/goals\/<slug>/);
+    assert.match(text, /board\.tree\.digest/);
+    assert.match(text, /every root\/child board in `board\.tree\.boards`/);
+    assert.match(text, /Each board may have at most one active task/);
+    assert.match(text, /depth-one child board/);
+    assert.match(text, /Separate branches or worktrees preserve bytes but do not prove semantic independence/);
+    assert.match(text, /same checker-validated root\/child snapshots as resume/);
     assert.match(text, /Operator Escalation/);
     assert.match(text, /ask the operator one concise question before creating the external artifact/);
     assert.match(text, /This section applies after the user starts `\/goal Follow docs\/goals\/<slug>\/goal\.md\.`/);
@@ -184,6 +192,10 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.match(canonicalLedger, /Never.*dispatch a task/);
   assert.match(canonicalLedger, /goalbuddy_ledger_audit_v1/);
   assert.match(canonicalLedger, /state_digest/);
+  assert.match(canonicalLedger, /board_tree_digest/);
+  assert.match(canonicalLedger, /active_lanes/);
+  assert.match(canonicalLedger, /every depth-one child `state\.yaml`/);
+  assert.match(canonicalLedger, /Reconcile every `board\.active_lanes` entry/);
   assert.match(canonicalLedger, /exact bundled `commands\.resume` command/);
   assert.doesNotMatch(canonicalLedger, /Run `goalbuddy resume/);
   assert.match(canonicalLedger, /SHA-256 before and after/);
@@ -191,6 +203,8 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.match(claudeLedger, /model: claude-opus-4-8/);
   assert.match(claudeLedger, /effort: high/);
   assert.match(claudeLedger, /goalbuddy_ledger_audit_v1/);
+  assert.match(claudeLedger, /board_tree_digest/);
+  assert.match(claudeLedger, /active_lanes/);
 });
 
 test("board keeper is a low-reasoning control-plane writer rather than a task actor", () => {

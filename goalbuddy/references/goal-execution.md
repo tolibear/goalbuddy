@@ -44,10 +44,10 @@ At every genuine recovery boundary:
    node <skill-path>/scripts/resume-board.mjs docs/goals/<slug> --json
    ```
 
-   The bundled resume script with no board remains discovery-only, and the public `goalbuddy resume` CLI delegates to this same script. The explicit-board form validates the exact captured `state.yaml` bytes first and uses the strict parser. An `ok: true` projection is a read model, not a second source of truth. An `ok: false` response contains no partial projection and grants no continuation authority; its stable digest, when available, only binds the full-board review.
-2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path, response digest, checker status, and the response's exact bundled `commands.resume` command so its independent rerun never depends on a global CLI. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
-3. Ledger independently reruns the explicit resume command, reads the complete charter and board, and compares them with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Its pre/post board digests must match the PM's response; a changed board is `uncertain` and requires a fresh recovery audit. Ledger never returns `congruent` when resume failed.
-4. Continue automatically from the projected active task only when resume returned `ok: true` and Ledger returns `verdict: congruent`, the same `state_digest`, and `main_agent_action: continue`.
+   The bundled resume script with no board remains discovery-only, and the public `goalbuddy resume` CLI delegates to this same script. The explicit-board form validates the exact captured root `state.yaml` and every referenced depth-one child `state.yaml`, then emits one deterministic `board.tree.digest` plus the complete projected `board.active_lanes` inventory. The existing checker remains byte-stable: resume invokes it against each exact snapshot rather than changing checker semantics or forcing runtime-binding migration. An `ok: true` projection is a read model, not a second source of truth. An `ok: false` response contains no partial projection and grants no continuation authority; its stable root digest, when available, only binds the full-board review.
+2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path, root `board.state_digest`, composite `board.tree.digest`, board-tree entries, active lanes, checker status, and the response's exact bundled `commands.resume` command so its independent rerun never depends on a global CLI. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
+3. Ledger independently reruns the explicit resume command, reads the complete charter plus every root/child board in `board.tree.boards`, and compares every active lane with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Every pre/post file digest and the composite digest must match the PM's response; a changed board tree is `uncertain` and requires a fresh recovery audit. Ledger never returns `congruent` when resume failed.
+4. Continue automatically from the projected active lane or lanes only when resume returned `ok: true` and Ledger returns `verdict: congruent`, the same root and composite digests, and `main_agent_action: continue`.
 5. Treat checker failure, projection failure, `discrepant`, `uncertain`, malformed output, timeout, or unavailable Ledger as a mandatory full-board PM review. Errors affecting the live task, current transition, gate, verification, or Worker liveness must be repaired before continuation. If every checker error is confined to immutable completed-task history on a current `version: 2` board, do not rewrite or fabricate history merely to make the checker green: the PM may continue only after directly proving the exact live continuation against the complete board and independent evidence. This compatibility path is never automatic and does not apply to v1, missing or changing state, an inconsistent live tail, an unresolved gate, or uncertain Worker liveness. After that review explicitly authorizes compatibility, render the exact active task with:
 
    ```bash
@@ -55,7 +55,7 @@ At every genuine recovery boundary:
    ```
 
    The public `goalbuddy prompt` command accepts the same flags. The renderer validates the exact on-disk snapshot, reuses the board-transition compatibility proof, and strict-parses a read model containing the exact active-task block plus every unchanged non-task top-level section. It does not parse fields through the board UI fallback, infer a non-active task, or persist a secondary summary. Digest drift, changed checker errors, a non-done errored task, global/live-tail errors, malformed active bytes, multiple active tasks, or `active_task` mismatch emits no prompt.
-6. Never infer Worker liveness from `status: active`. If an unfinished Worker might still be running and liveness is not proven, do not redispatch it. Ledger returns `uncertain`, and the PM checks the current harness/session or worktree before choosing recovery.
+6. Never infer Worker liveness from `status: active`. If any unfinished Worker lane might still be running and liveness is not proven, do not redispatch it. Ledger returns `uncertain`, and the PM checks the current harness/session or worktree before choosing recovery.
 
 Ledger never edits state, applies receipts, chooses tasks, dispatches work, or becomes a task/receipt actor. Do not add Ledger status to `state.yaml`; install health belongs to `goalbuddy doctor`, while board truth stays in the existing schema.
 
@@ -131,7 +131,7 @@ A task is the only work that may happen.
 
 No implementation without an active Worker or PM task that explicitly allows it.
 
-At most one write-capable Worker may be active. Do not run parallel Workers unless `state.yaml` proves disjoint write scopes and the user explicitly asked for parallel agent work.
+Each board may have at most one active task and therefore at most one active write-capable Worker. When the user explicitly asks for parallel agent work, represent each additional lane as a depth-one child board and run the bundled `parallel-plan` projection. Parallel Workers are eligible only when their structured `allowed_files` scopes are known and pairwise disjoint. Separate branches or worktrees preserve bytes but do not prove semantic independence, recovery safety, verification, or merge compatibility; they never relax the board-tree or scope checks.
 
 ## Receipts
 
@@ -421,7 +421,7 @@ Recover deterministically only when the agent itself reaches a terminal timeout,
 
 `goal_keeper` / `goal-keeper` is also separate from task prompt dispatch. Invoke or reuse it through the Board Keeper contract for board inspection and exact PM-authorized mutations. Keep its request compact; the installed agent definition already contains the mutation and validation procedure.
 
-Use `node <skill-path>/scripts/parallel-plan.mjs docs/goals/<slug>` when the user explicitly asks for parallel agent work. It is read-only: it recommends safe Scout/Judge handoffs and Worker handoffs only when write scopes are known and disjoint. It does not mutate `state.yaml`, create sub-goals, apply receipts, or spawn agents.
+Use `node <skill-path>/scripts/parallel-plan.mjs docs/goals/<slug>` when the user explicitly asks for parallel agent work. It is read-only: it consumes the same checker-validated root/child snapshots as resume, reports the same composite board-tree digest, recommends safe Scout/Judge handoffs, and recommends Worker handoffs only when write scopes are known and disjoint. It does not mutate `state.yaml`, create child boards, apply receipts, or spawn agents. If any board changes before output, validation fails closed; after a genuine recovery, Ledger reconciles every projected active lane before any redispatch.
 
 ## Completion
 

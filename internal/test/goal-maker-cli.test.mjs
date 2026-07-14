@@ -38,6 +38,11 @@ function testEnv(env) {
   return result;
 }
 
+function writeGoalSupport(goalDir, title = "Goal") {
+  mkdirSync(join(goalDir, "notes"), { recursive: true });
+  writeFileSync(join(goalDir, "goal.md"), `# ${title}\n`);
+}
+
 function pathSuffixPattern(...segments) {
   return new RegExp(`${segments.map(escapeRegExp).join("[\\\\/]")}$`);
 }
@@ -246,7 +251,7 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(ledger, /model = "gpt-5\.6-sol"/);
   assert.match(ledger, /model_reasoning_effort = "medium"/);
   assert.match(ledger, /sandbox_mode = "read-only"/);
-  assert.match(ledger, /Independently read the complete `goal\.md` and `state\.yaml`/);
+  assert.match(ledger, /Independently read the complete `goal\.md`, root `state\.yaml`, and every depth-one child `state\.yaml`/);
   assert.match(ledger, /goalbuddy_ledger_audit_v1/);
   assert.match(ledger, /never `congruent`/);
   assert.match(worker, /model_reasoning_effort = "high"/);
@@ -687,6 +692,8 @@ test("parallel-plan allows read-only active tasks and does not mutate state", ()
     const goal = join(root, "goal");
     const child = join(goal, "subgoals", "T001-child");
     mkdirSync(child, { recursive: true });
+    writeGoalSupport(goal, "Parent");
+    writeGoalSupport(child, "Child");
     writeFileSync(join(child, "state.yaml"), `version: 2
 goal:
   title: "Child"
@@ -765,6 +772,8 @@ test("parallel-plan rejects overlapping active Worker write scopes", () => {
     const goal = join(root, "goal");
     const child = join(goal, "subgoals", "T001-child");
     mkdirSync(child, { recursive: true });
+    writeGoalSupport(goal, "Parent");
+    writeGoalSupport(child, "Child");
     writeFileSync(join(child, "state.yaml"), `version: 2
 goal:
   title: "Child"
@@ -852,6 +861,8 @@ test("parallel-plan treats overlapping Worker glob patterns as unsafe", () => {
     const goal = join(root, "goal");
     const child = join(goal, "subgoals", "T001-child");
     mkdirSync(child, { recursive: true });
+    writeGoalSupport(goal, "Parent");
+    writeGoalSupport(child, "Child");
     writeFileSync(join(child, "state.yaml"), `version: 2
 goal:
   title: "Child"
@@ -1632,6 +1643,54 @@ ${active ? "" : `  - id: T999
   return goalDir;
 }
 
+function writeResumeChildBoard(goalDir, { objective = "Implement the child lane." } = {}) {
+  const childDir = join(goalDir, "subgoals", "T002-child");
+  writeGoalSupport(childDir, "Child lane");
+  writeFileSync(join(childDir, "state.yaml"), `version: 2
+goal:
+  title: "Child lane"
+  slug: "child-lane"
+  kind: specific
+  tranche: "test child"
+  status: active
+  oracle:
+    signal: "The child behavior is verified."
+    final_proof: "The focused child test passes."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: T010
+tasks:
+  - id: T010
+    type: worker
+    assignee: Worker
+    status: active
+    objective: "${objective}"
+    allowed_files:
+      - src/child.mjs
+    verify:
+      - node --test test/child.test.mjs
+    stop_if:
+      - "Need files outside child allowed_files."
+    receipt: null
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
+`);
+
+  const rootStatePath = join(goalDir, "state.yaml");
+  const rootState = readFileSync(rootStatePath, "utf8").replace(
+    `    stop_if:\n      - "Need files outside allowed_files."\n    receipt: null`,
+    `    stop_if:\n      - "Need files outside allowed_files."\n    subgoal:\n      status: active\n      path: subgoals/T002-child/state.yaml\n      owner: Worker\n      created_from: T002\n      depth: 1\n      rollup_receipt: null\n    receipt: null`,
+  );
+  writeFileSync(rootStatePath, rootState);
+  return childDir;
+}
+
 test("resume lists boards and prints the handoff command for active goals", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-"));
   try {
@@ -1821,6 +1880,10 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.schema_version, 1);
     assert.equal(scopedReport.checker.ok, true);
     assert.equal(scopedReport.checker.state_digest, scopedReport.board.state_digest);
+    assert.equal(scopedReport.checker.board_tree_version, 1);
+    assert.equal(scopedReport.checker.board_tree_digest, scopedReport.board.tree.digest);
+    assert.equal(scopedReport.board.tree.boards.length, 1);
+    assert.equal(scopedReport.board.tree.boards[0].path, "state.yaml");
     assert.equal(scopedReport.board.slug, "one");
     assert.match(scopedReport.board.state_digest, /^[a-f0-9]{64}$/);
     assert.equal(scopedReport.board.state_digest_status, "checker_validated");
@@ -1830,6 +1893,9 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.deepEqual(scopedReport.board.active_task.allowed_files, ["src/widget.mjs"]);
     assert.deepEqual(scopedReport.board.active_task.verify, ["npm test"]);
     assert.deepEqual(scopedReport.board.active_task.stop_if, ["Need files outside allowed_files."]);
+    assert.equal(scopedReport.board.active_lanes.length, 1);
+    assert.equal(scopedReport.board.active_lanes[0].kind, "root");
+    assert.equal(scopedReport.board.active_lanes[0].active_task.id, "T002");
     assert.equal(scopedReport.board.recent_receipt.task_id, "T001");
     assert.equal(scopedReport.board.recent_receipt.note, "notes/T001-transition.md");
     assert.doesNotMatch(scoped.stdout, /OLD_RECEIPT_SHOULD_NOT_APPEAR/);
@@ -1838,6 +1904,7 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.recovery.audit_agent.claude_code, "goal-ledger");
     assert.equal(scopedReport.recovery.continue_only_on, "congruent");
     assert.equal(scopedReport.recovery.worker_liveness, "unknown");
+    assert.equal(scopedReport.recovery.active_lane_count, 1);
     assert.equal(scopedReport.recovery.continuation_allowed_after_audit, true);
     assert.match(scopedReport.commands.resume, /^node /);
     assert.match(scopedReport.commands.resume, /scripts\/resume-board\.mjs/);
@@ -1852,6 +1919,7 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     const scopedHuman = runGoalMaker(["resume", "docs/goals/one"], { cwd: root });
     assert.equal(scopedHuman.status, 0, scopedHuman.stderr || scopedHuman.stdout);
     assert.match(scopedHuman.stdout, /State digest: [a-f0-9]{64}/);
+    assert.match(scopedHuman.stdout, /Board tree digest: [a-f0-9]{64} \(1 board\(s\)\)/);
     assert.match(scopedHuman.stdout, /Recovery audit required before continuation/);
 
     const complete = runGoalMaker(["resume", "docs/goals/two", "--json"], { cwd: root });
@@ -1871,6 +1939,82 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume and parallel-plan bind every active child lane to one composite board-tree digest", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-tree-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const childDir = writeResumeChildBoard(goalDir);
+    const rootStatePath = join(goalDir, "state.yaml");
+    const childStatePath = join(childDir, "state.yaml");
+    const rootDigest = createHash("sha256").update(readFileSync(rootStatePath, "utf8")).digest("hex");
+
+    const first = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(first.status, 0, first.stderr || first.stdout);
+    const firstReport = JSON.parse(first.stdout);
+    assert.equal(firstReport.checker.state_digest, rootDigest);
+    assert.equal(firstReport.board.tree.version, 1);
+    assert.match(firstReport.board.tree.digest, /^[a-f0-9]{64}$/);
+    assert.deepEqual(firstReport.board.tree.boards.map((board) => board.path), [
+      "state.yaml",
+      "subgoals/T002-child/state.yaml",
+    ]);
+    assert.equal(firstReport.board.active_lanes.length, 2);
+    const childLane = firstReport.board.active_lanes.find((lane) => lane.kind === "child");
+    assert.equal(childLane.active_task.id, "T010");
+    assert.deepEqual(childLane.active_task.allowed_files, ["src/child.mjs"]);
+    assert.deepEqual(childLane.active_task.verify, ["node --test test/child.test.mjs"]);
+    assert.deepEqual(childLane.active_task.stop_if, ["Need files outside child allowed_files."]);
+    assert.equal(firstReport.recovery.active_lane_count, 2);
+    assert.match(firstReport.commands.parallel_plan, /goalbuddy parallel-plan/);
+
+    const plan = runGoalMaker(["parallel-plan", goalDir, "--json"], { cwd: root });
+    assert.equal(plan.status, 0, plan.stderr || plan.stdout);
+    const planReport = JSON.parse(plan.stdout);
+    assert.equal(planReport.board_tree_digest, firstReport.board.tree.digest);
+    assert.equal(planReport.candidates.length, 2);
+    assert.equal(planReport.candidates.every((candidate) => candidate.safe_to_parallelize), true);
+
+    const childBefore = readFileSync(childStatePath, "utf8");
+    writeFileSync(childStatePath, childBefore.replace("Implement the child lane.", "Implement the revised child lane."));
+    const second = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(second.status, 0, second.stderr || second.stdout);
+    const secondReport = JSON.parse(second.stdout);
+    assert.equal(secondReport.board.state_digest, rootDigest);
+    assert.notEqual(secondReport.board.tree.digest, firstReport.board.tree.digest);
+    assert.notEqual(
+      secondReport.board.tree.boards.find((board) => board.path !== "state.yaml").state_digest,
+      firstReport.board.tree.boards.find((board) => board.path !== "state.yaml").state_digest,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume emits no partial board-tree projection when a child cannot be parsed strictly", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-tree-invalid-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const childDir = writeResumeChildBoard(goalDir);
+    const childStatePath = join(childDir, "state.yaml");
+    const malformed = readFileSync(childStatePath, "utf8").replace(
+      "active_task: T010\n",
+      "active_task: T010\nactive_task: T010\n",
+    );
+    writeFileSync(childStatePath, malformed);
+
+    const result = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(result.status, 1);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.recovery.mode, "full_board_review");
+    assert.equal(report.recovery.continuation_allowed, false);
+    assert.equal("tree" in report.board, false);
+    assert.match(report.errors.join("\n"), /child board could not be strictly projected|duplicate mapping key/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
