@@ -45,7 +45,7 @@ cp .codex/skills/goalbuddy/agents/goal_*.toml .codex/agents/
 Rules:
 
 - Only the PM loop chooses active tasks, decides tasks are done, or decides the goal is complete; Keeper applies those exact decisions.
-- Keep at most one write-capable Worker active unless disjoint write scopes are explicit in `state.yaml`.
+- Keep at most one active task and one write-capable Worker per board. Represent each additional concurrent product-writing lane as a depth-one child board, require pairwise-disjoint structured `allowed_files`, and run the bundled `parallel-plan` projection. Worktrees isolate bytes but never replace board recovery identity or those checks.
 - Keep at most one Keeper on a board. Use it for every execution-time full-board inspection or mutation, and reuse it within one uninterrupted session with the prior `after_digest`.
 - Worker defaults to high reasoning for implementation tasks and should complete the whole assigned slice.
 - Scout and Judge are read-only and safe to parallelize when their board inputs are clear.

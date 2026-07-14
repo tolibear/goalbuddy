@@ -11,6 +11,9 @@ const canonicalOpenAI = readFileSync("goalbuddy/agents/openai.yaml", "utf8");
 const pluginOpenAI = readFileSync("plugins/goalbuddy/skills/goal-prep/agents/openai.yaml", "utf8");
 const canonicalExecution = readFileSync("goalbuddy/references/goal-execution.md", "utf8");
 const pluginExecution = readFileSync("plugins/goalbuddy/skills/goal-prep/references/goal-execution.md", "utf8");
+const claudeGoalCommand = readFileSync("plugins/goalbuddy/commands/goal.md", "utf8");
+const canonicalAgentsTemplate = readFileSync("goalbuddy/templates/agents.md", "utf8");
+const pluginAgentsTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/agents.md", "utf8");
 
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
@@ -144,6 +147,19 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /configured job\/runtime deadline is actually exceeded/);
     assert.match(text, /Preserve the one-agent\/no-duplicate-dispatch rule/);
     assert.doesNotMatch(text, /After one `wait_agent` timeout/);
+  }
+});
+
+test("every shipped execution fallback uses child boards as parallel recovery identity", () => {
+  assert.equal(pluginAgentsTemplate, canonicalAgentsTemplate);
+
+  for (const text of [claudeGoalCommand, canonicalAgentsTemplate, pluginAgentsTemplate]) {
+    assert.match(text, /at most one active task/);
+    assert.match(text, /depth-one child board/);
+    assert.match(text, /parallel-plan/);
+    assert.match(text, /Worktrees isolate bytes but never replace board recovery identity/);
+    assert.doesNotMatch(text, /unless disjoint write scopes are proven/);
+    assert.doesNotMatch(text, /unless disjoint write scopes are explicit/);
   }
 });
 
