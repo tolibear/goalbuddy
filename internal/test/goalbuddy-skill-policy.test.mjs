@@ -319,3 +319,37 @@ test("receipt spec stays consistent with the shipped contracts", () => {
     assert.match(execution, new RegExp(field), `${field} missing from execution contract`);
   }
 });
+
+test("adaptive execution strategy governs quality routing in contract and charter", () => {
+  const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
+  const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
+  for (const text of [canonicalExecution, pluginExecution]) {
+    assert.match(text, /## Adaptive Execution Strategy/);
+    assert.match(text, /Decision risk: ambiguity, architectural choices, competing approaches/);
+    assert.match(text, /Execution risk: blast radius, integration breadth, long autonomous duration/);
+    assert.match(text, /auth, money, permissions, migrations, data integrity, public contracts, irreversible actions/);
+    assert.match(text, /When unsure, treat the slice as material/);
+    assert.match(text, /PM confidence alone is never a sufficient reason to skip independent review/);
+    assert.match(text, /record that downward deviation in PM-owned evidence/);
+    assert.match(text, /Never append it to a Worker's receipt/);
+    assert.match(text, /a clean review does not close a phase gate, and a Judge decision does not replace review evidence/);
+    assert.match(text, /Model identity for either tier is a runtime routing choice, never board data/);
+    assert.match(text, /\| Plan hardening \| Workflow Plan \| Omega Plan \|/);
+    assert.match(text, /A completion claim alone is not proof/);
+    assert.match(text, /tightened at runtime and never silently loosened/);
+    assert.match(text, /Decisive verification must prove the exact current bytes/);
+    assert.match(text, /preserve the checkpoint, repair and retry only the failed gate/);
+    assert.match(text, /never enter board truth/);
+    assert.match(text, /Independent implementation review is not a Judge task/);
+    assert.doesNotMatch(text, /review only at risk or phase boundaries/);
+  }
+  for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
+    assert.match(text, /## Execution Strategy/);
+    assert.match(text, /Planning horizon: `upfront \| just_in_time \| hybrid`/);
+    assert.match(text, /hardened plan → bounded Worker implementation → PM diff review → independent implementation review/);
+    assert.match(text, /When unsure, treat the slice as material/);
+    assert.match(text, /recorded in the PM's own evidence at the next phase-gate or final-audit receipt, never appended to a Worker receipt/);
+    assert.match(text, /do not skip independent review on a material slice on confidence alone/);
+    assert.doesNotMatch(text, /review only at phase\/risk\/final boundaries/);
+  }
+});

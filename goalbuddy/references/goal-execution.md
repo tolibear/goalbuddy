@@ -111,7 +111,7 @@ Planning, Scout findings, Judge decisions, and a queued Worker task are not term
 For execution goals, the default run is continuous:
 
 ```text
-Discover enough evidence, choose the largest reversible local work package, implement it, verify it, review only at risk or phase boundaries, then immediately choose and execute the next work package until the full original outcome is complete.
+Discover enough evidence, choose the largest reversible local work package, implement it, verify it, apply the Adaptive Execution Strategy's quality ladder, then immediately choose and execute the next work package until the full original outcome is complete.
 ```
 
 If the first `/goal` run reaches a Judge decision that names a safe Worker task with `allowed_files`, `verify`, and `stop_if`, the PM should activate that Worker and continue in the same run unless a stop condition applies.
@@ -119,6 +119,64 @@ If the first `/goal` run reaches a Judge decision that names a safe Worker task 
 After a verified Worker package, do not mark the thread goal complete merely because that package passed. For broad automation or product goals, continue by reopening or advancing the board to the next safe Worker package until the full owner outcome is complete.
 
 Missing owner input, credentials, production access, destructive-operation permission, or policy decisions are blockers for specific tasks, not stopping conditions for the whole goal. When a slice hits one of those blockers, mark that exact task blocked with a receipt, create a safe follow-up or workaround task, and keep doing local, non-destructive work that advances the full outcome.
+
+## Adaptive Execution Strategy
+
+The compiler and charter establish durable structure: outcome, constraints, vertical slices, dependencies, proof requirements, and owner gates. They do not pre-schedule quality tooling. At each material boundary — a slice about to start, a plan about to be trusted, a diff about to be accepted — the PM decides:
+
+- Is the next slice sufficiently specified, or does it need a new or revised implementation plan?
+- Should planning for it be upfront, just in time, or hybrid?
+- Does the plan warrant independent hardening before implementation?
+- Which implementation lane fits, and what review depth does the resulting diff deserve?
+- Is a dedicated simplification pass worthwhile?
+- Does this seam need the lead PM's judgment or a routine delegated Judge?
+
+The PM may split, combine, reorder, or refine queued work as evidence accumulates. It may not silently change the owner's outcome, non-goals, permissions, final proof, or completed history.
+
+### Risk axes and materiality
+
+Two independent axes justify planning and review; either alone is sufficient:
+
+- Decision risk: ambiguity, architectural choices, competing approaches, unverified external assumptions, new or changed authority, money, data-model, or cross-component seams.
+- Execution risk: blast radius, integration breadth, long autonomous duration, difficult verification. A conceptually simple but enormous migration still needs hardening.
+
+A slice is automatically material when it touches auth, money, permissions, migrations, data integrity, public contracts, irreversible actions, or meaningful interaction changes. Copy tweaks and small styling changes are not material. When unsure, treat the slice as material. The charter's Execution Strategy section may refine these defaults; it may not replace them with PM confidence.
+
+### Quality ladder
+
+Material slices normally receive, in order: a hardened plan, implementation by a bounded Worker, direct diff review by the PM, an independent implementation review, adjudication of findings with bounded fixes, verification, and a receipt. Simplification is available both as a review lens and as a standalone pass after large, cross-cutting, or complexity-producing changes.
+
+Small, mechanical, decision-complete changes may skip rungs. PM confidence alone is never a sufficient reason to skip independent review on a material slice during a long autonomous run. When the PM reduces the ladder for a material slice, record that downward deviation in PM-owned evidence: the rationale and evidence of the next phase-gate or final-audit Judge/PM receipt the PM authors. Never append it to a Worker's receipt — Worker `deviations` keeps its receipt-spec meaning (the Worker's own in-scope judgment calls against the task text), and subagent receipts pass to Keeper verbatim. Do not add board notes or new schema fields for it; if per-slice durability ever proves necessary, design a PM-owned additive field explicitly rather than overloading `deviations`.
+
+### Independent review is not Judge
+
+Independent implementation review — plan hardening, diff review workflows, simplification — produces adversarial evidence about a plan or diff. A GoalBuddy Judge holds board-level decision authority at phase, risk, ambiguity, rejected-verification, and final-completion gates. Neither substitutes for the other: a clean review does not close a phase gate, and a Judge decision does not replace review evidence for a material diff.
+
+The lead PM owns architecture, taste, ambiguous decisions, material board restructuring, workflow adjudication, and final completion. Routine readiness, scope, verification-adequacy, dependency, and post-fix rechecks may go to a delegated Judge, which escalates when a finding would change board structure, a task's authority model, or the owner contract. Model identity for either tier is a runtime routing choice, never board data.
+
+### Capabilities are semantic
+
+The board and charter name capabilities, not vendor skills:
+
+| Capability | Claude Code | Codex |
+|---|---|---|
+| Plan hardening | Workflow Plan | Omega Plan |
+| Implementation review | Workflow Review | Omega Review |
+| Simplification | Workflow Simplify | Omega Simplify |
+
+Receipts record the capability outcome, disposition, and artifact path — never full reports copied into board truth. Complete plans, review reports, and workflow artifacts live in their native locations.
+
+### Evidence binding
+
+Review and hardening evidence binds to the exact artifact it examined: the diff or plan content, its scope, the workflow version, and the run's completeness status. Evidence is stale when any relevant input changes; a review launched before a plan edit refutes text that no longer exists. When a board moves between harnesses, reuse completed evidence whose binding is unchanged; rerun the native workflow only when the evidence is incomplete, stale, untrusted, or the underlying input changed.
+
+A completion claim alone is not proof. A structured receipt backed by exact commands and inspectable artifacts is evidence; important claims still receive independent verification. A task's proof contract may be tightened at runtime and never silently loosened. Decisive verification must prove the exact current bytes — through a forced run, an isolated worktree, or a correctly content-addressed cache; a cached result that cannot be tied to the current content proves nothing.
+
+### Checkpoints and gate failures
+
+Durably checkpoint implementation — a task branch or worktree commit, never a push to a protected branch — before launching independent review, so an interrupted review cannot lose the work. Gate-infrastructure failure does not invalidate the implementation artifact: preserve the checkpoint, repair and retry only the failed gate, and use a canary before relaunching a failed review fleet.
+
+Transient quota, rate-limit, and timing conditions are scheduling inputs the PM may reorganize around freely; they never enter board truth. Durable safety constraints discovered at runtime — for example, a scheduler that reads prompts live from `main` — may enter board truth as constraints.
 
 ## Task Rules
 
@@ -367,7 +425,7 @@ Do not stop at "ready for implementation" when a safe Worker task exists. Activa
 
 Do not stop after one verified work package when the broader owner outcome still has safe local follow-up work. Advance the board to the next work package unless a risk boundary or final audit is due.
 
-Do not create a Judge task after every Worker by default. Use Judge only for phase boundaries, high-risk changes, unclear scope, rejected verification, or final completion. Repeated same-shape work belongs in one Worker package.
+Do not create a Judge task after every Worker by default. Use Judge only for phase boundaries, high-risk changes, unclear scope, rejected verification, or final completion. Repeated same-shape work belongs in one Worker package. Independent implementation review is not a Judge task: material slices receive it per the Adaptive Execution Strategy even when no Judge gate is due.
 
 Do not stop because the current slice needs owner input, credentials, production access, destructive operations, or policy decisions. Mark that slice blocked, spawn or activate the smallest safe local task that can proceed around the blocker, and continue.
 

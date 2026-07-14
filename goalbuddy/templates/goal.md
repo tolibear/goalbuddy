@@ -34,7 +34,18 @@ The PM must keep comparing task receipts to this oracle. Planning, discovery, a 
 
 ## Current Tranche
 
-<What is enough for the full owner outcome, and what is the current largest reversible local work package? For execution goals, the default is continuous: discover enough evidence, choose a coherent work package, implement it, verify it, review only at phase/risk/final boundaries, then immediately advance to the next work package until the full original outcome is complete. Plan-only or one-package-only stopping is valid only when explicitly requested.>
+<What is enough for the full owner outcome, and what is the current largest reversible local work package? For execution goals, the default is continuous: discover enough evidence, choose a coherent work package, implement it, verify it, apply the Execution Strategy's quality ladder, then immediately advance to the next work package until the full original outcome is complete. Plan-only or one-package-only stopping is valid only when explicitly requested.>
+
+## Execution Strategy
+
+<Compiled adaptive strategy for this goal. The execution contract's Adaptive Execution Strategy section governs; this section instantiates it. Describe capabilities semantically and do not pre-schedule tool calls.>
+
+- Planning horizon: `upfront | just_in_time | hybrid` — <default for this goal and why>
+- Normal quality ladder for material slices: hardened plan → bounded Worker implementation → PM diff review → independent implementation review → adjudicated fixes → verification → receipt.
+- Materiality: auth, money, permissions, migrations, data integrity, public contracts, irreversible actions, and meaningful interaction changes are automatically material; copy tweaks and small styling changes are not. <Goal-specific additions or refinements.> When unsure, treat the slice as material.
+- Risk triggers: decision risk (ambiguity, architecture, competing approaches, unverified external assumptions) or execution risk (blast radius, integration breadth, long autonomous duration, difficult verification) — either axis alone justifies planning and independent review.
+- Capabilities are semantic — plan hardening, implementation review, simplification — and each harness maps them to its native workflows. Receipts record outcome, disposition, and artifact path, never full reports.
+- Downward deviations from this ladder on a material slice are recorded in the PM's own evidence at the next phase-gate or final-audit receipt, never appended to a Worker receipt; PM confidence alone never justifies one.
 
 ## Non-Negotiable Constraints
 
@@ -109,7 +120,7 @@ On every `/goal` continuation:
 9. Give that exact mutation to Keeper; continue only from its passing checker receipt and new digest.
 10. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
 11. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
-12. Review at phase, risk, rejected-verification, ambiguity, or final-completion boundaries; do not review every small Worker by habit.
+12. Apply the Execution Strategy at each seam: independent implementation review for material slices, Judge gates only at phase, risk, rejected-verification, ambiguity, or final-completion boundaries. Do not add a Judge after every Worker by habit, and do not skip independent review on a material slice on confidence alone.
 13. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
 
 Issue and PR handoffs are supporting artifacts. `state.yaml` remains authoritative, and every external artifact decision must be recorded in a task receipt.
