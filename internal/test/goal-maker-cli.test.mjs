@@ -389,6 +389,9 @@ checks:
     assert.equal(report.metadata.recommended_reasoning, "high");
     assert.equal(report.metadata.sandbox, "workspace-write");
     assert.equal(report.metadata.changed_files_path_style, "board-relative");
+    assert.match(report.metadata.scope_change_recovery, /stop before those writes and return a blocked receipt/);
+    assert.match(report.metadata.scope_change_recovery, /apply_amendment/);
+    assert.match(report.metadata.scope_change_recovery, /apply_hydration/);
     assert.deepEqual(report.metadata.goal_oracle, {
       signal: "Prompt includes the active task contract without dumping old receipts.",
       final_proof: "JSON and human prompt outputs include the goal oracle and active task.",
@@ -420,6 +423,10 @@ checks:
     assert.match(human.stdout, /Preserve one-agent\/no-duplicate dispatch/);
     assert.match(human.stdout, /changed_files must use board-relative paths/);
     assert.match(human.stdout, /do not convert absolute paths to relative paths/);
+    assert.match(human.stdout, /scope_change_recovery/);
+    assert.match(human.stdout, /Do not widen or retry the active task/);
+    assert.match(human.stdout, /apply_amendment/);
+    assert.match(human.stdout, /apply_hydration/);
     assert.doesNotMatch(human.stdout, /After one wait_agent timeout/);
     assert.match(human.stdout, /goal_oracle/);
     assert.match(human.stdout, /slice_policy/);

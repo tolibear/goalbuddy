@@ -7,6 +7,7 @@ import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+const WORKER_SCOPE_CHANGE_RECOVERY = "If a stop_if condition fires because work needs files or authority outside allowed_files, stop before those writes and return a blocked receipt. Do not widen or retry the active task. The PM must use GoalBuddy Keeper apply_amendment to atomically record it as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
 
 const ROLE_DEFAULTS = {
   scout: { agent: "goal_scout", reasoning: "medium", sandbox: "read-only" },
@@ -57,6 +58,7 @@ export function renderTaskPrompt(options) {
         goal_oracle: board.goal.oracle || null,
         slice_policy: board.document.rules?.slice_policy || null,
         changed_files_path_style: changedFilesPathStyle(allowedFiles),
+        scope_change_recovery: role === "worker" ? WORKER_SCOPE_CHANGE_RECOVERY : null,
         warnings,
       },
       task: {
@@ -485,6 +487,9 @@ export function formatPrompt(payload) {
   addList(lines, "allowed_files", payload.task.allowed_files);
   addList(lines, "verify", payload.task.verify);
   addList(lines, "stop_if", payload.task.stop_if);
+  if (payload.metadata.scope_change_recovery) {
+    lines.push(`- scope_change_recovery: ${payload.metadata.scope_change_recovery}`);
+  }
   addList(lines, "expected_output", payload.task.expected_output);
   lines.push("", "Expected receipt JSON shape:", JSON.stringify(payload.receipt_schema, null, 2));
   return lines.join("\n");

@@ -600,6 +600,46 @@ test("apply-receipt reverts the board when the transition is invalid", () => {
   }
 });
 
+test("apply-receipt rejects out-of-scope work with typed successor recovery guidance", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const receipt = {
+      ...DONE_RECEIPT,
+      changed_files: ["src/widget.mjs", "src/outside.mjs"],
+    };
+
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.match(report.checker_errors.join("\n"), /changed file outside allowed_files: src\/outside\.mjs/);
+    assert.match(report.recovery_guidance.join("\n"), /Do not widen or retry the active task/);
+    assert.match(report.recovery_guidance.join("\n"), /apply_amendment/);
+    assert.match(report.recovery_guidance.join("\n"), /apply_hydration/);
+    assert.match(report.recovery_guidance.join("\n"), /fully scoped successor/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+
+    const human = spawnSync(process.execPath, [
+      script,
+      "docs/goals/one",
+      "--task",
+      "T001",
+      "--receipt",
+      join(root, "receipt.json"),
+      "--activate",
+      "T999",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(human.status, 1, human.stderr || human.stdout);
+    assert.match(human.stdout, /Recovery guidance:/);
+    assert.match(human.stdout, /apply_amendment/);
+    assert.match(human.stdout, /apply_hydration/);
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("apply-receipt rejects done receipts that do not cover every declared verification command", () => {
   const cases = [
     {

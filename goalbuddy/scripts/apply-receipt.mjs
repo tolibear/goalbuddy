@@ -9,6 +9,7 @@ import { immutableHistoryCompatibility, sha256 } from "./immutable-history-proof
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then use GoalBuddy Keeper apply_amendment to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
 
 if (isDirectRun()) {
   try {
@@ -29,7 +30,10 @@ if (isDirectRun()) {
     } else if (report.ok) {
       console.log(`Recorded ${report.task_id} as ${report.status}; active_task is now ${report.active_task}.`);
     } else {
-      console.log(`Transition rejected and reverted. Checker errors:\n- ${report.checker_errors.join("\n- ")}`);
+      const recovery = report.recovery_guidance?.length
+        ? `\nRecovery guidance:\n- ${report.recovery_guidance.join("\n- ")}`
+        : "";
+      console.log(`Transition rejected and reverted. Checker errors:\n- ${report.checker_errors.join("\n- ")}${recovery}`);
     }
     process.exitCode = report.ok ? 0 : 1;
   } catch (error) {
@@ -479,13 +483,15 @@ function installValidatedCandidate(context, candidate, report) {
       })
       : { ok: false, reason: "Checker-red history requires explicit --allow-immutable-history after PM full-board review." };
   if (!checkerReport.ok && !compatibility.ok) {
+    const checkerErrors = checkerReport.errors || [];
     return {
       ...report,
       ok: false,
       reverted: true,
       before_digest: context.originalDigest,
       after_digest: context.originalDigest,
-      checker_errors: checkerReport.errors || [],
+      checker_errors: checkerErrors,
+      recovery_guidance: checkerRecoveryGuidance(checkerErrors),
       immutable_history_rejection: compatibility.reason,
     };
   }
@@ -515,6 +521,12 @@ function runChecker(statePath, candidate) {
   } catch {
     return { ok: false, errors: [`checker produced unreadable output: ${(check.stderr || check.stdout || "").slice(0, 300)}`], warnings: [] };
   }
+}
+
+function checkerRecoveryGuidance(errors) {
+  return errors.some((error) => /changed file outside allowed_files:/.test(error))
+    ? [OUT_OF_SCOPE_RECOVERY_GUIDANCE]
+    : [];
 }
 
 function stateTopScalar(text, key) {
