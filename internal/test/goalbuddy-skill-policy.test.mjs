@@ -359,8 +359,9 @@ test("native harness goal loops are documented without becoming board truth", ()
     assert.match(text, /## Native Harness Goal Loops/);
     assert.match(text, /judges the goal condition\s+against the conversation transcript only/);
     assert.match(text, /surface decisive proof in turn text/);
-    assert.match(text, /A turn that uses no tools suppresses the\s+next continuation/);
-    assert.match(text, /`budget_limited` with wrap-up steering/);
+    assert.match(text, /A prose-only turn does not itself suppress continuation/);
+    assert.match(text, /do\s+not make meaningless tool calls merely to keep the loop alive/);
+    assert.match(text, /`budget_limited`\s+with wrap-up\s+steering/);
     assert.match(text, /Do not let a harness evaluator's "achieved" verdict or a wrap-up steering\s+message substitute for that receipt/);
   }
 });

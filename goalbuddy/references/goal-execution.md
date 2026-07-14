@@ -48,13 +48,15 @@ overrides the owner contract or this document.
 - **Codex** (goals feature): a per-thread persisted goal object
   (objective, optional `token_budget`, status). When the thread goes idle
   with an active in-budget goal, the harness injects hidden continuation
-  steering and starts a new turn. A turn that uses no tools suppresses the
-  next continuation — keep goal turns acting through tools, which the
-  Continuation Rule already requires. On token-budget exhaustion the status
-  becomes `budget_limited` with wrap-up steering: write that wrap-up into
-  receipts and notes so board truth captures the stopping point. The model
-  may `create_goal` and mark `complete` or `blocked` only; pausing,
-  resuming, and budgets belong to the user.
+  steering and starts a new turn when automatic idle work is permitted.
+  Queued user or client work, another active turn, or Plan mode takes
+  precedence. A prose-only turn does not itself suppress continuation; do
+  not make meaningless tool calls merely to keep the loop alive. On
+  token-budget exhaustion the status becomes `budget_limited` with wrap-up
+  steering: write that wrap-up into receipts and notes so board truth
+  captures the stopping point. The model may `create_goal` and mark
+  `complete` or `blocked` only; pausing, resuming, and budgets belong to the
+  user.
 
 Under either loop, completion truth is still the board: a final Judge/PM
 audit receipt with `full_outcome_complete: true` recorded in `state.yaml`.
