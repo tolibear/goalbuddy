@@ -26,6 +26,42 @@ If the raw input is detailed and already contains a plan, the first board task s
 
 The target is not literal certainty. It is the highest practical likelihood of a successful goal run: preserve the user's intent, avoid the likely misfire, pick the earliest responsible phase, require proof, and keep advancing safe work until a final audit proves the full outcome.
 
+## Native Harness Goal Loops
+
+Both harnesses now provide a native, harness-driven goal loop that keeps
+re-invoking the model until the goal resolves. The loop drives continuation;
+it never becomes board truth, and its steering or evaluator text never
+overrides the owner contract or this document.
+
+- **Claude Code** (`/goal`, v2.1.139+): a session-scoped Stop-hook wrapper.
+  After every turn, a small fast evaluator model judges the goal condition
+  against the conversation transcript only — it runs no tools and reads no
+  files. Consequences: surface decisive proof in turn text (the final receipt,
+  checker result, and `goal.status`), because proof that stays inside files or
+  subagent output is invisible to the evaluator; and there is no implicit turn
+  cap, so for walk-away runs the operator may append a measurable completion
+  clause and a bound to the run command, for example
+  `/goal Follow docs/goals/<slug>/goal.md until a final receipt with
+  full_outcome_complete: true is surfaced; stop after N turns if blocked.`
+  The goal is restored on `--resume`/`--continue` with turn and token
+  baselines reset.
+- **Codex** (goals feature): a per-thread persisted goal object
+  (objective, optional `token_budget`, status). When the thread goes idle
+  with an active in-budget goal, the harness injects hidden continuation
+  steering and starts a new turn. A turn that uses no tools suppresses the
+  next continuation — keep goal turns acting through tools, which the
+  Continuation Rule already requires. On token-budget exhaustion the status
+  becomes `budget_limited` with wrap-up steering: write that wrap-up into
+  receipts and notes so board truth captures the stopping point. The model
+  may `create_goal` and mark `complete` or `blocked` only; pausing,
+  resuming, and budgets belong to the user.
+
+Under either loop, completion truth is still the board: a final Judge/PM
+audit receipt with `full_outcome_complete: true` recorded in `state.yaml`.
+Do not let a harness evaluator's "achieved" verdict or a wrap-up steering
+message substitute for that receipt, and do not mark a Codex goal `complete`
+before the board's final transition is applied.
+
 ## Boards Move Between Harnesses
 
 A board may arrive mid-run from a different harness: a goal started in Codex can be resumed in Claude Code and vice versa. `state.yaml` is the only durable board truth, but a durable record can still be stale, malformed, mid-closeout, or inconsistent with repository reality. On recovery, never reconstruct progress from chat history, and never blindly trust an active-task label as proof that continuation or redispatch is safe. Receipts written by another harness are as authoritative as your own once the recovery audit below finds the board congruent.
