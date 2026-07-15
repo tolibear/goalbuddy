@@ -29,7 +29,7 @@ The package has no install lifecycle hook, so the package step cannot change Cod
 
 Restart Codex or Claude Code.
 
-Then compile an agreed plan, spec, or conversation into the right goal route:
+Then compile a decision-complete plan, specification, or agreed conversation contract into a new GoalBuddy board:
 
 ```text
 $codex-goal-compiler
@@ -41,7 +41,7 @@ In Claude Code, use:
 /codex-goal-compiler
 ```
 
-Codex Goal Compiler chooses direct work, planning, a standalone native goal, GoalBuddy, or recurring automation. When it selects GoalBuddy, it explicitly loads Goal Prep as the board backend. `$goal-prep` and `/goal-prep` remain available for intentional manual board intake or repair, not as competing routers.
+Codex Goal Compiler has one job: preserve the accepted source, compile an adaptive execution strategy, and create a new checker-valid GoalBuddy board. If material product decisions are missing, it returns `not_compilable` and creates nothing. It does not route to other workflows, implement, repair an existing board, or start `/goal`. Goal Prep is its non-model-invocable schema backend and remains available only for intentional manual intake or board repair.
 
 In Claude Code, GoalBuddy installs a real `/goal` command that runs the execution loop. In Codex, native `/goal` is the separate OpenAI-gated feature GoalBuddy prepares boards for.
 
@@ -173,6 +173,8 @@ Use subgoals for bounded child work that belongs to a parent task. Use multiple 
 
 GoalBuddy can prepare safe parallel work; it does not run a parallel org chart or install arbitrary extension packs.
 
+Routine control-plane work stays quiet. Successful resume checks, Ledger audits, Keeper mutations, digest chaining, receipt application, checker passes, prompt rendering, and polling remain internal. User updates describe the product milestone, review, real blocker, required decision, and completion evidence. GoalBuddy mechanics surface only when the user asks, recovery is incongruent, the runtime itself blocks safe work, an exact board action is required, or final harness completion needs one concise proof marker.
+
 Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the active task without dumping the whole state file. The prompt includes a mandatory `required_spawn_agent_type`; Codex PMs should use that exact GoalBuddy task agent (`goal_scout`, `goal_worker`, or `goal_judge`) instead of a generic role agent. `goal_keeper` and `goal_ledger` are separate control-plane roles: Keeper handles exact board operations during execution, while Ledger runs only at genuine recovery boundaries. Neither receives a board task. Use `goalbuddy parallel-plan docs/goals/<slug>` to inspect read-only or disjoint write-scope work that can be handed to native Codex or Claude Code agent flows. The command reports recommendations only; it does not mutate state or spawn agents.
 
 ## Product Boundary
@@ -180,8 +182,8 @@ Use `goalbuddy prompt docs/goals/<slug>` to render a compact prompt for the acti
 GoalBuddy owns both canonical skill trees, installation topology, execution agents, board schema, runtime commands, and a stable compiler-facing contract:
 
 ```text
-codex-goal-compiler  -> chooses and validates the route
-goal-prep            -> compiles GoalBuddy boards when selected
+codex-goal-compiler  -> compiles decision-complete source into a new validated board
+goal-prep            -> owns board schema and explicit manual intake/repair
 goalbuddy contract   -> reports target readiness and runtime capabilities
 ```
 
@@ -205,7 +207,7 @@ Multiple local boards reuse one readable `goalbuddy.localhost` hub with an in-he
 
 Custom external integrations should be built as ordinary repo work with a concrete implementation plan, not installed from a GoalBuddy catalog.
 
-See [GoalBuddy 0.5.0: Integrated Goal Compiler](docs/releases/0.5.0.md) for the latest release notes.
+See [GoalBuddy 0.5.0: Focused Compiler, Quiet Runtime](docs/releases/0.5.0.md) for the latest release notes.
 
 <p align="center">
   <img src="internal/assets/goalbuddy-live-board.jpg" alt="GoalBuddy local live board open next to Codex while Scout, Judge, and Worker tasks populate." width="100%">
@@ -223,7 +225,7 @@ See [GoalBuddy 0.5.0: Integrated Goal Compiler](docs/releases/0.5.0.md) for the 
 
 GoalBuddy is MIT licensed. This personal distribution is installed from the local Git checkout and is deliberately marked private so it cannot overwrite the upstream npm package.
 
-The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Codex Goal Compiler, then let the selected route work from the generated artifact.
+The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Codex Goal Compiler on decision-complete source, review the generated board, then start `/goal` with the printed command.
 
 For release process details, see [docs/releases](docs/releases/README.md).
 

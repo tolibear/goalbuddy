@@ -1,4 +1,4 @@
-# GoalBuddy Route Handoff Reference
+# GoalBuddy Board-Compilation Handoff
 
 ## Contents
 
@@ -9,7 +9,7 @@
 - [Blocked runtime](#blocked-runtime)
 - [Production-sensitive work](#production-sensitive-work)
 
-This is the canonical quality-pass and target-adapter reference for the GoalBuddy route inside `codex-goal-compiler`. The installed GoalBuddy skill remains authoritative for board files, task and receipt fields, checker behavior, agents, and execution.
+This is the canonical source-to-board quality pass and target adapter for `codex-goal-compiler`. The installed GoalBuddy skill remains authoritative for board files, task and receipt fields, checker behavior, agents, and execution.
 
 Every handoff includes all MUST blocks with real content. Include a SHOULD block only when its condition applies. Never fill a block with placeholders or `unknown` boilerplate.
 
@@ -47,7 +47,7 @@ goal_mode_readiness:
   concurrency_summary: <safe lanes and serial reasons>
 ```
 
-Infer conservatively from the plan and repository. Stop only when inference would change scope, authority, risk, user-visible behavior, or completion proof. If the oracle, completion proof, likely misfire, or realistic proof path remains weak, return the plan for hardening instead of creating a board.
+Infer conservatively from the accepted source and already-supplied repository evidence. Stop when inference would change scope, authority, risk, user-visible behavior, architecture, or completion proof. If the oracle, completion proof, likely misfire, or realistic proof path remains weak, return `not_compilable` with the exact missing decisions instead of creating a board or invoking a hardening workflow.
 
 ### Official GoalBuddy intake mapping (MUST)
 
@@ -55,7 +55,7 @@ Read the selected harness's installed Goal Prep skill and map the source plan pl
 
 ### Source-plan facts and ambiguity challenge (MUST)
 
-Preserve milestones, decisions, known files, interfaces, constraints, assumptions, non-goals, verification commands, and rollback facts. For each material ambiguity, record two plausible interpretations, the accepted reading and rationale, unchanged decisions, and any owner decision that truly changes architecture, authority, risk, or proof.
+Keep the accepted plan or specification in its native location and bind it by path plus stable revision or content digest when available. Preserve only its load-bearing milestones, decisions, known files, interfaces, constraints, assumptions, non-goals, verification commands, and rollback facts in board intake; never paste the complete source into `goal.md` or `state.yaml`. For each material ambiguity, record two plausible interpretations, the accepted reading and rationale, unchanged decisions, and any owner decision that truly changes architecture, authority, risk, or proof.
 
 ### Official five-proof mapping (MUST)
 
@@ -113,7 +113,7 @@ Use the selected harness's real preparation surface directly in the current comp
 
 Use the finished plan below/above as an existing_plan source artifact.
 
-The goal compiler selected GoalBuddy as the route and selected target: <codex | claude>.
+The goal compiler accepted a decision-complete source contract and selected target: <codex | claude>.
 
 Execute this preparation directly in the current compiler context. Do not spawn a subagent, collaboration agent, or separate Codex task merely to prepare the board.
 
@@ -162,31 +162,31 @@ Run the installed official board checker and apply only the compiler semantic ac
 ### Codex
 
 ```text
-Initial Codex start: /goal Achieve <outcome>, proven by <oracle>. Operating procedure and board: docs/goals/<slug>/goal.md.
-Initial Claude start: n/a
+Codex start command: /goal Achieve <outcome>, proven by <oracle>. Operating procedure and board: docs/goals/<slug>/goal.md.
+Claude start command: n/a
 Portable continuation: /goal Follow docs/goals/<slug>/goal.md.
 CLI helper: goalbuddy resume docs/goals/<slug>
 ```
 
-When explicit start was requested, the compiler checks Plan Mode, validates the objective, calls `get_goal`, and calls `create_goal` only when no unfinished goal exists.
+The compiler validates this command and prints it for a later execution turn. It never calls `get_goal`, `create_goal`, or starts execution.
 
 ### Claude Code
 
 ```text
-Initial Codex start: n/a
-Initial Claude start: /goal Follow docs/goals/<slug>/goal.md.
+Codex start command: n/a
+Claude start command: /goal Follow docs/goals/<slug>/goal.md.
 Portable continuation: /goal Follow docs/goals/<slug>/goal.md.
 CLI helper: goalbuddy resume docs/goals/<slug>
 ```
 
-Claude never uses Codex native goal tools or the Codex objective validator. The user starts `/goal` in a fresh session after reviewing the checkpoint.
+Claude never uses Codex native goal tools or the Codex objective validator. The user starts `/goal` in a fresh session after reviewing the checkpoint; the compiler never starts it.
 
 ## Blocked runtime
 
 ```text
-Blocked: GoalBuddy compiler contract preflight failed for <target>. The compiler will not resolve another harness's skill, invent a fallback schema, or inspect existing boards. Repair the selected target and rerun.
+Blocked: GoalBuddy compiler contract preflight failed for <target>. The compiler will not resolve another harness's skill, invent a fallback schema, inspect existing boards, or route to a different workflow. Repair the selected target and rerun.
 ```
 
 ## Production-sensitive work
 
-Prepare and validate the board, preserve the checkpoint, and stop. Start only after the owner explicitly confirms the risk and authority boundary.
+Prepare and validate the board, preserve the checkpoint, and stop. A later execution turn owns every start and risk gate.

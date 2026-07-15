@@ -1,6 +1,6 @@
 ---
 name: goal-prep
-description: "Explicit Goal Prep backend for GoalBuddy. Use only when the user explicitly invokes $goal-prep or /goal-prep, or when Codex Goal Compiler explicitly loads it after selecting the GoalBuddy route. Prepares or repairs structured /goal intake, goal.md, state.yaml, notes, role-tagged tasks, receipts, and the starter command; generic requests to goalize, route, or compile work belong to Codex Goal Compiler."
+description: "Explicit Goal Prep backend for GoalBuddy. Use only when the user explicitly invokes $goal-prep or /goal-prep, or when Codex Goal Compiler explicitly loads it after accepting a decision-complete source contract. Prepares or repairs structured /goal intake, goal.md, state.yaml, notes, role-tagged tasks, receipts, and the starter command. Decision-complete new-board compilation belongs to Codex Goal Compiler; generic route selection is outside Goal Prep."
 disable-model-invocation: true
 user-invocable: true
 ---
@@ -27,16 +27,16 @@ No oracle, no serious goal. A goal oracle is the observable signal that tells th
 
 ## Invocation Boundary
 
-Goal Prep is an explicit or compiler-internal backend, not the general goal-routing front door. Do not select it implicitly for generic requests to goalize, route, or compile work; those belong to Codex Goal Compiler. After Codex Goal Compiler selects the GoalBuddy route, it may explicitly load this `SKILL.md` as its declared board-preparation dependency. Direct `$goal-prep` or `/goal-prep` invocation remains supported for users who intentionally want GoalBuddy intake or board repair.
+Goal Prep is an explicit or compiler-internal backend, not a general routing or compilation front door. Do not select it implicitly for generic goalization, route selection, or board-compilation requests. Decision-complete new-board compilation belongs to Codex Goal Compiler. After the compiler accepts its source contract, it may explicitly load this `SKILL.md` as its declared board-preparation dependency. Direct `$goal-prep` or `/goal-prep` invocation remains supported for users who intentionally want interactive GoalBuddy intake or board repair.
 
 There are two different modes:
 
 - `$goal-prep`: prepare intake, `goal.md`, `state.yaml`, and the starter `/goal` command, then stop.
 - `/goal Follow docs/goals/<slug>/goal.md.`: execute the board, including Scout/Judge/Worker work.
 
-This boundary is strict. `$goal-prep` is not a lightweight `/goal`; it is a board compiler.
+This boundary is strict. `$goal-prep` is not a lightweight `/goal` or a competing public compiler; it is GoalBuddy's schema-bound board-preparation and repair backend.
 
-This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; each board has at most one active task; explicitly requested parallel lanes use depth-one child boards and the bundled `parallel-plan` safety projection; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; the PM owns semantic board decisions while the Board Keeper performs normal execution-time board inspection and mutation; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
+This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; each board has at most one active task; explicitly requested parallel lanes use depth-one child boards and the bundled `parallel-plan` safety projection; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; the PM owns semantic board decisions while the Board Keeper performs normal execution-time board inspection and mutation; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals). Routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics stay out of user-facing updates; report product progress instead, and surface mechanics only when the user asks, recovery is incongruent, the runtime is the real blocker, an exact board action is required, or final harness completion needs one concise proof marker.
 
 During a `$goal-prep` turn, do not perform the user's requested work, even if the work looks read-only, preparatory, or obviously useful. Do not refresh or load named skills, inspect implementation files, browse reference repos, research design inspiration, generate design plans, generate images/assets, run app-specific checks, or edit product files. Put those actions into Scout, Judge, Worker, or PM tasks for the later `/goal` run.
 

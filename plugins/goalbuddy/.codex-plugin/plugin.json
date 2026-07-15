@@ -35,7 +35,7 @@
     "privacyPolicyURL": "https://github.com/Danielalnajjar/goalbuddy#privacy",
     "termsOfServiceURL": "https://github.com/Danielalnajjar/goalbuddy#license",
     "defaultPrompt": [
-      "$codex-goal-compiler determine and compile the correct goal route for this work"
+      "$codex-goal-compiler compile this decision-complete source into a new validated GoalBuddy board"
     ],
     "brandColor": "#2563EB",
     "composerIcon": "./assets/goalbuddy-icon.svg",

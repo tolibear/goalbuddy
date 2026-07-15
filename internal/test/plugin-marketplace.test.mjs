@@ -53,8 +53,8 @@ test("Claude plugin metadata stays aligned with package release", () => {
   assert.ok(!claudePlugin.keywords.includes("extensions"));
 });
 
-test("GoalBuddy plugin delegates composer invocation to Codex Goal Compiler", () => {
+test("GoalBuddy plugin delegates composer invocation to the focused board compiler", () => {
   assert.deepEqual(plugin.interface.defaultPrompt, [
-    "$codex-goal-compiler determine and compile the correct goal route for this work",
+    "$codex-goal-compiler compile this decision-complete source into a new validated GoalBuddy board",
   ]);
 });

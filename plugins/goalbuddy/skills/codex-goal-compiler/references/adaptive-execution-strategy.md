@@ -62,8 +62,8 @@ loosen it.
 ## Boundaries
 
 - This reference adds no board schema, statuses, Keeper operations, or agent
-  roles. If a compile appears to need one, the route is wrong — stop and
-  report.
+  roles. If a compile appears to need one, the source contract or board design
+  is incomplete — stop and report.
 - The strategy section may not pre-authorize skipping review on named future
   slices; skip decisions happen at the seam with live evidence.
 - Judge routing stays behavioral: lead-orchestrator seams (architecture,

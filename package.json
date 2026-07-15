@@ -20,7 +20,6 @@
     "internal/cli",
     "codex-goal-compiler/SKILL.md",
     "codex-goal-compiler/agents",
-    "codex-goal-compiler/assets",
     "codex-goal-compiler/references",
     "codex-goal-compiler/scripts/*.py",
     "goalbuddy/SKILL.md",

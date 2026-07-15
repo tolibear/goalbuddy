@@ -70,8 +70,9 @@ test("Goal Prep is explicit or compiler-internal across Codex and Claude", () =>
     assert.match(text, /^disable-model-invocation: true$/m);
     assert.match(text, /^user-invocable: true$/m);
     assert.match(text, /Goal Prep is an explicit or compiler-internal backend/);
-    assert.match(text, /Do not select it implicitly for generic requests to goalize, route, or compile work/);
-    assert.match(text, /Codex Goal Compiler selects the GoalBuddy route/);
+    assert.match(text, /Do not select it implicitly for generic goalization, route selection, or board-compilation requests/);
+    assert.match(text, /Decision-complete new-board compilation belongs to Codex Goal Compiler/);
+    assert.match(text, /After the compiler accepts its source contract/);
     assert.match(text, /explicitly load this `SKILL\.md` as its declared board-preparation dependency/);
     assert.match(text, /Compiler-internal invocation:[\s\S]*default is file-only/);
     assert.match(text, /Direct `\$goal-prep` or `\/goal-prep` invocation:[\s\S]*local GoalBuddy board as the default work surface/);
@@ -150,6 +151,36 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /configured job\/runtime deadline is actually exceeded/);
     assert.match(text, /Preserve the one-agent\/no-duplicate-dispatch rule/);
     assert.doesNotMatch(text, /After one `wait_agent` timeout/);
+  }
+});
+
+test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
+  const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
+  const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
+
+  for (const text of [canonicalExecution, pluginExecution]) {
+    assert.match(text, /## Quiet Control Plane/);
+    assert.match(text, /GoalBuddy is internal operating state, not the subject of routine user conversation/);
+    assert.match(text, /Keep every safety mechanism in this contract, but keep successful mechanics backstage/);
+    assert.match(text, /Do not narrate routine successful control-plane events/);
+    assert.match(text, /a malformed control-plane request that was rejected before mutation and can be corrected safely/);
+    assert.match(text, /Do not use `GoalBuddy`, `board`, `Keeper`, `Ledger`, `digest`, `receipt`, `checker`, or a `T###` identifier in a routine user update/);
+    assert.match(text, /The authentication slice is verified; I’m moving to session revocation/);
+    assert.match(text, /the user asks about GoalBuddy or its mechanics/);
+    assert.match(text, /recovery is discrepant or uncertain/);
+    assert.match(text, /is the actual blocker after bounded retry/);
+    assert.match(text, /Never hide a real discrepancy, approval gate, failed verification, possible duplicate Worker, or unsafe state/);
+    assert.match(text, /communication boundary, not a reduction in durable proof/);
+    assert.match(text, /product-facing progress updates under the Quiet Control Plane/);
+  }
+
+  for (const text of [canonicalSkill, pluginSkill, claudeGoalCommand]) {
+    assert.match(text, /Routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics stay out of user-facing updates|Keep routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics out of user-facing updates/);
+  }
+
+  for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
+    assert.match(text, /Keep routine successful GoalBuddy control-plane mechanics backstage/);
+    assert.match(text, /User updates describe product progress, reviews, real blockers, required decisions, and completion evidence/);
   }
 });
 

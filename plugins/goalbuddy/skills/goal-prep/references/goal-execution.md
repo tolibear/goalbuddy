@@ -64,6 +64,34 @@ Do not let a harness evaluator's "achieved" verdict or a wrap-up steering
 message substitute for that receipt, and do not mark a Codex goal `complete`
 before the board's final transition is applied.
 
+## Quiet Control Plane
+
+GoalBuddy is internal operating state, not the subject of routine user conversation. Keep every safety mechanism in this contract, but keep successful mechanics backstage. User-facing commentary and final responses describe the product outcome, current implementation or review milestone, material finding, real blocker, required human decision, and completion evidence.
+
+Do not narrate routine successful control-plane events, including:
+
+- resume projection, congruent Ledger audit, or digest capture;
+- Keeper spawn/reuse, request construction, receipt application, status change, or checker pass;
+- task IDs, board fields, receipt plumbing, control-file edits, and prompt rendering;
+- polling intervals, idle notifications, or a still-running subagent;
+- a malformed control-plane request that was rejected before mutation and can be corrected safely in the same turn.
+
+Do not use `GoalBuddy`, `board`, `Keeper`, `Ledger`, `digest`, `receipt`, `checker`, or a `T###` identifier in a routine user update merely because the mechanism ran. Translate the event into the work it protects:
+
+- after a successful closeout and activation: “The authentication slice is verified; I’m moving to session revocation.”
+- while an independent review is still running: “The security review is still running; no files have changed.”
+- after successful recovery: continue with the product milestone without a recovery preamble.
+
+Surface control-plane mechanics only when at least one condition holds:
+
+1. the user asks about GoalBuddy or its mechanics;
+2. recovery is discrepant or uncertain and safe continuation needs explanation;
+3. a GoalBuddy runtime, installation, schema, checker, or Keeper/Ledger failure is the actual blocker after bounded retry;
+4. the user must take an exact board-related action or supply an exact reply;
+5. final native-harness completion requires one concise machine-readable proof marker such as `full_outcome_complete: true`.
+
+When an exception applies, name the product impact first, then the minimum mechanism detail needed to make the decision understandable. Never hide a real discrepancy, approval gate, failed verification, possible duplicate Worker, or unsafe state merely to sound quiet. This is a communication boundary, not a reduction in durable proof, recovery auditing, or mutation safety.
+
 ## Boards Move Between Harnesses
 
 A board may arrive mid-run from a different harness: a goal started in Codex can be resumed in Claude Code and vice versa. `state.yaml` is the only durable board truth, but a durable record can still be stale, malformed, mid-closeout, or inconsistent with repository reality. On recovery, never reconstruct progress from chat history, and never blindly trust an active-task label as proof that continuation or redispatch is safe. Receipts written by another harness are as authoritative as your own once the recovery audit below finds the board congruent.
@@ -509,7 +537,7 @@ Use `node <skill-path>/scripts/render-task-prompt.mjs docs/goals/<slug>` to rend
 
 When dispatching Codex subagents from a GoalBuddy prompt, the `required_spawn_agent_type` is mandatory. Use that exact `spawn_agent` `agent_type` (`goal_scout`, `goal_worker`, or `goal_judge`). Do not substitute generic `scout`, `worker`, or `judge` agents; if the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or ask the operator to run the GoalBuddy CLI through their install channel with `agents` or `install`.
 
-A `wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry, not an agent or task execution timeout. Continue polling the same live agent and provide periodic user-facing progress updates; do not interrupt, replace, redispatch, declare a timeout, or trigger PM fallback solely because a poll expired. Preserve the one-agent/no-duplicate-dispatch rule. Visible allowed-file changes are useful progress evidence, but their absence is not evidence of inactivity during reading, analysis, planning, or verification. Read-only Judge and Ledger work, plus inspection-only Keeper work, may never create allowed-file diffs at all.
+A `wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry, not an agent or task execution timeout. Continue polling the same live agent and provide product-facing progress updates under the Quiet Control Plane; do not narrate polling or internal agent management, and do not interrupt, replace, redispatch, declare a timeout, or trigger PM fallback solely because a poll expired. Preserve the one-agent/no-duplicate-dispatch rule. Visible allowed-file changes are useful progress evidence, but their absence is not evidence of inactivity during reading, analysis, planning, or verification. Read-only Judge and Ledger work, plus inspection-only Keeper work, may never create allowed-file diffs at all.
 
 Recover deterministically only when the agent itself reaches a terminal timeout, failed, or unavailable state; liveness cannot be established; the configured job/runtime deadline is actually exceeded; or an explicit task stop condition fires. If liveness is uncertain, do not duplicate the in-flight task: establish status through the current harness/session before choosing recovery.
 

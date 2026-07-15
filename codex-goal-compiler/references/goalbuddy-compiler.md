@@ -1,4 +1,4 @@
-# GoalBuddy Compiler Backend
+# GoalBuddy Board Compiler Contract
 
 ## Contents
 
@@ -10,19 +10,19 @@
 - [Conditional dimensions](#conditional-dimensions)
 - [Mixed-fleet safety](#mixed-fleet-safety)
 - [Board surface](#board-surface)
-- [Start policies](#start-policies)
+- [Start handoff](#start-handoff)
 - [GoalBuddy checkpoint](#goalbuddy-checkpoint)
 - [Failure handling](#failure-handling)
 
-Use only after unified routing selects GoalBuddy or the user explicitly requests a GoalBuddy board and the route is honest.
+Use after the compiler has confirmed that its source is decision-complete. This reference governs one output only: a new validated GoalBuddy board.
 
 The installed GoalBuddy skill is authoritative for board files, task and receipt fields, checker behavior, agents, and execution. This compiler supplies the owner contract, proof expectations, source-plan preservation, and target-aware handoff. It must not invent board schema.
 
 ## Ownership
 
-- **Compiler core:** route confirmation, readiness synthesis, oracle and proof design, source-plan preservation, ambiguity challenge, executor boundaries, concurrency assessment, and one review checkpoint.
-- **Codex adapter:** Codex runtime preflight, hybrid native objective, objective-length validation, Plan Mode exit checks, `get_goal`, and explicit-request-only `create_goal`.
-- **Claude adapter:** Claude runtime preflight and installed `/goal Follow ...` command. It never uses Codex native goal tools or Codex objective validation.
+- **Compiler core:** source readiness, oracle and proof design, source-plan preservation, ambiguity challenge, executor boundaries, concurrency assessment, adaptive strategy, and semantic acceptance.
+- **Codex adapter:** Codex runtime preflight plus construction and validation of the hybrid start command printed for later use. It never starts the goal.
+- **Claude adapter:** Claude runtime preflight plus the installed `/goal Follow ...` command printed for later use. It never uses Codex native goal tools or Codex objective validation.
 - **GoalBuddy:** `goal.md`, `state.yaml`, notes, tasks, receipts, roles, checker, prompt rendering, dispatch, atomic receipt application, and execution.
 
 Do not bundle GoalBuddy templates, recreate its checker, invent board fields, or select the legacy `goal_worker_ultra` role for new boards.
@@ -45,7 +45,7 @@ python3 <compiler-skill>/scripts/check_new_goal_path.py docs/goals/<slug> --json
 
 The root must not already exist as a directory, file, or broken symlink. On collision, choose another slug or stop without inspecting the collision. Never scan other boards to find a path.
 
-Existing boards require an explicit user request naming the board before rescue, migration, resumption, or mutation.
+Existing boards are outside this compiler. Explicit Goal Prep repair or GoalBuddy execution owns rescue, migration, resumption, and mutation.
 
 ## Target selection and preflight
 
@@ -58,11 +58,11 @@ python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target codex --jso
 python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target claude --json
 ```
 
-The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. Missing requirements block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, and source provenance. Agent-file presence alone is insufficient because a Keeper must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block the GoalBuddy route and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
+The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. Missing requirements block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, and source provenance. Agent-file presence alone is insufficient because a Keeper must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block compilation and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
 
 ## GoalBuddy workflow
 
-1. Confirm the source plan or agreed context is strong enough for a durable board.
+1. Confirm the accepted specification, plan, or conversation contract satisfies the compiler's decision-complete source contract. Otherwise return `not_compilable` without creating a board.
 2. Run selected-target preflight.
 3. Guard the new board path.
 4. Synthesize readiness:
@@ -81,7 +81,7 @@ The checker consumes GoalBuddy compiler contract v1 and requires board schema v2
 7. In the current compiler context, explicitly load and execute the selected harness's installed Goal Prep `SKILL.md` as a declared internal dependency. Its implicit/model invocation may be disabled by design; do not rely on trigger matching. Never spawn a subagent, collaboration agent, or separate Codex task merely to prepare the board.
 8. Run the official board checker and the compiler acceptance gates: require checker `ok: true`, no unresolved placeholders, no weak oracle/final-proof warnings, installed agents, and visible official mapping for all proof expectations. File-only preparation does not run unrelated repository-wide product or source suites.
 9. Return to the compiler immediately after checker and semantic acceptance, then print one user-facing checkpoint. Do not keep a board-preparation loop alive after acceptance.
-10. Start only when explicitly requested and the target-specific start gate passes.
+10. Stop. Print the target-correct command for a later execution turn; never start `/goal` from the compiler.
 
 The direct-current-context restriction applies only to Goal Prep board preparation. It does not restrict intended Scout, Judge, Worker, Keeper, Ledger, Council, or other explicit delegation during later planning, execution, recovery, or review.
 
@@ -92,7 +92,7 @@ Every GoalBuddy compile must preserve:
 1. **Outcome and oracle** — one durable owner outcome and observable signal.
 2. **Readiness** — completion proof, likely misfire, done/not-done traps, fast/final checks, realistic proof surface, stop/ask conditions, first phase, concurrency.
 3. **Installed intake mapping** — the selected Goal Prep intake wins.
-4. **Source-plan facts** — decisions, sequence, files, constraints, non-goals, labeled assumptions.
+4. **Source-plan facts** — bind the native source artifact by path plus stable revision or content digest when available; preserve decisions, sequence, files, constraints, non-goals, and labeled assumptions compactly. Never copy the complete plan or specification into board truth.
 5. **Ambiguity challenge** — plausible readings, accepted reading, unchanged decisions, material owner decisions only.
 6. **Verification loop** — per-slice check, broad pre-audit check, fallback evidence, proxy limits.
 7. **Executor boundaries** — allowed scope, approval gates, repeated-failure stop, cleanup.
@@ -134,21 +134,17 @@ GoalBuddy mixed-vendor dispatch is allowed only from a clean Git baseline becaus
 
 Default to a file-only board. Preserve board files and notes, but do not launch the local server or browser unless the user explicitly requests visual tracking.
 
-## Start policies
+## Start handoff
 
 ### Codex
 
-Default terminal state: validated board plus checkpoint, not execution.
+After semantic acceptance, construct the hybrid command:
 
-When explicit start is requested:
+```text
+/goal Achieve <outcome>, proven by <oracle>. Operating procedure and board: docs/goals/<slug>/goal.md.
+```
 
-1. Confirm semantic board acceptance.
-2. Confirm the session is out of Plan Mode.
-3. Confirm the hybrid objective passed validation.
-4. Report dirty Git state without automatic stash/commit requests.
-5. Call `get_goal`. Never clear, overwrite, or silently replace an unfinished active goal. If one exists, report the conflict and stop.
-6. Call `create_goal` only when no unfinished goal exists.
-7. Supply `token_budget` only when explicitly requested.
+Validate its exact objective with `validate_codex_goal_objective.py`. Target under 400 characters; hard cap 4,000. Print the command for a later execution turn and stop. Never call `get_goal`, `create_goal`, or any native goal mutation tool from the compiler. Never supply or invent `token_budget`.
 
 ### Claude Code
 
@@ -166,12 +162,12 @@ For a walk-away run, add the measurable completion clause:
 
 Append `stop after <N> turns if blocked` only when the user supplied that exact turn limit. Never invent a cap or ask for one merely to render this handoff; GoalBuddy's exact-human wait, no-safe-work, and full-outcome completion rules already define the unbounded stop conditions.
 
-Do not auto-execute production-sensitive work. The user starts the installed Claude `/goal` command after reviewing the checkpoint.
+The user starts the installed Claude `/goal` command after reviewing the checkpoint. The compiler never executes it, including for non-production work.
 
 ## GoalBuddy checkpoint
 
 ```text
-Route: goalbuddy
+Compile: pass | blocked
 Target: <codex | claude>
 Runtime preflight: <pass with version | blocked>
 Goal path: <new docs/goals/<slug>/goal.md | blocked>
@@ -183,20 +179,20 @@ Ambiguity challenge: <none | summary | blocked>
 Concurrency: <safe lanes | read-only only | serial because: reason>
 Mixed-fleet dispatch: <available from clean baseline | disabled: dirty baseline>
 Git state: <clean | dirty; preserved>
-Initial Codex start: </goal hybrid objective | n/a>
-Initial Claude start: </goal Follow docs/goals/<slug>/goal.md. | n/a>
+Codex start command: </goal hybrid objective | n/a>
+Claude start command: </goal Follow docs/goals/<slug>/goal.md. | n/a>
 Portable continuation: /goal Follow docs/goals/<slug>/goal.md.
 CLI helper: goalbuddy resume docs/goals/<slug>
-Start: <not requested | started | command printed | blocked>
+Execution started: no
 Open questions: <none | material questions>
 ```
 
 ## Failure handling
 
-- Runtime missing/stale → block GoalBuddy route with exact doctor result.
+- Runtime missing/stale → block compilation with exact preflight result.
 - Board path exists → stop without reading it.
-- Plan/readiness weak → route to hardening; never write placeholders into a board.
+- Source contract incomplete → return `not_compilable`; never write placeholders into a board or invoke a hardening workflow.
 - Semantic warning denylist fires → preparation is not accepted.
 - Codex objective invalid → rewrite and revalidate.
-- Existing unfinished Codex goal → report and stop.
+- Existing board request → stop; this compiler never repairs, resumes, or replaces it.
 - Dirty baseline plus mixed-fleet request → keep board, disable cross-vendor dispatch until a clean checkpoint.

@@ -2,7 +2,7 @@
 
 Historical release notes live next to this process doc:
 
-- [0.5.0: Integrated Goal Compiler](0.5.0.md)
+- [0.5.0: Focused Compiler, Quiet Runtime](0.5.0.md)
 - [0.4.0: Cross-Harness Goals](0.4.0.md)
 - [0.3.9: Marketplace and Board Runtime Polish](0.3.9.md)
 - [0.3.8: Board Hub Guardrails](0.3.8.md)

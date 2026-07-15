@@ -113,14 +113,15 @@ On every `/goal` continuation:
 2. At a genuine recovery boundary, run `node <skill-path>/scripts/resume-board.mjs docs/goals/<slug> --json` and invoke the read-only Goal Ledger Auditor (`goal_ledger` in Codex or `goal-ledger` in Claude Code) with the board path, response digest, checker status, and returned `commands.resume` command. Continue automatically only from an `ok: true` projection with Ledger `congruent` on the same digest. Any failure requires the execution contract's full-board PM review; preserve immutable completed-task history on a current v2 board when the live continuation is independently proven instead of rewriting old receipts. Do not redispatch a possibly in-flight Worker merely because the board says `active`.
 3. Start a fresh Keeper from the Ledger-approved digest. During uninterrupted transitions, reuse it and chain each validated `after_digest`; do not rerun recovery or load the full board into PM context.
 4. Run the bundled GoalBuddy update checker when available and mention a newer version without blocking.
-5. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.
-6. Work only on the active board task.
-7. Assign Scout, Judge, Worker, or PM according to the task.
-8. Write or accept a compact task receipt and decide the exact resulting status, gates, and successor.
-9. Give that exact mutation to Keeper; continue only from its passing checker receipt and new digest.
-10. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
-11. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
-12. Apply the Execution Strategy at each seam: independent implementation review for material slices, Judge gates only at phase, risk, rejected-verification, ambiguity, or final-completion boundaries. Do not add a Judge after every Worker by habit, and do not skip independent review on a material slice on confidence alone.
-13. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
+5. Keep routine successful GoalBuddy control-plane mechanics backstage. User updates describe product progress, reviews, real blockers, required decisions, and completion evidence.
+6. Re-check the intake: original request, input shape, authority, proof, blind spots, existing plan facts, and likely misfire.
+7. Work only on the active board task.
+8. Assign Scout, Judge, Worker, or PM according to the task.
+9. Write or accept a compact task receipt and decide the exact resulting status, gates, and successor.
+10. Give that exact mutation to Keeper; continue only from its passing checker receipt and new digest.
+11. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
+12. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
+13. Apply the Execution Strategy at each seam: independent implementation review for material slices, Judge gates only at phase, risk, rejected-verification, ambiguity, or final-completion boundaries. Do not add a Judge after every Worker by habit, and do not skip independent review on a material slice on confidence alone.
+14. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
 
 Issue and PR handoffs are supporting artifacts. `state.yaml` remains authoritative, and every external artifact decision must be recorded in a task receipt.
