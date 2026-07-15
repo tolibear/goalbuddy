@@ -52,6 +52,14 @@ class CompilerContractTests(unittest.TestCase):
         self.assertIn("create no board", self.skill)
         self.assertIn("Do not ask a diagnostic ladder", self.skill)
         self.assertIn("never write placeholders into a board or invoke a hardening workflow", self.goalbuddy)
+        self.assertIn("return that missing fact to the compiler so it emits `not_compilable`; do not seed a board task", self.handoff)
+        self.assertIn("owner contract is complete but environment, evidence, calibration, or implementation-plan detail remains unproven", self.handoff)
+
+    def test_compiler_owns_the_only_user_facing_checkpoint(self):
+        self.assertEqual(1, self.skill.count("## Compilation checkpoint"))
+        self.assertIn("Goal Prep returns preparation evidence to the current compiler context", self.goalbuddy)
+        self.assertIn("does not print a second user-facing checkpoint", self.goalbuddy)
+        self.assertNotIn("## GoalBuddy checkpoint", self.goalbuddy)
 
     def test_only_board_compiler_resources_ship(self):
         expected = (

@@ -471,7 +471,7 @@ export function formatPrompt(payload) {
     "- Do not substitute generic scout, worker, or judge agents for GoalBuddy agents.",
     "- If the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or install agents.",
     "- A wait_agent polling timeout while the target agent is still running is only a polling interval expiry. Keep waiting on the same agent; do not interrupt, replace, redispatch, declare a task timeout, or trigger PM fallback.",
-    "- Continue polling while liveness is confirmed, with periodic user-facing progress updates. Visible allowed-file changes are useful progress evidence, but their absence is not evidence of inactivity; read-only Judge/Ledger work and inspection-only Keeper work may never create diffs.",
+    "- Continue polling while liveness is confirmed. Under the Quiet Control Plane, do not narrate polling or internal agent management; when a user update is due, report only product-level progress, review status, a real blocker, or a required decision. Visible allowed-file changes are useful progress evidence, but their absence is not evidence of inactivity; read-only Judge/Ledger work and inspection-only Keeper work may never create diffs.",
     "- Recover deterministically only when the agent reaches a terminal timeout, failed, or unavailable state; liveness cannot be established; the configured job/runtime deadline is actually exceeded; or an explicit task stop condition fires. Preserve one-agent/no-duplicate dispatch.",
     `- In the receipt, changed_files must use ${payload.metadata.changed_files_path_style} paths, matching the path form recorded in allowed_files; do not convert absolute paths to relative paths or relative paths to absolute paths.`,
     "",

@@ -30,7 +30,7 @@ Use this skill when the user explicitly asks to compile settled work into a Goal
 - the current conversation after its material decisions are settled;
 - a small decision-complete plan when the user explicitly wants a board.
 
-For an explicit small request, compile the smallest honest board; do not second-guess the owner's request by routing elsewhere.
+For an explicit small request, compile the smallest honest board that still satisfies the source contract, oracle, and completion-proof floor; otherwise return `not_compilable`. Do not second-guess the owner's request by routing elsewhere.
 
 Do not use it for:
 

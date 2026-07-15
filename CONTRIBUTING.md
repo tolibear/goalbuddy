@@ -62,7 +62,7 @@ GoalBuddy is committed and pushed to the personal fork, then activated from the 
 - Keep the runtime dependency-free unless there is a strong reason.
 - Keep both canonical skills installable and their plugin mirrors byte-exact.
 - Keep installation working for both Codex and Claude Code.
-- Keep one routing front door: Codex Goal Compiler. Goal Prep is the explicit backend.
+- Keep one public board-compilation surface: Codex Goal Compiler. Goal Prep is the non-model-invocable schema backend and explicit manual intake/repair surface.
 - Do not add new compatibility shims; version compiler contracts and fail closed.
 - Prefer small, reviewable changes.
 - Update README or templates when behavior changes.

@@ -16,6 +16,9 @@ This work remains isolated on `codex/goalbuddy-product-0.5`. It must not install
 - [x] (2026-07-14) Added the quiet control-plane communication contract to the canonical execution reference and every required fallback surface.
 - [x] (2026-07-14) Updated package documentation, 0.5 release notes, plugin mirrors, metadata, and the isolated skills-repo transfer wording.
 - [x] (2026-07-14) Passed 20 focused Node policy/mirror tests, 34 focused compiler tests, the full 192 Node + 34 Python suite, package dry-run/archive inspection, and isolated Codex/Claude install-contract tests. The live 0.4 checkout remains clean at `41cb2fb` and the installed Codex cache remains 0.4.0.
+- [x] (2026-07-14) Ran read-only adversarial audits with Claude Opus 4.8 at xhigh and Grok 4.5 at its supported high effort; both accepted the separation with bounded modifications rather than recommending a redesign.
+- [x] (2026-07-14) Integrated the live 0.4 targeted-Keeper policy semantically, made rendered task prompts obey the quiet control plane, removed the compiler-internal Goal Prep question, clarified readiness boundaries, enforced the smallest-board proof floor, and reduced compilation to one user-facing checkpoint.
+- [x] (2026-07-14) Passed 90 focused Node + 35 focused Python tests, the full 193 Node + 35 Python suite, compiler skill validation, mirror sync, package dry-run, and inspection of all 126 packed files. No live install, board, or current run was changed.
 
 ## Surprises & Discoveries
 
@@ -29,6 +32,10 @@ This work remains isolated on `codex/goalbuddy-product-0.5`. It must not install
   Evidence: comparison against `adc5781`; the packed archive contains 126 files and none of the removed route/native surfaces.
 - Observation: Existing GoalBuddy CLI tests already exercise isolated Codex and Claude installation, doctor/contract readiness, rollback safety, stale-byte detection, and bundled compiler preflight with temporary homes.
   Evidence: `internal/test/goal-maker-cli.test.mjs`; all cases passed within the 192-test Node suite.
+- Observation: The live 0.4 branch gained a narrower Keeper rule while the 0.5 candidate was isolated: a direct PM edit is allowed only for one already-known scalar or one-line annotation that needs no board read; all multi-location, authority, receipt, card, scope, approval, completion, and uncertain mutations still require Keeper mediation.
+  Evidence: live commit `f73f45993a29cdd867be9e2d188279faf0319bb3`; the rule is represented in the candidate's canonical skill, execution contract, templates, and public-surface policy tests without cherry-picking unrelated live history.
+- Observation: The generic skill validator cleanly validates both compiler copies but is not a valid package gate for the rich Goal Prep tree: it rejects pre-existing human-facing assets, JavaScript template literals as placeholders, the canonical directory/frontmatter naming convention, and one pre-existing resource-path heuristic.
+  Evidence: the same flagged Goal Prep surfaces existed at candidate `HEAD` before this patch; the package's own 193 Node + 35 Python behavioral suite and mirror tests pass. This cutover does not broaden scope to redesign Goal Prep around a generic validator.
 
 ## Decision Log
 
@@ -47,14 +54,23 @@ This work remains isolated on `codex/goalbuddy-product-0.5`. It must not install
 - Decision: Preserve every recovery, mutation, receipt, checker, and review invariant while making routine narration product-facing.
   Rationale: The problem is interface leakage, not the safety machinery. Hiding successful mechanics reduces cognitive load without weakening crash recovery or auditability.
   Date/Author: 2026-07-14 / Codex
+- Decision: Keep Keeper mediation for every mutation that requires reading the board or changes more than one known location, but permit one exact-context direct edit to an already-known scalar or one-line annotation.
+  Rationale: This incorporates the field-tested 0.4 ergonomics improvement without creating a direct-edit escape hatch for authority, receipts, task cards, scope, approvals, completion, or uncertain mutations.
+  Date/Author: 2026-07-14 / Codex
+- Decision: Goal Prep returns compiler-internal evidence silently; Codex Goal Compiler owns the only user-facing compilation checkpoint.
+  Rationale: Two checkpoints made the backend feel like a competing workflow and invited duplicate start/refine/stop questions. One owner surface makes the interface predictable while preserving backend validation.
+  Date/Author: 2026-07-14 / Codex
+- Decision: Permit a first validation task only when the owner contract is complete and the missing information is environmental, evidentiary, calibration-related, or implementation-detail evidence.
+  Rationale: Missing outcome, authority, scope, proof, or irreversible-boundary decisions are not discoverable implementation facts and must still fail closed as `not_compilable`.
+  Date/Author: 2026-07-14 / Codex
 
 ## Outcomes & Retrospective
 
-The isolated cutover is complete. Codex Goal Compiler now performs one transformation: decision-complete source to one new validated GoalBuddy board. Missing material decisions return `not_compilable`; compilation never selects another workflow, mutates an existing board, implements product work, or starts `/goal`. The compiler's main instruction file is 112 lines smaller, and obsolete native/routing resources are absent from the inspected package archive.
+The isolated cutover is complete. Codex Goal Compiler now performs one transformation: decision-complete source to one new validated GoalBuddy board. Missing material decisions return `not_compilable`; compilation never selects another workflow, mutates an existing board, implements product work, or starts `/goal`. The compiler's main instruction file is 112 lines smaller, obsolete native/routing resources are absent from the inspected 126-file package archive, and the compiler emits one user-facing checkpoint after Goal Prep returns its evidence internally.
 
-GoalBuddy's runtime safety model is unchanged. Resume, Ledger, Keeper, digest, receipt, checker, polling, and prompt-rendering mechanics remain mandatory but are no longer routine user-facing narration. Product progress, independent review, material findings, actual blockers, required decisions, and completion evidence stay visible. Focused tests, the full 192 Node + 34 Python suite, package inspection, and temporary Codex/Claude install-contract tests pass.
+GoalBuddy's runtime safety model is preserved. Resume, Ledger, Keeper, digest, receipt, checker, polling, and prompt-rendering mechanics remain mandatory but are no longer routine user-facing narration. The only ergonomic relaxation is the live 0.4 rule for one already-known, exact-context scalar or one-line annotation edit that needs no board read; all consequential and uncertain mutations remain Keeper-owned. Product progress, independent review, material findings, actual blockers, required decisions, and completion evidence stay visible. Focused 90 Node + 35 Python tests, the full 193 Node + 35 Python suite, compiler validation, package inspection, and temporary Codex/Claude install-contract tests pass.
 
-No activation occurred. `/Users/danielalnajjar/Code/goalbuddy` remains clean at 0.4.0 commit `41cb2fb`, the Codex plugin cache still contains only 0.4.0, and current boards were not read or mutated. The next step is a separate owner-approved activation after reviewing the two isolated commits.
+No activation occurred. The live 0.4 checkout, installed harness surfaces, and current boards were not written by this cutover. The next step is a separate owner-approved activation after reviewing the isolated candidate commit.
 
 ## Context and Orientation
 

@@ -14,6 +14,8 @@ const pluginExecution = readFileSync("plugins/goalbuddy/skills/goal-prep/referen
 const claudeGoalCommand = readFileSync("plugins/goalbuddy/commands/goal.md", "utf8");
 const canonicalAgentsTemplate = readFileSync("goalbuddy/templates/agents.md", "utf8");
 const pluginAgentsTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/agents.md", "utf8");
+const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
+const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
 
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
@@ -77,6 +79,7 @@ test("Goal Prep is explicit or compiler-internal across Codex and Claude", () =>
     assert.match(text, /Compiler-internal invocation:[\s\S]*default is file-only/);
     assert.match(text, /Direct `\$goal-prep` or `\/goal-prep` invocation:[\s\S]*local GoalBuddy board as the default work surface/);
     assert.match(text, /for compiler-internal invocation, preserve the compiler-supplied surface and default to file-only/);
+    assert.match(text, /for compiler-internal invocation, return the board result to the compiler without another question or user-facing checkpoint/);
   }
   for (const text of [canonicalOpenAI, pluginOpenAI]) {
     assert.match(text, /^\s*allow_implicit_invocation: false$/m);
@@ -141,7 +144,11 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Do not embed a long task payload in prose/);
     assert.match(text, /For `rebind_goalbuddy`, set `transition: null` exactly/);
     assert.match(text, /Do not send an all-null transition object/);
-    assert.match(text, /use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation/);
+    assert.match(text, /may directly apply one narrow, one-location mutation only when the exact file, location, old value, and new value are already known/);
+    assert.match(text, /if the PM needs or expects to need any board read, use Keeper from the outset/);
+    assert.match(text, /does not participate in an atomic receipt, status-plus-successor, scope, authority, approval, or completion transition/);
+    assert.match(text, /run the bundled checker immediately/);
+    assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
     assert.match(text, /Ledger remains independently read-only/);
     assert.match(text, /`wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry/);
     assert.match(text, /Continue polling the same live agent/);
@@ -154,10 +161,24 @@ test("the execution contract carries the /goal runtime rules", () => {
   }
 });
 
-test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
-  const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
-  const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
+test("one-location board edits stay direct only when no board read is needed", () => {
+  assert.equal(pluginGoalTemplate, canonicalGoalTemplate);
+  assert.equal(pluginAgentsTemplate, canonicalAgentsTemplate);
 
+  for (const text of [canonicalExecution, pluginExecution, canonicalSkill, pluginSkill, canonicalGoalTemplate, pluginGoalTemplate, canonicalAgentsTemplate, pluginAgentsTemplate]) {
+    assert.match(text, /one[- ]location/);
+    assert.match(text, /board read|without reading the board/);
+    assert.match(text, /checker/);
+    assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
+  }
+
+  assert.match(canonicalExecution, /multi-location mutations, receipts, task cards/);
+  assert.match(canonicalExecution, /if the PM needs or expects to need any board read, use Keeper from the outset/);
+  assert.match(canonicalExecution, /If the edit misses its expected context or the checker fails, restore only that edit and route the operation to Keeper/);
+  assert.match(canonicalExecution, /do not reclassify it as a narrow direct edit/);
+});
+
+test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
     assert.match(text, /## Quiet Control Plane/);
     assert.match(text, /GoalBuddy is internal operating state, not the subject of routine user conversation/);

@@ -65,6 +65,7 @@ class TriggerAndDependencyContractTests(unittest.TestCase):
     def test_small_explicit_board_request_is_honored(self):
         self.assertIn("a small decision-complete plan when the user explicitly wants a board", self.skill)
         self.assertIn("smallest honest board", self.skill)
+        self.assertIn("source contract, oracle, and completion-proof floor", self.skill)
 
     def test_missing_source_does_not_trigger_another_workflow(self):
         for needle in (

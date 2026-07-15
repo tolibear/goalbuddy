@@ -152,7 +152,7 @@ Compiled brief:
 
 Omitted SHOULD blocks are intentionally not applicable. Do not reconstruct them.
 
-If readiness is insufficient, make the first task evidence/scorecard/environment/plan validation work or reject preparation when the missing fact changes the owner contract. Never hide weak proof behind placeholders.
+If the owner contract is incomplete because outcome, authority, scope, proof, or an irreversible boundary is materially unresolved, return that missing fact to the compiler so it emits `not_compilable`; do not seed a board task. If the owner contract is complete but environment, evidence, calibration, or implementation-plan detail remains unproven, make the first task that validation work. Never hide weak proof behind placeholders.
 
 Run the installed official board checker and apply only the compiler semantic acceptance rules above. File-only preparation must not run unrelated repository-wide product or source suites. As soon as checker and acceptance results are available, return immediately to the current compiler with: target, new goal path, checker JSON, warnings and allowlist, intake completeness, five-proof mapping, first phase, and target-correct start/continuation commands. Do not keep waiting, launch another task, or print a duplicate user-facing checkpoint.
 ```

@@ -11,7 +11,7 @@
 - [Mixed-fleet safety](#mixed-fleet-safety)
 - [Board surface](#board-surface)
 - [Start handoff](#start-handoff)
-- [GoalBuddy checkpoint](#goalbuddy-checkpoint)
+- [Backend return](#backend-return)
 - [Failure handling](#failure-handling)
 
 Use after the compiler has confirmed that its source is decision-complete. This reference governs one output only: a new validated GoalBuddy board.
@@ -164,28 +164,9 @@ Append `stop after <N> turns if blocked` only when the user supplied that exact 
 
 The user starts the installed Claude `/goal` command after reviewing the checkpoint. The compiler never executes it, including for non-production work.
 
-## GoalBuddy checkpoint
+## Backend return
 
-```text
-Compile: pass | blocked
-Target: <codex | claude>
-Runtime preflight: <pass with version | blocked>
-Goal path: <new docs/goals/<slug>/goal.md | blocked>
-Board: none (file-only)
-Validation: <pass | blocked>
-Goal readiness: <complete | missing fields>
-Five-proof mapping: <all mapped | blocked>
-Ambiguity challenge: <none | summary | blocked>
-Concurrency: <safe lanes | read-only only | serial because: reason>
-Mixed-fleet dispatch: <available from clean baseline | disabled: dirty baseline>
-Git state: <clean | dirty; preserved>
-Codex start command: </goal hybrid objective | n/a>
-Claude start command: </goal Follow docs/goals/<slug>/goal.md. | n/a>
-Portable continuation: /goal Follow docs/goals/<slug>/goal.md.
-CLI helper: goalbuddy resume docs/goals/<slug>
-Execution started: no
-Open questions: <none | material questions>
-```
+Goal Prep returns preparation evidence to the current compiler context; it does not print a second user-facing checkpoint. Return the target, new goal path, checker JSON, semantic warnings and allowlist, intake completeness, five-proof mapping, first phase, concurrency and mixed-fleet result, plus target-correct start and continuation commands. The compiler then prints exactly the single `## Compilation checkpoint` defined in `SKILL.md`.
 
 ## Failure handling
 

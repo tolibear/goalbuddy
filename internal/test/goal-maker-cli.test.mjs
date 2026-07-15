@@ -776,6 +776,9 @@ checks:
     assert.match(human.stdout, /Do not substitute generic scout, worker, or judge agents/);
     assert.match(human.stdout, /wait_agent polling timeout while the target agent is still running is only a polling interval expiry/);
     assert.match(human.stdout, /Keep waiting on the same agent; do not interrupt, replace, redispatch, declare a task timeout, or trigger PM fallback/);
+    assert.match(human.stdout, /Under the Quiet Control Plane, do not narrate polling or internal agent management/);
+    assert.match(human.stdout, /report only product-level progress, review status, a real blocker, or a required decision/);
+    assert.doesNotMatch(human.stdout, /periodic user-facing progress updates/);
     assert.match(human.stdout, /absence is not evidence of inactivity; read-only Judge\/Ledger work and inspection-only Keeper work may never create diffs/);
     assert.match(human.stdout, /terminal timeout, failed, or unavailable state/);
     assert.match(human.stdout, /configured job\/runtime deadline is actually exceeded/);

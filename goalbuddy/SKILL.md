@@ -49,7 +49,7 @@ Allowed `$goal-prep` actions:
 - optionally run the GoalBuddy board checker against that `state.yaml`;
 - verify GoalBuddy agent availability, if this can be done without touching implementation work, and record `installed`, `bundled_not_installed`, `missing`, or `unknown` truthfully;
 - print exactly `/goal Follow docs/goals/<slug>/goal.md.`;
-- ask whether to start `/goal`, refine the board, or stop.
+- for direct invocation, ask whether to start `/goal`, refine the board, or stop; for compiler-internal invocation, return the board result to the compiler without another question or user-facing checkpoint.
 
 If the prompt names another skill or tool, such as "use the taste skill", "refresh the taste skill", "look at this repo", "use browser", or "generate assets", record that requirement in the charter and seed tasks. Do not load that skill, browse that repo, or generate those assets during `$goal-prep`.
 
@@ -183,7 +183,7 @@ Do:
 - make the first active task safe;
 - verify Scout, Worker, and Judge agent availability or record an explicit truthful state;
 - print the exact command `/goal Follow docs/goals/<slug>/goal.md.`;
-- ask whether to start now, refine `goal.md`, or stop.
+- for direct invocation, ask whether to start now, refine `goal.md`, or stop; for compiler-internal invocation, return the board result to the compiler without another question or user-facing checkpoint.
 
 Do not:
 
@@ -383,13 +383,13 @@ Non-`installed` task-agent states are warnings, not false failures, because the 
 | Worker | high | yes, bounded | one coherent bounded useful slice |
 | Judge | xhigh | no | phase/risk/final review, ambiguity, scope, completion skepticism |
 
-Keeper and Ledger are not represented in `state.yaml` agent availability or task cards. During execution, invoke `goal_keeper` (Codex, Sol low) or `goal-keeper` (Claude Code, Opus low) for every board inspection or mutation beyond the compact PM projection. Give it an exact `goalbuddy_keeper_request_v1`, the current board digest, authorized control files, expected before/after facts, and the bundled checker command. It returns `goalbuddy_keeper_receipt_v1` and makes no semantic decisions. Checker-red immutable history requires explicit PM authorization after full-board review; Keeper then uses the bundled proof path and reports `immutable_history_compatible`. Runtime rebinding uses the typed `rebind_goalbuddy` operation, never a hand edit.
+Keeper and Ledger are not represented in `state.yaml` agent availability or task cards. During execution, invoke `goal_keeper` (Codex, Sol low) or `goal-keeper` (Claude Code, Opus low) whenever the PM must or may need to read board content beyond the compact projection, or for any multi-location, receipt, task-card, scope, authority, approval, completion, or otherwise uncertain mutation. One already-known one-location scalar or one-line annotation may be edited directly under the execution contract's digest, exact-context, and checker rules without reading the board. Give Keeper an exact `goalbuddy_keeper_request_v1`, the current board digest, authorized control files, expected before/after facts, and the bundled checker command. It returns `goalbuddy_keeper_receipt_v1` and makes no semantic decisions. Checker-red immutable history requires explicit PM authorization after full-board review; Keeper then uses the bundled proof path and reports `immutable_history_compatible`. Runtime rebinding uses the typed `rebind_goalbuddy` operation, never a hand edit.
 
 At a genuine recovery boundary, `/goal` runs the bundled `scripts/resume-board.mjs` entrypoint, then invokes `goal_ledger` (Codex, Sol medium) or `goal-ledger` (Claude Code, Opus high) with the board path, resume-response digest, checker status, and returned `commands.resume` command. Ledger independently reruns that same bundled entrypoint and compares the complete board with independent repo/worktree/receipt/verification/gate/Worker evidence; it never depends on a globally installed GoalBuddy CLI. It returns `goalbuddy_ledger_audit_v1`, never a task receipt, and never mutates the board. Only `congruent` with matching pre/post digests after an `ok: true` projection permits automatic continuation. Checker or strict-parser failure routes to full-board PM review without rewriting immutable completed-task history merely for checker conformance. After that review explicitly authorizes immutable-history compatibility, render only the current active task with the bundled prompt script plus `--expected-state-digest <sha256> --allow-immutable-history`; this digest-bound path reuses the transition proof and strict-parses exact active-task and top-level control bytes rather than the lossy UI fallback. The exact Keeper and recovery contracts live in `references/goal-execution.md`.
 
 A task's `assignee` determines the agent. The task card is the order. The receipt is the return format.
 
-Only the main `/goal` PM may choose the active task, decide board changes, decide that a task is done, or decide that the goal is complete. Only the Board Keeper normally reads or writes the full execution board, applying those exact decisions mechanically. The PM thinking policy and the execution quality commands (including the subagent dispatch rules) live in `references/goal-execution.md`.
+Only the main `/goal` PM may choose the active task, decide board changes, decide that a task is done, or decide that the goal is complete. Keeper reads the execution board and applies nontrivial exact decisions mechanically; the PM may use only the execution contract's no-board-read, one-location direct-edit path. The PM thinking policy and the execution quality commands (including the subagent dispatch rules) live in `references/goal-execution.md`.
 
 ## Default `/goal` Shape
 

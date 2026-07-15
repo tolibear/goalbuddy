@@ -127,9 +127,11 @@ Ledger never edits state, applies receipts, chooses tasks, dispatches work, or b
 
 ### Board Keeper
 
-The PM owns every semantic board decision; the Board Keeper owns the mechanical board operation. During `/goal` execution, use `goal_keeper` in Codex or `goal-keeper` in Claude Code for every full-board inspection and every mutation of `state.yaml`, receipts, task cards, goal/task status, `active_task`, verification state, owner gates, GoalBuddy notes, or charter control text. Board preparation may create the initial files directly; this Keeper boundary begins when `/goal` execution starts.
+The PM owns every semantic board decision. Use `goal_keeper` in Codex or `goal-keeper` in Claude Code whenever an operation requires, or may require, reading board content beyond the compact resume/task projection. Also use Keeper for multi-location mutations, receipts, task cards, task addition or hydration, scope or authority changes, owner gates, runtime rebinding, exact-human wait/reply, completion, and any operation whose current or resulting state is uncertain. Board preparation may create the initial files directly; this execution boundary begins when `/goal` starts.
 
-The PM should normally see only the compact resume projection, task prompt, agent receipt, and Keeper receipt. A board file already loaded into PM context remains in the cached conversation prefix on later turns, so targeted shell reads by the PM are not the default substitute for Keeper. Direct PM full-board review is the exceptional recovery path required by a failed or ambiguous Ledger audit, not routine bookkeeping.
+The PM may directly apply one narrow, one-location mutation only when the exact file, location, old value, and new value are already known from the compact projection or latest validated receipt; the change affects one already-located scalar or one-line annotation; it requires no board search or inspection; and it does not participate in an atomic receipt, status-plus-successor, scope, authority, approval, or completion transition. Require the current validated state digest, use an exact-context edit, and run the bundled checker immediately. If the edit misses its expected context or the checker fails, restore only that edit and route the operation to Keeper. Do not read, grep, query, or scan `state.yaml` to make a change qualify for this direct path: if the PM needs or expects to need any board read, use Keeper from the outset.
+
+The PM should normally see only the compact resume projection, task prompt, agent receipt, and Keeper receipt. A board file loaded into PM context remains in the cached conversation prefix on later turns, so targeted shell reads are not a substitute for Keeper. Direct PM full-board review remains the exceptional recovery path required by a failed or ambiguous Ledger audit, not routine bookkeeping.
 
 For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
 
@@ -148,7 +150,7 @@ Keeper reads the board in its isolated context, applies no judgment, prefers the
 
 Keeper is control-plane, not a task agent: it receives no task card, never returns `goalbuddy_receipt_v1`, never chooses a task or successor, and never edits product files. Do not add Keeper status to `state.yaml`. Run at most one Keeper against a board. Digest drift, ambiguous instructions, unavailable validation, concurrent board activity, unauthorized paths, or a failed checker blocks the operation with no accepted mutation.
 
-Keeper and Ledger are required installed control-plane roles. If Keeper is unavailable, malformed, or times out, do not silently fall back to routine PM full-board reads or direct edits. Preserve the last validated digest, run `goalbuddy doctor` through the installed channel, repair the install, and retry or escalate to the operator. Ledger remains independently read-only so the recovery auditor can never mutate the evidence it verifies.
+Keeper and Ledger are required installed control-plane roles. If a Keeper-required operation encounters an unavailable, malformed, or timed-out Keeper, do not reclassify it as a narrow direct edit. Preserve the last validated digest, run `goalbuddy doctor` through the installed channel, repair the install, and retry or escalate to the operator. Ledger remains independently read-only so the recovery auditor can never mutate the evidence it verifies.
 
 ### Mixed Fleets
 
