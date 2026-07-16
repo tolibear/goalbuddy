@@ -7,7 +7,7 @@ import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const WORKER_SCOPE_CHANGE_RECOVERY = "If a stop_if condition fires because work needs files or authority outside allowed_files, stop before those writes and return a blocked receipt. Do not widen or retry the active task. The PM must use GoalBuddy Keeper apply_amendment to atomically record it as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
+const WORKER_SCOPE_CHANGE_RECOVERY = "If a stop_if condition fires because work needs files or authority outside allowed_files, stop before those writes and return a blocked receipt. Do not widen or retry the active task. The PM must use GoalBuddy's direct digest-bound apply_amendment transition to atomically record it as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
 
 const ROLE_DEFAULTS = {
   scout: { agent: "goal_scout", reasoning: "medium", sandbox: "read-only" },
@@ -123,8 +123,8 @@ export function parseArgs(args) {
   if (options.allowImmutableHistory && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
     throw new Error("--allow-immutable-history requires --expected-state-digest with exactly 64 lowercase hex characters.");
   }
-  if (options.expectedStateDigest && !options.allowImmutableHistory) {
-    throw new Error("--expected-state-digest is valid only with --allow-immutable-history.");
+  if (options.expectedStateDigest && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
+    throw new Error("--expected-state-digest must contain exactly 64 lowercase hex characters.");
   }
   return options;
 }
@@ -133,6 +133,9 @@ export function loadBoard(boardPath, options = {}) {
   if (!existsSync(boardPath)) throw new Error(`state file not found: ${boardPath}`);
   const stateText = readFileSync(boardPath, "utf8");
   const stateDigest = sha256(stateText);
+  if (options.expectedStateDigest && options.expectedStateDigest !== stateDigest) {
+    throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${stateDigest}.`);
+  }
   if (!options.allowImmutableHistory) {
     return boardFromDocument(boardPath, stateText, parseGoalStateText(stateText, { allowFallback: false }), {
       mode: "strict_full_state",
@@ -140,10 +143,6 @@ export function loadBoard(boardPath, options = {}) {
       immutableHistory: null,
     });
   }
-  if (options.expectedStateDigest !== stateDigest) {
-    throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${stateDigest}.`);
-  }
-
   const checker = checkExactSnapshot(boardPath, stateText);
   if (checker.state_digest !== stateDigest) {
     throw new Error("GoalBuddy checker did not validate the exact state.yaml snapshot supplied to prompt rendering.");
@@ -261,7 +260,7 @@ function parseActiveTaskProjection(stateText, activeTaskId) {
 }
 
 function promptUsage() {
-  return "Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml] [--expected-state-digest <sha256> --allow-immutable-history]";
+  return "Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml] [--expected-state-digest <sha256>] [--allow-immutable-history]";
 }
 
 export function resolveBoardPath(options) {

@@ -172,10 +172,12 @@ test("one-location board edits stay direct only when no board read is needed", (
     assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
   }
 
-  assert.match(canonicalExecution, /multi-location mutations, receipts, task cards/);
+  assert.match(canonicalExecution, /complete canonical typed transition/);
+  assert.match(canonicalExecution, /receipt closeout and successor activation/);
+  assert.match(canonicalExecution, /deterministic GoalBuddy CLI/);
   assert.match(canonicalExecution, /if the PM needs or expects to need any board read, use Keeper from the outset/);
   assert.match(canonicalExecution, /If the edit misses its expected context or the checker fails, restore only that edit and route the operation to Keeper/);
-  assert.match(canonicalExecution, /do not reclassify it as a narrow direct edit/);
+  assert.match(canonicalExecution, /do not reclassify it as a canonical typed transition or narrow direct edit/);
 });
 
 test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
@@ -196,7 +198,7 @@ test("the quiet control plane keeps mechanics internal without hiding real block
     assert.match(text, /## Scarce Orchestrator Budget/);
     assert.match(text, /not the complete board or session transcript/);
     assert.match(text, /Do not paste full reports, repeated command output, or subagent transcripts into the lead context/);
-    assert.match(text, /Reuse one warm Keeper for related operations inside one uninterrupted digest-bound sequence/);
+    assert.match(text, /Reuse one warm Keeper only for related Keeper-required operations inside one uninterrupted digest-bound sequence/);
     assert.match(text, /a genuine recovery still uses a fresh audit identity/);
     assert.match(text, /do not create polling or status-churn turns/);
     assert.match(text, /Do not delegate the work for which the lead orchestrator is selected/);
@@ -207,6 +209,8 @@ test("the quiet control plane keeps mechanics internal without hiding real block
   for (const text of [canonicalSkill, pluginSkill, claudeGoalCommand]) {
     assert.match(text, /Routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics stay out of user-facing updates|Keep routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics out of user-facing updates/);
   }
+  assert.doesNotMatch(claudeGoalCommand, /load it and its sibling `state\.yaml` board/);
+  assert.match(claudeGoalCommand, /do not load its sibling `state\.yaml` into the main context by default/);
 
   for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
     assert.match(text, /Keep routine successful GoalBuddy control-plane mechanics backstage/);
@@ -305,11 +309,8 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /Never stage, commit, push/);
   assert.match(canonicalKeeper, /Run `checker_command` after every mutation/);
   assert.match(canonicalKeeper, /Never paste the board/);
-  assert.match(canonicalKeeper, /apply_amendment/);
-  assert.match(canonicalKeeper, /apply_hydration/);
-  assert.match(canonicalKeeper, /enter_exact_human_wait/);
-  assert.match(canonicalKeeper, /resume_exact_human_reply/);
-  assert.match(canonicalKeeper, /complete_goal/);
+  assert.match(canonicalKeeper, /Reject `apply_receipt`, `apply_amendment`, `apply_hydration`, `enter_exact_human_wait`, `resume_exact_human_reply`, and `complete_goal` requests/);
+  assert.match(canonicalKeeper, /canonical deterministic transitions owned directly by the PM/);
   assert.match(canonicalKeeper, /rebind_goalbuddy/);
   assert.match(canonicalKeeper, /require exactly `transition: null`/);
   assert.match(canonicalKeeper, /"transition": null/);
@@ -318,19 +319,12 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /immutable_history_authorized/);
   assert.match(canonicalKeeper, /immutable_history_compatible/);
   assert.match(canonicalKeeper, /--allow-immutable-history/);
-  assert.match(canonicalKeeper, /reply_file_path/);
-  assert.match(canonicalKeeper, /not authenticated human identity or product authorization/);
-  assert.match(canonicalKeeper, /task_cards_path/);
-  assert.match(canonicalKeeper, /hydrate_task_id/);
-  assert.match(canonicalKeeper, /task_card_path/);
-  assert.match(canonicalKeeper, /task_card_sha256/);
+  assert.match(canonicalKeeper, /inspect \| rebind_goalbuddy \| update_control \| repair/);
   assert.doesNotMatch(canonicalKeeper, /\| add_task \|/);
   assert.match(claudeKeeper, /model: claude-opus-4-8/);
   assert.match(claudeKeeper, /effort: low/);
   assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
-  assert.match(claudeKeeper, /enter_exact_human_wait/);
-  assert.match(claudeKeeper, /resume_exact_human_reply/);
-  assert.match(claudeKeeper, /complete_goal/);
+  assert.match(claudeKeeper, /Reject `apply_receipt`, `apply_amendment`, `apply_hydration`, `enter_exact_human_wait`, `resume_exact_human_reply`, and `complete_goal` requests/);
   assert.match(claudeKeeper, /rebind_goalbuddy/);
   assert.match(claudeKeeper, /require exactly `transition: null`/);
   assert.match(claudeKeeper, /"transition": null/);
@@ -338,7 +332,6 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(claudeKeeper, /never substitute a fully-null transition or control object/);
   assert.match(claudeKeeper, /immutable_history_authorized/);
   assert.match(claudeKeeper, /immutable_history_compatible/);
-  assert.match(claudeKeeper, /not authenticated human identity or product authorization/);
 });
 
 test("Codex install keeps Goal Prep in the plugin and removes compatibility skill folders", () => {

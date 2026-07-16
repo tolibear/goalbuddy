@@ -337,14 +337,14 @@ Usage:
   ${canonicalCliName} check-update [--json]
   ${canonicalCliName} board <docs/goals/slug> [--host <host>] [--port <port>] [--once] [--json]
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
-  ${canonicalCliName} resume [docs/goals/slug] [--json]
+  ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
-  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--allow-immutable-history] [--json]
+  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--allow-immutable-history] [--json]
   ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} rebind <docs/goals/slug> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <sha256> [--allow-immutable-history] [--json]
-  ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--expected-state-digest <sha256> --allow-immutable-history] [--json]
+  ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--expected-state-digest <sha256>] [--allow-immutable-history] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
 Targets: install/update transactionally prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the transaction.

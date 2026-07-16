@@ -9,7 +9,7 @@ import { immutableHistoryCompatibility, sha256 } from "./immutable-history-proof
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then use GoalBuddy Keeper apply_amendment to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
+const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then have the PM run GoalBuddy's direct digest-bound apply_amendment transition to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
 
 if (isDirectRun()) {
   try {
@@ -83,16 +83,16 @@ export function parseApplyArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot) {
-    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--expected-state-digest <hex>] [--json]");
+    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> --expected-state-digest <hex> [--json]");
   }
   if (options.mode === "rebind") {
     if (!options.bindingPath || options.installedCheckerPaths.length === 0 || options.installedCheckerPaths.some((path) => !path) || options.taskId || options.receiptPath || options.replyPath) {
       throw new Error("Usage: node apply-receipt.mjs rebind <goal-root> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <hex> [--allow-immutable-history] [--json]");
     }
   } else if (!options.taskId || (options.mode !== "reply" && !options.receiptPath) || (options.mode === "reply" && !options.replyPath)) {
-    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--expected-state-digest <hex>] [--status done|blocked] [--activate T###|none] [--json]");
+    throw new Error("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> --expected-state-digest <hex> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--json]");
   }
-  if (["wait", "reply", "complete", "rebind"].includes(options.mode) && !options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
+  if (!options.expectedStateDigest) throw new Error(`${options.mode} requires --expected-state-digest with exactly 64 lowercase hex characters.`);
   if (options.mode !== "receipt" && (options.addTasksPath || options.hydrateTaskId || options.taskCardPath || options.taskCardSha256 || options.status || options.activate)) {
     throw new Error(`${options.mode} does not accept receipt-transition task, status, or activation options.`);
   }

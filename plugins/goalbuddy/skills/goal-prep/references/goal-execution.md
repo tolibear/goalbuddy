@@ -99,8 +99,8 @@ Quiet output is not enough. Protect the lead orchestrator's context, tool calls,
 Use the smallest authoritative projection that supports the current decision:
 
 - At startup and recovery, give the lead PM the validated continuation projection and Ledger verdict, not the complete board or session transcript. Escalate to full-board or session-log inspection only when compact evidence is missing, contradictory, or unsafe.
-- For task execution, give Workers the rendered task prompt. For review and adjudication, give the lead PM the exact diff or content-addressed artifact, compact receipts, verification results, and material findings. Do not paste full reports, repeated command output, or subagent transcripts into the lead context.
-- Delegate full-board inspection and mutation mechanics to Ledger and Keeper, and deterministic validation to scripts. Reuse one warm Keeper for related operations inside one uninterrupted digest-bound sequence; a genuine recovery still uses a fresh audit identity. Batch nonessential annotations into the next substantive transition, and do not create polling or status-churn turns.
+- For task execution, give a native Worker the digest-bound prompt pointer returned by resume (`board_path`, `task_id`, `expected_state_digest`, and the exact bundled render command). The Worker renders and follows its own full prompt; the lead PM retains the active task summary, authority, verification, and stop conditions without ingesting or re-emitting repeated role boilerplate. For review and adjudication, give the lead PM the exact diff or content-addressed artifact, compact receipts, verification results, and material findings. Do not paste full reports, repeated command output, or subagent transcripts into the lead context.
+- Delegate full-board inspection to Ledger at recovery and to Keeper for ambiguous or noncanonical control work. Apply canonical digest-bound typed transitions directly through the deterministic GoalBuddy CLI; scripts own validation, locking, and rollback. Reuse one warm Keeper only for related Keeper-required operations inside one uninterrupted digest-bound sequence; a genuine recovery still uses a fresh audit identity. Batch nonessential annotations into the next substantive transition, and do not create polling or status-churn turns.
 - Require delegated lanes to return compact receipts, findings, or decisions rather than narrated work logs. A cheaper lane is appropriate only when replacing the lead PM does not reduce decision quality.
 
 Do not delegate the work for which the lead orchestrator is selected: owner/spec decisions, implementation-plan authorship or revision, architecture and taste, direct review of material diffs, adjudication of independent review findings, material board restructuring, and final completion. When any compact projection is insufficient for one of those decisions, spend the lead context deliberately.
@@ -125,7 +125,7 @@ At every genuine recovery boundary:
    node <skill-path>/scripts/resume-board.mjs docs/goals/<slug> --json
    ```
 
-   The bundled resume script with no board remains discovery-only, and the public `goalbuddy resume` CLI delegates to this same script. The explicit-board form validates the exact captured root `state.yaml` and every referenced depth-one child `state.yaml`, then emits one deterministic `board.tree.digest` plus the complete projected `board.active_lanes` inventory. The existing checker remains byte-stable: resume invokes it against each exact snapshot rather than changing checker semantics or forcing runtime-binding migration. An `ok: true` projection is a read model, not a second source of truth. An `ok: false` response contains no partial projection and grants no continuation authority; its stable root digest, when available, only binds the full-board review.
+   The bundled resume script with no board remains discovery-only, and the public `goalbuddy resume` CLI delegates to this same script. The explicit-board form validates the exact captured root `state.yaml` and every referenced depth-one child `state.yaml`, then emits one deterministic `board.tree.digest` plus the complete projected `board.active_lanes` inventory. Its default projection includes counts and unresolved approval gates but omits the bodies of ordinary blocked and queued tasks. Use the returned `commands.planning` view only when selecting or materially restructuring successors; it adds the bounded blocked/queued inventory without changing board truth. The existing checker remains byte-stable: resume invokes it against each exact snapshot rather than changing checker semantics or forcing runtime-binding migration. An `ok: true` projection is a read model, not a second source of truth. An `ok: false` response contains no partial projection and grants no continuation authority; its stable root digest, when available, only binds the full-board review.
 2. Invoke the dedicated read-only Ledger Auditor: `goal_ledger` in Codex or `goal-ledger` in Claude Code. Give it the board path, root `board.state_digest`, composite `board.tree.digest`, board-tree entries, active lanes, checker status, and the response's exact bundled `commands.resume` command so its independent rerun never depends on a global CLI. Do not substitute Judge: Judge owns high-judgment phase, risk, scope, and completion decisions; Ledger owns mechanical recovery reconciliation.
 3. Ledger independently reruns the explicit resume command, reads the complete charter plus every root/child board in `board.tree.boards`, and compares every active lane with independent repository evidence: relevant worktrees and diffs, persisted receipts, recorded verification, owner gates, and visible Worker/session state. Every pre/post file digest and the composite digest must match the PM's response; a changed board tree is `uncertain` and requires a fresh recovery audit. Ledger never returns `congruent` when resume failed.
 4. Continue automatically from the projected active lane or lanes only when resume returned `ok: true` and Ledger returns `verdict: congruent`, the same root and composite digests, and `main_agent_action: continue`.
@@ -142,13 +142,28 @@ Ledger never edits state, applies receipts, chooses tasks, dispatches work, or b
 
 ### Board Keeper
 
-The PM owns every semantic board decision. Use `goal_keeper` in Codex or `goal-keeper` in Claude Code whenever an operation requires, or may require, reading board content beyond the compact resume/task projection. Also use Keeper for multi-location mutations, receipts, task cards, task addition or hydration, scope or authority changes, owner gates, runtime rebinding, exact-human wait/reply, completion, and any operation whose current or resulting state is uncertain. Board preparation may create the initial files directly; this execution boundary begins when `/goal` starts.
+The PM owns every semantic board decision. The bundled deterministic transition CLI—not Keeper—is the canonical path for a decision already represented by a complete typed transition: receipt closeout and successor activation, amendment with exact task cards, placeholder hydration, exact-human wait/reply, and final completion. The PM supplies the latest validated state digest and exact receipt/card artifacts; the CLI holds the per-board lock, validates receipt identity and scope, runs the checker before install, writes atomically, rolls back on failure, and returns before/after digests. This removes a model wrapper without relaxing any state invariant.
+
+Use `goal_keeper` in Codex or `goal-keeper` in Claude Code when an operation requires, or may require, reading board content beyond the compact resume/task projection; when the state or requested mutation is ambiguous; for targeted inspection, repair, runtime rebinding, or noncanonical control changes; or when no typed deterministic transition represents the PM's complete decision. Board preparation may create the initial files directly; this execution boundary begins when `/goal` starts.
 
 The PM may directly apply one narrow, one-location mutation only when the exact file, location, old value, and new value are already known from the compact projection or latest validated receipt; the change affects one already-located scalar or one-line annotation; it requires no board search or inspection; and it does not participate in an atomic receipt, status-plus-successor, scope, authority, approval, or completion transition. Require the current validated state digest, use an exact-context edit, and run the bundled checker immediately. If the edit misses its expected context or the checker fails, restore only that edit and route the operation to Keeper. Do not read, grep, query, or scan `state.yaml` to make a change qualify for this direct path: if the PM needs or expects to need any board read, use Keeper from the outset.
 
-The PM should normally see only the compact resume projection, task prompt, agent receipt, and Keeper receipt. A board file loaded into PM context remains in the cached conversation prefix on later turns, so targeted shell reads are not a substitute for Keeper. Direct PM full-board review remains the exceptional recovery path required by a failed or ambiguous Ledger audit, not routine bookkeeping.
+The PM should normally see only the compact resume projection, active task summary, agent receipt, deterministic transition result, and any Keeper receipt from exceptional control work. A board file loaded into PM context remains in the cached conversation prefix on later turns, so targeted shell reads are not a substitute for projection, Ledger, or Keeper. Direct PM full-board review remains the exceptional recovery path required by a failed or ambiguous Ledger audit, not routine bookkeeping.
 
-For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
+For canonical typed transitions, invoke the bundled/public deterministic surface directly with the latest validated digest:
+
+```bash
+goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --status done --activate T042 --json
+goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --add-tasks task-cards.json --activate T046 --json
+goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --hydrate-task T042 --activate T042 --json
+goalbuddy wait docs/goals/<slug> --task T042 --receipt wait.json --expected-state-digest <sha256> --json
+goalbuddy reply docs/goals/<slug> --task T042 --reply-file reply.json --expected-state-digest <sha256> --json
+goalbuddy complete docs/goals/<slug> --task T099 --receipt final.json --expected-state-digest <sha256> --json
+```
+
+The first three forms are the typed `apply_receipt`, `apply_amendment`, and `apply_hydration` transitions. Persist the exact compact agent/PM receipt and any exact task-card JSON outside the board, call the transition once, and consume only its compact result. Never hand-edit a receipt, task card, status-plus-successor, scope, approval, or completion transition.
+
+For each Keeper-required operation, send one compact `goalbuddy_keeper_request_v1` containing:
 
 - the exact `board_path`, operation, and authorized GoalBuddy control files;
 - the current `state.yaml` digest from resume or the previous Keeper `after_digest`;
@@ -157,15 +172,15 @@ For each operation, send one compact `goalbuddy_keeper_request_v1` containing:
 
 Always include both operation-discriminated keys. Use `transition: null` and `control: null` as the canonical absence representation; never send an object whose fields are merely all null. Missing common authorization fields remain a fail-closed request error.
 
-For `apply_receipt`, replace `transition: null` with the typed transition object containing `task_id`, `status`, `receipt_path`, and `activate`; keep `control: null` and set unused task-card fields to `null`. For a Judge decision that introduces exact successor cards, use `apply_amendment` and provide the same fields plus `task_cards_path`, which points to a JSON array of complete PM-approved task objects. When the selected successor is an existing queued Worker placeholder, use `apply_hydration`: set `hydrate_task_id` to that same successor and either set `task_card_path` plus its exact `task_card_sha256` or leave both null to consume the receipt's exact `worker_package`. The exact-human wait/reply and final-completion operations use the same typed transition object with only their operation-relevant fields populated. Do not embed a long task payload in prose and do not send separate `add_task`, task-edit, receipt, or activation requests. Keeper must perform either typed transition with one `apply-receipt.mjs` invocation so package materialization, closeout, activation, checker validation, and rollback share one atomic boundary.
+Keeper does not wrap a canonical typed transition merely to invoke the same deterministic CLI. If an exceptional Keeper inspection or repair produces a complete canonical typed transition, Keeper returns the facts to the PM without installing it; the PM invokes the direct transition against the Keeper's validated digest. Do not embed a long task payload in prose and do not split task materialization, closeout, and activation across requests.
 
 For the reviewed immutable-history path, set request field `immutable_history_authorized: true`; otherwise it must be false and Keeper must not pass the compatibility flag. For `rebind_goalbuddy`, set `transition: null` exactly and replace `control: null` with the object containing `binding_path` plus every absolute `installed_checker_paths` entry. Do not send an all-null transition object. Keeper runs the public rebind command once; direct control editing is forbidden. For `inspect`, `activate`, `update_control`, and `repair`, keep both discriminated keys null unless a narrower operation rule explicitly replaces one.
 
-Keeper reads the board in its isolated context, applies no judgment, prefers the bundled atomic receipt applier for receipt/status/successor transitions, validates the result, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
+Keeper reads the board in its isolated context, applies no judgment, validates only the exact authorized exceptional control operation, and returns one `goalbuddy_keeper_receipt_v1`. Reuse one warm Keeper for successive Keeper-required operations on one board during an uninterrupted session; send only the new decision payload and prior digest, not the role contract or full history. Start a fresh Keeper after a genuine recovery audit.
 
 Keeper is control-plane, not a task agent: it receives no task card, never returns `goalbuddy_receipt_v1`, never chooses a task or successor, and never edits product files. Do not add Keeper status to `state.yaml`. Run at most one Keeper against a board. Digest drift, ambiguous instructions, unavailable validation, concurrent board activity, unauthorized paths, or a failed checker blocks the operation with no accepted mutation.
 
-Keeper and Ledger are required installed control-plane roles. If a Keeper-required operation encounters an unavailable, malformed, or timed-out Keeper, do not reclassify it as a narrow direct edit. Preserve the last validated digest, run `goalbuddy doctor` through the installed channel, repair the install, and retry or escalate to the operator. Ledger remains independently read-only so the recovery auditor can never mutate the evidence it verifies.
+Keeper and Ledger are required installed control-plane roles. If a genuinely Keeper-required operation encounters an unavailable, malformed, or timed-out Keeper, do not reclassify it as a canonical typed transition or narrow direct edit. Preserve the last validated digest, run `goalbuddy doctor` through the installed channel, repair the install, and retry or escalate to the operator. Ledger remains independently read-only so the recovery auditor can never mutate the evidence it verifies.
 
 ### Mixed Fleets
 
@@ -179,7 +194,7 @@ Rules for external dispatch:
 
 - Dispatch to an external harness only when the user asked for a specific harness or model, or the task card carries an optional `harness:` field naming one. Never dispatch externally by default — it spends the user's quota on another vendor.
 - The dispatcher renders the task prompt, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and mechanically verifies write scope with git: worker changes must match `allowed_files`, and read-only roles must change nothing.
-- The dispatcher never edits `state.yaml`. The PM gives the reported receipt — including its `harness` stamp — to Keeper for exact recording, just as with any subagent receipt.
+- The dispatcher never edits `state.yaml`. The PM persists the reported receipt — including its `harness` stamp — and applies it once through the direct digest-bound typed transition, just as with any native-agent receipt.
 - Do not mark a dispatched task `done` unless the dispatch report's scope check is clean and the receipt's verify commands pass. A scope violation means inspect the working tree, decide what to keep, and record a blocked receipt with the facts.
 - If the target CLI is missing, unauthenticated, or times out, fall back to the normal path: PM fallback or the required GoalBuddy agent, per the dispatch rules above.
 
@@ -229,7 +244,7 @@ A slice is automatically material when it touches auth, money, permissions, migr
 
 Material slices normally receive, in order: a hardened plan, implementation by a bounded Worker, direct diff review by the PM, an independent implementation review, adjudication of findings with bounded fixes, verification, and a receipt. Simplification is available both as a review lens and as a standalone pass after large, cross-cutting, or complexity-producing changes.
 
-Small, mechanical, decision-complete changes may skip rungs. PM confidence alone is never a sufficient reason to skip independent review on a material slice during a long autonomous run. When the PM reduces the ladder for a material slice, record that downward deviation in PM-owned evidence: the rationale and evidence of the next phase-gate or final-audit Judge/PM receipt the PM authors. Never append it to a Worker's receipt — Worker `deviations` keeps its receipt-spec meaning (the Worker's own in-scope judgment calls against the task text), and subagent receipts pass to Keeper verbatim. Do not add board notes or new schema fields for it; if per-slice durability ever proves necessary, design a PM-owned additive field explicitly rather than overloading `deviations`.
+Small, mechanical, decision-complete changes may skip rungs. PM confidence alone is never a sufficient reason to skip independent review on a material slice during a long autonomous run. When the PM reduces the ladder for a material slice, record that downward deviation in PM-owned evidence: the rationale and evidence of the next phase-gate or final-audit Judge/PM receipt the PM authors. Never append it to a Worker's receipt — Worker `deviations` keeps its receipt-spec meaning (the Worker's own in-scope judgment calls against the task text), and subagent receipts pass verbatim to the direct typed transition. Do not add board notes or new schema fields for it; if per-slice durability ever proves necessary, design a PM-owned additive field explicitly rather than overloading `deviations`.
 
 ### Adaptive write scope
 
@@ -280,7 +295,7 @@ A task is the only work that may happen.
 - Scout tasks are read-only and produce findings.
 - Judge tasks are read-only and produce decisions or constraints.
 - Worker tasks may write only inside `allowed_files`.
-- PM tasks may decide control-file and board-state changes; Keeper applies them.
+- PM tasks decide control-file and board-state changes; deterministic typed transitions apply complete canonical decisions, while Keeper handles exceptional inspection, repair, and noncanonical control work.
 
 No implementation without an active Worker or PM task that explicitly allows it.
 
@@ -290,7 +305,7 @@ Each board may have at most one active task and therefore at most one active wri
 
 A receipt is compact proof that the task happened and what it changed, learned, decided, blocked, or spawned.
 
-Scout, Judge, and Worker subagents return a `goalbuddy_receipt_v1` JSON object. The PM decides the resulting task status and successor, then gives Keeper the receipt verbatim. Keeper copies its fields into the task's `receipt:` mapping in `state.yaml`, dropping only null or empty fields. Do not rename fields or invent new ones. The YAML examples below show minimum shapes, not a different schema.
+Scout, Judge, and Worker subagents return a `goalbuddy_receipt_v1` JSON object. The PM decides the resulting task status and successor, persists the receipt verbatim as the transition artifact, and invokes the direct digest-bound typed transition once. The applier copies its fields into the task's `receipt:` mapping in `state.yaml`, dropping only null or empty fields. Do not rename fields or invent new ones. The YAML examples below show minimum shapes, not a different schema.
 
 Scout receipt:
 
@@ -369,11 +384,11 @@ Recording a receipt by hand takes three separate precise edits (task status, rec
 node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> --task T### --receipt receipt.json --expected-state-digest <64-lowercase-hex> --activate T###
 ```
 
-It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Receipt `task_id` and `board_path` identity are preserved losslessly and rejected when they contradict the selected task or board. Other additive receipt evidence is stored as inert data; GoalBuddy does not interpret it as product authority. Keeper invokes the applier from the PM's exact mutation request; the PM supplies the semantic status and successor decision without loading or hand-editing the full board.
+It accepts a bare receipt JSON, a `goalbuddy_receipt_v1` envelope, or a dispatch report. Receipt `task_id` and `board_path` identity are preserved losslessly and rejected when they contradict the selected task or board. Other additive receipt evidence is stored as inert data; GoalBuddy does not interpret it as product authority. The PM invokes the applier directly with the semantic status, successor decision, exact artifact paths, and latest validated digest without loading or hand-editing the full board.
 
 Every official board mutation uses one stable per-board transition lock. The lock is held across the fresh `state.yaml` read, expected-digest check, candidate validation, atomic rename, and directory fsync. A competing writer is rejected without changing board bytes; after the active writer finishes, recover with `goalbuddy resume` and use the fresh digest rather than replaying the old request. A stale-lock diagnostic is not permission to delete it blindly: first prove that no board writer is live and preserve the current board bytes.
 
-The immutable-history compatibility path remains explicit. After the recovery procedure's mandatory PM full-board review proves that every current checker error belongs to exactly one already-done task, add `immutable_history_authorized: true` to the Keeper request and let Keeper pass `--allow-immutable-history` to the same atomic command. The runtime compares the exact pre/post checker-error multiset, requires version 2, verifies every referenced task remains done, and compares each referenced task's raw YAML block byte-for-byte. It rejects global errors, live-tail errors, missing or multi-task attribution, changed history, new/different errors, digest drift, and malformed state. The explicit prompt compatibility flags invoke this same proof against one exact, unchanged snapshot before strictly projecting only the active task and non-task control sections. A successful compatibility report is compact: baseline error count/digest, preserved task IDs, unchanged-history proof, and zero live-tail errors. It never makes the raw checker green and never authorizes historical rewriting.
+The immutable-history compatibility path remains explicit. After the recovery procedure's mandatory PM full-board review proves that every current checker error belongs to exactly one already-done task, the PM may pass `--allow-immutable-history` with the reviewed digest to the same direct atomic command. The runtime compares the exact pre/post checker-error multiset, requires version 2, verifies every referenced task remains done, and compares each referenced task's raw YAML block byte-for-byte. It rejects global errors, live-tail errors, missing or multi-task attribution, changed history, new/different errors, digest drift, and malformed state. The explicit prompt compatibility flags invoke this same proof against one exact, unchanged snapshot before strictly projecting only the active task and non-task control sections. A successful compatibility report is compact: baseline error count/digest, preserved task IDs, unchanged-history proof, and zero live-tail errors. It never makes the raw checker green and never authorizes historical rewriting.
 
 When a Judge amendment creates successors that are not yet on the board, put the exact complete task objects in a temporary JSON array and apply the entire transition once:
 
@@ -393,7 +408,7 @@ Omit `--task-card` and `--task-card-sha256` only when the receipt itself carries
 
 ### Exact-human wait and reply
 
-When an exact human reply is the only remaining action, Keeper enters the terminal wait through the official digest-bound transition rather than hand-editing task and goal status:
+When an exact human reply is the only remaining action, the PM enters the terminal wait through the official direct digest-bound transition rather than hand-editing task and goal status:
 
 ```bash
 goalbuddy wait docs/goals/<slug> --task T### --receipt wait.json --expected-state-digest <sha256> --json
@@ -538,7 +553,7 @@ If the checker and your judgment disagree, choose the more conservative state.
 
 ## PM Thinking Policy
 
-The main `/goal` thread is the PM. It owns board meaning, chooses active tasks, decides when Scout/Judge/Worker receipts are sufficient, and decides completion. Keeper records those exact decisions and returns the validated board digest.
+The main `/goal` thread is the PM. It owns board meaning, chooses active tasks, decides when Scout/Judge/Worker receipts are sufficient, and decides completion. Canonical typed transitions record complete decisions directly and return the validated board digest; Keeper handles only exceptional inspection, repair, rebinding, and noncanonical control work.
 
 Recommended PM thinking:
 
@@ -562,7 +577,7 @@ Treat `reasoning_hint` as PM guidance. It does not override task scope, write pe
 
 ## Execution Quality Commands
 
-Use `node <skill-path>/scripts/render-task-prompt.mjs docs/goals/<slug>` to render a compact prompt for the active task. The prompt includes only task-specific material, safe agent metadata, continuation warnings, and the expected receipt shape. It should not include broad chat history or dump the whole state file.
+At startup or recovery, use the digest-bound `commands.prompt` returned by resume as a pointer for the selected native task agent. Give the agent the board path, task ID, expected digest, and exact bundled command; the agent runs it in its own context and follows the rendered prompt. The lead PM keeps the projected active task summary, authority, verification, and stop conditions, but does not ingest and re-emit the repeated spawn contract, path rules, polling rules, or receipt schema. Direct PM execution may run the same command locally when no task agent is used.
 
 When dispatching Codex subagents from a GoalBuddy prompt, the `required_spawn_agent_type` is mandatory. Use that exact `spawn_agent` `agent_type` (`goal_scout`, `goal_worker`, or `goal_judge`). Do not substitute generic `scout`, `worker`, or `judge` agents; if the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or ask the operator to run the GoalBuddy CLI through their install channel with `agents` or `install`.
 
@@ -572,7 +587,7 @@ Recover deterministically only when the agent itself reaches a terminal timeout,
 
 `goal_ledger` / `goal-ledger` is separate from task prompt dispatch. Invoke it only through the Recovery Audit contract; it never receives a task card, returns a `goalbuddy_receipt_v1`, or changes board status.
 
-`goal_keeper` / `goal-keeper` is also separate from task prompt dispatch. Invoke or reuse it through the Board Keeper contract for board inspection and exact PM-authorized mutations. Keep its request compact; the installed agent definition already contains the mutation and validation procedure.
+`goal_keeper` / `goal-keeper` is also separate from task prompt dispatch. Invoke or reuse it through the Board Keeper contract only for exceptional board inspection, repair, rebinding, or noncanonical mutations not represented by a complete deterministic typed transition. Keep its request compact; the installed agent definition already contains the inspection and validation procedure.
 
 Use `node <skill-path>/scripts/parallel-plan.mjs docs/goals/<slug>` when the user explicitly asks for parallel agent work. It is read-only: it consumes the same checker-validated root/child snapshots as resume, reports the same composite board-tree digest, recommends safe Scout/Judge handoffs, and recommends Worker handoffs only when write scopes are known and disjoint. It does not mutate `state.yaml`, create child boards, apply receipts, or spawn agents. If any board changes before output, validation fails closed; after a genuine recovery, Ledger reconciles every projected active lane before any redispatch.
 

@@ -40,10 +40,12 @@ export function runResume(args, { cwd = process.cwd() } = {}) {
 }
 
 function parseResumeArgs(args) {
-  const options = { goalRoot: "", json: false };
+  const options = { goalRoot: "", json: false, planning: false };
   for (const arg of args) {
     if (arg === "--json") {
       options.json = true;
+    } else if (arg === "--planning") {
+      options.planning = true;
     } else if (arg.startsWith("-")) {
       throw new Error(`Unknown argument: ${arg}`);
     } else if (!options.goalRoot) {
@@ -70,7 +72,7 @@ function resumeBoard(goalDir, options) {
   }
 
   try {
-    const projection = createResumeProjection(goalDir, validation.checker, validation.boardSnapshots);
+    const projection = createResumeProjection(goalDir, validation.checker, validation.boardSnapshots, options);
     assertBoardTreeSnapshotsCurrent(validation.boardSnapshots);
     if (options.json) printJson(projection);
     else printResumeProjection(projection);
@@ -376,7 +378,7 @@ function printResumeFailure(goalDir, checker, options, { stateText = null, proje
   console.error("Do not continue from compact state. Inspect the complete board and independent evidence.");
 }
 
-function createResumeProjection(goalDir, checker, boardSnapshots) {
+function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) {
   const root = resolve(goalDir);
   const statePath = join(root, "state.yaml");
   const goalPath = join(root, "goal.md");
@@ -470,8 +472,11 @@ function createResumeProjection(goalDir, checker, boardSnapshots) {
       },
       dirty_fingerprint: resumeText(checks.dirty_fingerprint || "unknown"),
       approval_gates: approvalGates,
-      blocked_tasks: blockedTasks,
-      queued_tasks: queuedTasks,
+      planning_inventory: {
+        included: options.planning === true,
+        blocked_tasks: options.planning === true ? blockedTasks : [],
+        queued_tasks: options.planning === true ? queuedTasks : [],
+      },
     },
     recovery: {
       audit_required: true,
@@ -493,7 +498,10 @@ function createResumeProjection(goalDir, checker, boardSnapshots) {
     commands: {
       resume: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --json`,
       run: `/goal Follow ${path}/goal.md.`,
-      prompt: activeTask ? `goalbuddy prompt ${path}` : null,
+      prompt: activeTask
+        ? `node ${shellArgument(join(skillRoot, "scripts", "render-task-prompt.mjs"))} ${shellArgument(path)} --task ${activeTask.id} --expected-state-digest ${sha256(stateText)} --json`
+        : null,
+      planning: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --planning --json`,
       parallel_plan: activeLanes.length > 1 ? `goalbuddy parallel-plan ${path}` : null,
     },
   };
@@ -517,7 +525,7 @@ function projectActiveLane(snapshot) {
     state_digest: snapshot.state_digest,
     goal_status: resumeText(document.goal?.status),
     active_task: activeTask,
-    prompt: `goalbuddy prompt --board ${shellArgument(snapshot.state_path)} --task ${activeTask.id}`,
+    prompt: `node ${shellArgument(join(skillRoot, "scripts", "render-task-prompt.mjs"))} --board ${shellArgument(snapshot.state_path)} --task ${activeTask.id} --expected-state-digest ${snapshot.state_digest} --json`,
   };
 }
 
@@ -677,6 +685,7 @@ function printResumeProjection(projection) {
   console.log("");
   console.log(`Resume projection: ${commands.resume}`);
   if (commands.prompt) console.log(`Active task prompt: ${commands.prompt}`);
+  if (commands.planning) console.log(`Planning inventory: ${commands.planning}`);
   if (commands.parallel_plan) console.log(`Parallel plan: ${commands.parallel_plan}`);
   console.log(`Run command: ${commands.run}`);
 }

@@ -113,7 +113,8 @@ function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hyd
     writeFileSync(taskCardPath, rawTaskCard);
     taskArgs.push("--task-card", taskCardPath, "--task-card-sha256", hydrateSha256 ?? createHash("sha256").update(rawTaskCard).digest("hex"));
   }
-  return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, ...taskArgs, "--json", ...args], {
+  const digest = createHash("sha256").update(readFileSync(join(root, "docs/goals/one/state.yaml"))).digest("hex");
+  return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, "--expected-state-digest", digest, ...taskArgs, "--json", ...args], {
     cwd: root,
     encoding: "utf8",
   });
@@ -436,6 +437,24 @@ test("apply-receipt rejects a stale expected board digest without writing", () =
   }
 });
 
+test("apply-receipt requires a digest for every canonical typed transition", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const receiptPath = join(root, "receipt.json");
+    writeFileSync(receiptPath, JSON.stringify(DONE_RECEIPT));
+    const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const result = spawnSync(process.execPath, [script, "docs/goals/one", "--task", "T001", "--receipt", receiptPath, "--activate", "T999", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /requires --expected-state-digest/);
+    assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("apply-receipt adds exact amendment tasks, closes the current task, and activates the successor atomically", () => {
   const { root, goalDir } = makeBoard();
   try {
@@ -627,6 +646,8 @@ test("apply-receipt rejects out-of-scope work with typed successor recovery guid
       "T001",
       "--receipt",
       join(root, "receipt.json"),
+      "--expected-state-digest",
+      createHash("sha256").update(before).digest("hex"),
       "--activate",
       "T999",
     ], { cwd: root, encoding: "utf8" });

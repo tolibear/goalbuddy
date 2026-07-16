@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Dispatch one board task to an external harness CLI and verify the result.
-// Read-only toward state.yaml: prints the receipt and scope verdict; the PM routes them to Keeper.
+// Read-only toward state.yaml: prints the receipt and scope verdict; the PM applies them through a direct digest-bound typed transition.
 import { spawnSync } from "node:child_process";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,7 +69,7 @@ export function dispatchTask(options) {
     "",
     "Dispatch notes:",
     `- Work only inside the current directory: ${process.cwd()}`,
-    "- Do not edit state.yaml or any GoalBuddy control files; the PM routes your receipt to GoalBuddy Keeper.",
+    "- Do not edit state.yaml or any GoalBuddy control files; the PM applies your receipt through GoalBuddy's direct digest-bound typed transition.",
     `- End your reply with exactly one goalbuddy_receipt_v1 JSON object, including "harness": "${to}".`,
   ].join("\n");
 

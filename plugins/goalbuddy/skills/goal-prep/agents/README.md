@@ -29,6 +29,6 @@ job_max_runtime_seconds = 1800
 
 ## Authority Boundary
 
-Only the main `/goal` PM loop may select the active task, decide tasks are done, define board changes, or decide the goal is complete. Keeper applies exact PM-authorized board operations and returns `goalbuddy_keeper_receipt_v1`; it makes no semantic decisions.
+Only the main `/goal` PM loop may select the active task, decide tasks are done, define board changes, or decide the goal is complete. Complete canonical typed decisions use GoalBuddy's direct digest-bound atomic CLI. Keeper applies only exceptional PM-authorized inspection, repair, rebinding, or noncanonical board operations and returns `goalbuddy_keeper_receipt_v1`; it makes no semantic decisions.
 
 Scout, Worker, and Judge act only from board task cards and return receipts. Keeper and Ledger never receive task cards: Keeper handles execution-time board operations, while Ledger independently reconciles recovery state and returns `goalbuddy_ledger_audit_v1` only at genuine recovery boundaries.

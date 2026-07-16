@@ -784,7 +784,8 @@ checks:
     commands: []
 `);
 
-    const result = runGoalMaker(["prompt", goal, "--json"]);
+    const stateDigest = createHash("sha256").update(readFileSync(join(goal, "state.yaml"))).digest("hex");
+    const result = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest, "--json"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.metadata.recommended_agent, "goal_worker");
@@ -813,6 +814,10 @@ checks:
     assert.equal(Object.hasOwn(report.receipt_schema, "needs_judge"), false);
     assert.equal(Object.hasOwn(report.receipt_schema, "next_allowed_task"), false);
     assert.equal(result.stdout.includes("A previous finding that should not force a full state dump."), false);
+
+    const stale = runGoalMaker(["prompt", goal, "--expected-state-digest", "0".repeat(64), "--json"]);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /state\.yaml digest drift/);
 
     const human = runGoalMaker(["prompt", goal]);
     assert.equal(human.status, 0, human.stderr || human.stdout);
@@ -2346,6 +2351,12 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.recovery.continuation_allowed_after_audit, true);
     assert.match(scopedReport.commands.resume, /^node /);
     assert.match(scopedReport.commands.resume, /scripts\/resume-board\.mjs/);
+    assert.match(scopedReport.commands.prompt, /scripts\/render-task-prompt\.mjs/);
+    assert.match(scopedReport.commands.prompt, new RegExp(`--task T002 --expected-state-digest ${scopedReport.board.state_digest} --json$`));
+    assert.equal(scopedReport.board.planning_inventory.included, false);
+    assert.deepEqual(scopedReport.board.planning_inventory.blocked_tasks, []);
+    assert.deepEqual(scopedReport.board.planning_inventory.queued_tasks, []);
+    assert.match(scopedReport.commands.planning, /--planning --json$/);
 
     const direct = spawnSync(process.execPath, [bundledResume, "docs/goals/one", "--json"], {
       cwd: root,
@@ -2626,7 +2637,13 @@ checks:
     assert.equal(report.board.approval_gates.length, 1);
     assert.equal(report.board.approval_gates[0].task_id, "T001");
     assert.equal(report.board.approval_gates[0].required_reply, "approve 20260711120000");
-    assert.equal(report.board.blocked_tasks[0].waiting_for_user_approval, true);
+    assert.equal(report.board.planning_inventory.included, false);
+    assert.deepEqual(report.board.planning_inventory.blocked_tasks, []);
+    const planning = runGoalMaker(["resume", "docs/goals/production-migration", "--planning", "--json"], { cwd: root });
+    assert.equal(planning.status, 0, planning.stderr || planning.stdout);
+    const planningReport = JSON.parse(planning.stdout);
+    assert.equal(planningReport.board.planning_inventory.included, true);
+    assert.equal(planningReport.board.planning_inventory.blocked_tasks[0].waiting_for_user_approval, true);
     assert.equal(report.recovery.continuation_allowed_after_audit, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
