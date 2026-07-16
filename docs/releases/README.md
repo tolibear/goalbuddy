@@ -23,7 +23,7 @@ npm run check
 npm run pack:dry-run
 ```
 
-3. Install into isolated Codex and Claude homes and run both `goalbuddy contract` targets and doctors.
+3. Install with one disposable `HOME` plus isolated `CODEX_HOME` and `CLAUDE_HOME`, then run both `goalbuddy contract` targets and doctors. The disposable `HOME` is required because Codex also discovers shared skills below `~/.agents`.
 4. Verify representative current boards remain byte-identical after read-only resume/prompt checks.
 5. Commit and push the candidate to the personal fork.
 6. Activate locally only after explicit owner approval, then rerun the same gates against the live surfaces.

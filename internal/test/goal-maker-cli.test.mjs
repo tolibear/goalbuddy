@@ -2579,7 +2579,7 @@ test("resume scoped to an invalid board fails closed with checker evidence", () 
   }
 });
 
-test("resume rejects a checker-green board when only the lossy parser can render it", () => {
+test("resume and prompt strictly preserve checker-green block scalar receipts", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-strict-projection-"));
   try {
     const goalDir = writeResumeGoal(root, "strict-projection", { active: true });
@@ -2593,22 +2593,19 @@ test("resume rejects a checker-green board when only the lossy parser can render
     );
 
     const result = runGoalMaker(["resume", "docs/goals/strict-projection", "--json"], { cwd: root });
-    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
-    assert.equal(report.ok, false);
+    assert.equal(report.ok, true);
     assert.equal(report.checker.ok, true);
     assert.match(report.board.state_digest, /^[a-f0-9]{64}$/);
     assert.equal(report.board.state_digest_status, "checker_validated");
-    assert.equal(report.recovery.mode, "full_board_review");
-    assert.equal(report.recovery.continuation_allowed, false);
-    assert.match(report.errors.join("\n"), /Block scalar YAML is not supported/);
-    assert.equal(report.board.active_task, undefined);
-    assert.equal(report.board.approval_gates, undefined);
+    assert.equal(report.board.active_task.id, "T002");
+    assert.match(report.board.recent_receipt.summary, /Recent transition selected the bounded widget task/);
 
     const stateDigest = createHash("sha256").update(readFileSync(statePath)).digest("hex");
     const prompt = runGoalMaker(["prompt", "docs/goals/strict-projection", "--expected-state-digest", stateDigest, "--json"], { cwd: root });
-    assert.equal(prompt.status, 1, prompt.stderr || prompt.stdout);
-    assert.match(JSON.parse(prompt.stdout).error, /Block scalar YAML is not supported/);
+    assert.equal(prompt.status, 0, prompt.stderr || prompt.stdout);
+    assert.equal(JSON.parse(prompt.stdout).task.id, "T002");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

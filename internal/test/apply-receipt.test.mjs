@@ -10,7 +10,7 @@ import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/sc
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
 
-function makeBoard({ placeholder = false, populatedWorker = false } = {}) {
+function makeBoard({ placeholder = false, populatedWorker = false, omitReceipts = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-apply-receipt-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
@@ -43,13 +43,13 @@ tasks:
       - git diff --check
     stop_if:
       - "Need files outside allowed_files."
-    receipt: null
+${omitReceipts ? "" : "    receipt: null\n"}
   - id: T999
     type: judge
     assignee: Judge
     status: queued
     objective: "Audit the outcome."
-    receipt: null
+${omitReceipts ? "" : "    receipt: null\n"}
 ${placeholder ? `  - id: T042
     type: worker
     assignee: Worker
@@ -385,6 +385,24 @@ test("apply-receipt records a done receipt and activates the next task atomicall
     assert.match(state, /harness: codex/);
     assert.match(state, /status: pass/);
 
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt accepts checker-equivalent omitted receipts and canonicalizes the closed task", () => {
+  const { root, goalDir } = makeBoard({ omitReceipts: true });
+  try {
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], DONE_RECEIPT);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
+    const board = parseGoalStateText(state, { allowFallback: false });
+    const closed = board.tasks.find((task) => task.id === "T001");
+    assert.equal(closed.status, "done");
+    assert.equal(closed.receipt.result, "done");
+    assert.equal(board.active_task, "T999");
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
   } finally {

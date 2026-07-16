@@ -568,23 +568,88 @@ function escapeRegExp(value) {
 }
 
 function tokenizeYaml(text) {
-  return text
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((raw, index) => {
-      const withoutComments = stripComment(raw).replace(/\s+$/, "");
-      if (!withoutComments.trim()) return null;
-      const indent = withoutComments.match(/^ */)[0].length;
-      if (indent % 2 !== 0) {
-        throw new GoalBoardError(`Unsupported odd indentation at line ${index + 1}.`);
-      }
-      return {
+  const rawLines = text.replace(/\r\n/g, "\n").split("\n");
+  const tokens = [];
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const raw = rawLines[index];
+    const withoutComments = stripComment(raw).replace(/\s+$/, "");
+    if (!withoutComments.trim()) continue;
+    const indent = withoutComments.match(/^ */)[0].length;
+    if (indent % 2 !== 0) {
+      throw new GoalBoardError(`Unsupported odd indentation at line ${index + 1}.`);
+    }
+    const content = withoutComments.trimStart();
+    const blockHeader = content.match(/^((?:-\s+)?[A-Za-z0-9_.-]+:\s*)([|>](?:[+-]?[1-9]?|[1-9][+-]?))$/);
+    if (blockHeader) {
+      const block = readBlockScalar(rawLines, index + 1, indent, blockHeader[2], index + 1);
+      tokens.push({
         number: index + 1,
         indent,
-        text: withoutComments.trimStart(),
-      };
-    })
-    .filter(Boolean);
+        text: `${blockHeader[1]}${JSON.stringify(block.value)}`,
+      });
+      index = block.nextIndex - 1;
+      continue;
+    }
+    tokens.push({
+      number: index + 1,
+      indent,
+      text: content,
+    });
+  }
+  return tokens;
+}
+
+function readBlockScalar(rawLines, startIndex, headerIndent, indicator, headerLineNumber) {
+  let nextIndex = startIndex;
+  while (nextIndex < rawLines.length) {
+    const raw = rawLines[nextIndex];
+    if (!raw.trim()) {
+      nextIndex += 1;
+      continue;
+    }
+    const indent = raw.match(/^ */)[0].length;
+    if (indent <= headerIndent) break;
+    nextIndex += 1;
+  }
+
+  const sourceLines = rawLines.slice(startIndex, nextIndex);
+  const explicitIndent = Number(indicator.match(/[1-9]/)?.[0] || 0);
+  const nonemptyIndents = sourceLines
+    .filter((line) => line.trim())
+    .map((line) => line.match(/^ */)[0].length);
+  const contentIndent = explicitIndent > 0
+    ? headerIndent + explicitIndent
+    : nonemptyIndents.length > 0 ? Math.min(...nonemptyIndents) : headerIndent + 1;
+  if (nonemptyIndents.some((indent) => indent < contentIndent)) {
+    throw new GoalBoardError(`Invalid block scalar indentation below line ${headerLineNumber}.`);
+  }
+
+  const contentLines = sourceLines.map((line) => line.trim() ? line.slice(contentIndent) : "");
+  const style = indicator[0];
+  const body = style === ">" ? foldBlockScalar(contentLines) : contentLines.join("\n");
+  const withTerminalBreak = contentLines.length > 0 ? `${body}\n` : "";
+  const chomping = indicator.includes("+") ? "+" : indicator.includes("-") ? "-" : "clip";
+  const value = chomping === "+"
+    ? withTerminalBreak
+    : chomping === "-" ? withTerminalBreak.replace(/\n+$/, "") : withTerminalBreak.replace(/\n+$/, "\n");
+  return { value, nextIndex };
+}
+
+function foldBlockScalar(lines) {
+  let value = "";
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === "") {
+      value += "\n";
+      continue;
+    }
+    value += line;
+    if (index === lines.length - 1) continue;
+    const next = lines[index + 1];
+    if (next === "") continue;
+    value += line.startsWith(" ") || next.startsWith(" ") ? "\n" : " ";
+  }
+  return value;
 }
 
 function stripComment(line) {
@@ -732,11 +797,15 @@ function parseScalar(text) {
 
 function unquote(text) {
   if (text.startsWith("'")) return text.slice(1, -1).replace(/''/g, "'");
-  return text
-    .slice(1, -1)
-    .replace(/\\"/g, "\"")
-    .replace(/\\n/g, "\n")
-    .replace(/\\\\/g, "\\");
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text
+      .slice(1, -1)
+      .replace(/\\"/g, "\"")
+      .replace(/\\n/g, "\n")
+      .replace(/\\\\/g, "\\");
+  }
 }
 
 function splitInlineArray(text) {

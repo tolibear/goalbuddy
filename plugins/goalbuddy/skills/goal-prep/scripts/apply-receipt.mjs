@@ -191,7 +191,7 @@ function enterExactHumanWaitUnderLock(options, statePath) {
   }
   const task = selectedTask(context.document, options.taskId);
   if (task.status !== "active") throw new Error(`wait requires task ${options.taskId} to be active.`);
-  if (task.receipt !== null) throw new Error(`wait requires task ${options.taskId} to have receipt: null.`);
+  if (!isReceiptFree(task)) throw new Error(`wait requires task ${options.taskId} to be receipt-free.`);
   if (liveExactHumanWaitTasks(context.document).length > 0) throw new Error("wait requires no existing live exact-human wait.");
 
   let lines = context.original.replace(/\r\n/g, "\n").split("\n");
@@ -296,7 +296,7 @@ function completeGoalUnderLock(options, statePath) {
   const task = selectedTask(context.document, options.taskId);
   if (task.status !== "active") throw new Error(`complete requires task ${options.taskId} to be active.`);
   if (!["judge", "pm"].includes(task.type)) throw new Error("complete requires a Judge or PM audit task.");
-  if (task.receipt !== null) throw new Error(`complete requires task ${options.taskId} to have receipt: null.`);
+  if (!isReceiptFree(task)) throw new Error(`complete requires task ${options.taskId} to be receipt-free.`);
   if (receipt.result !== "done" || receipt.decision !== "complete" || receipt.full_outcome_complete !== true) {
     throw new Error("complete requires result done, decision complete, and full_outcome_complete true.");
   }
@@ -429,15 +429,15 @@ function authorizeReceiptSource(document, taskId) {
     throw publicError("TASK_NOT_CURRENT_ACTIVE", `receipt requires ${taskId} to be the unique active task.`);
   }
   const source = selectedTask(document, taskId);
-  if (source.status !== "active" || source.receipt !== null) {
-    throw publicError("TASK_NOT_CURRENT_ACTIVE", `receipt requires task ${taskId} to be active with receipt: null.`);
+  if (source.status !== "active" || !isReceiptFree(source)) {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `receipt requires task ${taskId} to be active and receipt-free.`);
   }
 }
 
 function authorizeReceiptSuccessor(document, taskId) {
   const successor = selectedTask(document, taskId);
-  if (successor.status !== "queued" || successor.receipt !== null) {
-    throw publicError("SUCCESSOR_NOT_QUEUED", `Successor ${taskId} must be queued with receipt: null.`);
+  if (successor.status !== "queued" || !isReceiptFree(successor)) {
+    throw publicError("SUCCESSOR_NOT_QUEUED", `Successor ${taskId} must be queued and receipt-free.`);
   }
 }
 
@@ -481,6 +481,10 @@ function selectedTask(document, taskId) {
   const task = document.tasks?.find((candidate) => candidate?.id === taskId);
   if (!task) throw new Error(`Task ${taskId} not found in state.yaml.`);
   return task;
+}
+
+function isReceiptFree(task) {
+  return task?.receipt === null || !Object.hasOwn(task || {}, "receipt");
 }
 
 function liveExactHumanWaitTasks(document) {
@@ -721,7 +725,7 @@ function hydratePlaceholderTask(lines, taskId, hydration) {
   const type = taskScalarValue(lines, start, end, "type");
   const status = taskScalarValue(lines, start, end, "status");
   const receipt = taskScalarValue(lines, start, end, "receipt");
-  if (type !== "worker" || status !== "queued" || receipt !== null) {
+  if (type !== "worker" || status !== "queued" || (receipt !== null && receipt !== undefined)) {
     throw new Error(`Task ${taskId} is not a queued receipt-free Worker placeholder.`);
   }
   for (const key of ["allowed_files", "verify"]) {
@@ -878,7 +882,12 @@ function setTaskReceipt(lines, taskId, receipt) {
       break;
     }
   }
-  if (receiptLine === -1) throw new Error(`Task ${taskId} has no "receipt" field.`);
+  if (receiptLine === -1) {
+    let insertion = end;
+    while (insertion > start && lines[insertion - 1].trim() === "") insertion -= 1;
+    const serialized = receipt === null ? ["    receipt: null"] : ["    receipt:", ...toYamlLines(receipt, 6)];
+    return [...lines.slice(0, insertion), ...serialized, ...lines.slice(insertion)];
+  }
 
   let receiptEnd = receiptLine + 1;
   while (receiptEnd < end && (/^\s{5,}/.test(lines[receiptEnd]) || lines[receiptEnd].trim() === "")) {

@@ -53,8 +53,8 @@ export function admitCurrentTask(options) {
   if (options.taskId && options.taskId !== board.activeTask) {
     throw publicError("TASK_NOT_CURRENT_ACTIVE", `Task ${options.taskId} is not the current active task ${board.activeTask}.`);
   }
-  if (task.id !== board.activeTask || task.status !== "active" || task.receipt !== null) {
-    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Prompt requires current active receipt-free task ${board.activeTask}; got ${task.id} (${task.status}, receipt ${task.receipt === null ? "null" : "present"}).`);
+  if (task.id !== board.activeTask || task.status !== "active" || !isReceiptFree(task)) {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Prompt requires current active receipt-free task ${board.activeTask}; got ${task.id} (${task.status}, receipt ${isReceiptFree(task) ? "empty" : "present"}).`);
   }
   const role = normalizeRole(task.type);
   const defaults = ROLE_DEFAULTS[role] || ROLE_DEFAULTS.pm;
@@ -304,6 +304,10 @@ export function selectTask(board, taskId = "") {
   const task = board.tasks.find((candidate) => candidate?.id === id);
   if (!task) throw new Error(`Task ${id} not found in ${board.path}`);
   return task;
+}
+
+function isReceiptFree(task) {
+  return task?.receipt === null || !Object.hasOwn(task || {}, "receipt");
 }
 
 export function childBoardPaths(board) {

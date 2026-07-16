@@ -117,6 +117,21 @@ test("prompt keeps the normal checker-green strict rendering path", () => {
   }
 });
 
+test("prompt treats a checker-accepted omitted receipt as receipt-free", () => {
+  const state = legacyBoard({ omitActiveReceipt: true, activeNotes: true });
+  const fixture = createGoal(state);
+  try {
+    const result = runPrompt(fixture.goalDir, compatibilityArgs(state));
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.task.id, "T082");
+    assert.equal(report.task.status, "active");
+    assert.equal(report.metadata.projection_mode, "immutable_history_active_task");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function createGoal(state) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-immutable-prompt-"));
   const goalDir = join(root, "goal");
@@ -148,7 +163,7 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function legacyBoard({ activeExtra = "", secondActive = false } = {}) {
+function legacyBoard({ activeExtra = "", secondActive = false, omitActiveReceipt = false, activeNotes = false } = {}) {
   return `version: 2
 goal:
   title: "Immutable prompt fixture"
@@ -200,7 +215,10 @@ tasks:
     allowed_files: []
     verify: []
     stop_if: []
-    receipt: null
+${activeNotes ? `    notes: |
+      Existing operational notes remain valid YAML.
+      They do not become receipt authority.
+` : ""}${omitActiveReceipt ? "" : "    receipt: null\n"}
 ${activeExtra}checks:
   dirty_fingerprint: unknown
   last_verification:

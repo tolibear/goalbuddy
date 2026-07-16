@@ -829,7 +829,7 @@ tasks:
 `;
 }
 
-test("flags degraded parses with a warning instead of silently dropping data", () => {
+test("strictly parses literal block scalars without degrading the board", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-degraded-parse-"));
   try {
     const goalDir = join(root, "degraded");
@@ -846,20 +846,21 @@ tasks:
     assignee: Scout
     status: active
     objective: |
-      Block scalars force the fallback parser.
+      Block scalars stay available to strict safety-critical consumers.
+      Hashes such as #abc remain scalar content.
     receipt: null
 `);
     const payload = createBoardPayload(goalDir);
     assert.equal(payload.tasks[0].id, "T001");
-    assert.match(payload.parseWarning, /fallback/i);
-    assert.match(payload.tasks[0].objective, /Block scalars force the fallback parser/);
-    assert.notEqual(payload.tasks[0].title, "|");
+    assert.equal("parseWarning" in payload, false);
+    assert.match(payload.tasks[0].objective, /Block scalars stay available/);
+    assert.match(payload.tasks[0].objective, /#abc/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("lets safety-critical callers disable the best-effort parser", () => {
+test("strict parser preserves block-scalar style and chomping semantics", () => {
   const state = `version: 2
 goal:
   title: "Strict projection"
@@ -871,16 +872,20 @@ tasks:
     type: scout
     assignee: Scout
     status: active
-    objective: |
-      Block scalars are valid for the board UI but not for a strict projection.
+    objective: |-
+      Literal line one.
+      Literal line two.
+    notes: >-
+      Folded line one.
+      Folded line two.
+
+      Folded paragraph two.
     receipt: null
 `;
 
-  assert.match(parseGoalStateText(state).__parseWarning, /fallback/i);
-  assert.throws(
-    () => parseGoalStateText(state, { allowFallback: false }),
-    /Block scalar YAML is not supported/,
-  );
+  const document = parseGoalStateText(state, { allowFallback: false });
+  assert.equal(document.tasks[0].objective, "Literal line one.\nLiteral line two.");
+  assert.equal(document.tasks[0].notes, "Folded line one. Folded line two.\nFolded paragraph two.");
 });
 
 test("recovers odd-indentation boards through the fallback parser", () => {
