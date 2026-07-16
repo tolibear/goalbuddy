@@ -731,7 +731,7 @@ test("prompt renders a compact active task prompt without dumping full state", (
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const goal = join(root, "goal");
-    mkdirSync(goal, { recursive: true });
+    writeGoalSupport(goal, "Prompt test");
     writeFileSync(join(goal, "state.yaml"), `version: 2
 goal:
   title: "Prompt test"
@@ -792,7 +792,7 @@ checks:
     assert.equal(report.metadata.required_spawn_agent_type, "goal_worker");
     assert.equal(report.metadata.recommended_reasoning, "high");
     assert.equal(report.metadata.sandbox, "workspace-write");
-    assert.equal(report.metadata.changed_files_path_style, "board-relative");
+    assert.equal(report.metadata.changed_files_path_style, "repository-relative");
     assert.match(report.metadata.scope_change_recovery, /stop before those writes and return a blocked receipt/);
     assert.match(report.metadata.scope_change_recovery, /apply_amendment/);
     assert.match(report.metadata.scope_change_recovery, /apply_hydration/);
@@ -817,9 +817,9 @@ checks:
 
     const stale = runGoalMaker(["prompt", goal, "--expected-state-digest", "0".repeat(64), "--json"]);
     assert.equal(stale.status, 1);
-    assert.match(stale.stderr, /state\.yaml digest drift/);
+    assert.match(JSON.parse(stale.stdout).error, /state\.yaml digest drift/);
 
-    const human = runGoalMaker(["prompt", goal]);
+    const human = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest]);
     assert.equal(human.status, 0, human.stderr || human.stdout);
     assert.match(human.stdout, /Codex spawn_agent agent_type: goal_worker/);
     assert.match(human.stdout, /Do not substitute generic scout, worker, or judge agents/);
@@ -832,7 +832,7 @@ checks:
     assert.match(human.stdout, /terminal timeout, failed, or unavailable state/);
     assert.match(human.stdout, /configured job\/runtime deadline is actually exceeded/);
     assert.match(human.stdout, /Preserve one-agent\/no-duplicate dispatch/);
-    assert.match(human.stdout, /changed_files must use board-relative paths/);
+    assert.match(human.stdout, /changed_files must use repository-relative paths/);
     assert.match(human.stdout, /do not convert absolute paths to relative paths/);
     assert.match(human.stdout, /scope_change_recovery/);
     assert.match(human.stdout, /Do not widen or retry the active task/);
@@ -850,7 +850,7 @@ test("prompt requires absolute changed_files when allowed_files are absolute", (
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const goal = join(root, "goal");
-    mkdirSync(goal, { recursive: true });
+    writeGoalSupport(goal, "Absolute receipt path test");
     writeFileSync(join(goal, "state.yaml"), `version: 2
 goal:
   title: "Absolute receipt path test"
@@ -878,11 +878,12 @@ tasks:
     receipt: null
 `);
 
-    const result = runGoalMaker(["prompt", goal, "--json"]);
+    const stateDigest = createHash("sha256").update(readFileSync(join(goal, "state.yaml"))).digest("hex");
+    const result = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest, "--json"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).metadata.changed_files_path_style, "absolute");
 
-    const human = runGoalMaker(["prompt", goal]);
+    const human = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest]);
     assert.equal(human.status, 0, human.stderr || human.stdout);
     assert.match(human.stdout, /changed_files must use absolute paths/);
   } finally {
@@ -894,7 +895,7 @@ test("prompt resolves relative goal paths without rewriting task ids", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const goal = join(root, "docs", "goals", "demo");
-    mkdirSync(goal, { recursive: true });
+    writeGoalSupport(goal, "Relative prompt test");
     writeFileSync(join(goal, "state.yaml"), `version: 2
 goal:
   title: "Relative prompt test"
@@ -916,6 +917,8 @@ tasks:
     receipt:
       result: done
       summary: "Mapped the board."
+      evidence:
+        - docs/goals/demo/state.yaml
   - id: T002
     type: worker
     assignee: Worker
@@ -936,16 +939,17 @@ checks:
     commands: []
 `);
 
+    const stateDigest = createHash("sha256").update(readFileSync(join(goal, "state.yaml"))).digest("hex");
     const cases = [
-      ["prompt", "docs/goals/demo", "--task", "T001", "--json"],
-      ["prompt", "docs/goals/demo", "--task=T001", "--json"],
-      ["prompt", "--board", "docs/goals/demo/state.yaml", "--task", "T001", "--json"],
+      ["prompt", "docs/goals/demo", "--task", "T002", "--expected-state-digest", stateDigest, "--json"],
+      ["prompt", "docs/goals/demo", "--task=T002", "--expected-state-digest", stateDigest, "--json"],
+      ["prompt", "--board", "docs/goals/demo/state.yaml", "--task", "T002", "--expected-state-digest", stateDigest, "--json"],
     ];
     for (const args of cases) {
       const result = runGoalMaker(args, { cwd: root });
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const report = JSON.parse(result.stdout);
-      assert.equal(report.task.id, "T001", args.join(" "));
+      assert.equal(report.task.id, "T002", args.join(" "));
       assert.equal(report.metadata.board_path, join(realpathSync(goal), "state.yaml"));
     }
   } finally {
@@ -989,7 +993,7 @@ test("prompt receipt schemas mirror bundled agent receipt contracts", () => {
 
     for (const item of cases) {
       const goal = join(root, item.type);
-      mkdirSync(goal, { recursive: true });
+      writeGoalSupport(goal, `${item.type} prompt contract`);
       writeFileSync(join(goal, "state.yaml"), `version: 2
 goal:
   title: "${item.type} prompt contract"
@@ -1020,7 +1024,8 @@ checks:
     commands: []
 `);
 
-      const result = runGoalMaker(["prompt", goal, "--json"]);
+      const stateDigest = createHash("sha256").update(readFileSync(join(goal, "state.yaml"))).digest("hex");
+      const result = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest, "--json"]);
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const report = JSON.parse(result.stdout);
       const expectedSchema = receiptContractSchema(`goalbuddy/agents/${item.agent}.toml`);
@@ -1036,7 +1041,7 @@ test("prompt warns when the board may be micro-slicing", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const goal = join(root, "goal");
-    mkdirSync(goal, { recursive: true });
+    writeGoalSupport(goal, "Prompt warning test");
     writeFileSync(join(goal, "state.yaml"), `version: 2
 goal:
   title: "Prompt warning test"
@@ -1056,24 +1061,57 @@ tasks:
     assignee: Worker
     status: done
     objective: "Add one narrow projection helper."
+    allowed_files:
+      - lib/helper-1.ts
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
     receipt:
       result: done
+      changed_files:
+        - lib/helper-1.ts
+      commands:
+        - cmd: npm test
+          status: pass
       summary: "Added one helper."
   - id: T002
     type: worker
     assignee: Worker
     status: done
     objective: "Add one narrow contract file."
+    allowed_files:
+      - lib/helper-2.ts
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
     receipt:
       result: done
+      changed_files:
+        - lib/helper-2.ts
+      commands:
+        - cmd: npm test
+          status: pass
       summary: "Added one contract."
   - id: T003
     type: worker
     assignee: Worker
     status: done
     objective: "Add one narrow validation wrapper."
+    allowed_files:
+      - lib/helper-3.ts
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
     receipt:
       result: done
+      changed_files:
+        - lib/helper-3.ts
+      commands:
+        - cmd: npm test
+          status: pass
       summary: "Added one wrapper."
   - id: T004
     type: worker
@@ -1095,7 +1133,8 @@ checks:
     commands: []
 `);
 
-    const result = runGoalMaker(["prompt", goal, "--json"]);
+    const stateDigest = createHash("sha256").update(readFileSync(join(goal, "state.yaml"))).digest("hex");
+    const result = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest, "--json"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.match(report.metadata.warnings.join("\n"), /Board may be micro-slicing\. Prefer the largest safe useful slice/);
@@ -1178,6 +1217,8 @@ checks:
     assert.equal(report.spawned_agents, false);
     assert.equal(report.candidates.length, 2);
     assert.equal(report.candidates.every((candidate) => candidate.safe_to_parallelize), true);
+    assert.equal(report.candidates.every((candidate) => /^[a-f0-9]{64}$/.test(candidate.state_digest)), true);
+    assert.equal(report.candidates.every((candidate) => candidate.render_prompt_command.includes(`--expected-state-digest ${candidate.state_digest}`)), true);
     assert.equal(readFileSync(join(goal, "state.yaml"), "utf8"), parentState);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1404,6 +1445,7 @@ test("plugin install removes stale personal Codex GoalBuddy skills", () => {
     const fakeBin = fakeCodexBin(root);
     const env = {
       ...process.env,
+      HOME: root,
       PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
     };
 
@@ -1523,6 +1565,7 @@ test("plugin install ignores non-version cache directories", () => {
     const fakeBin = fakeCodexBin(root);
     const env = {
       ...process.env,
+      HOME: root,
       PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
     };
 
@@ -1547,6 +1590,7 @@ test("plugin reinstall does not leave empty preserved cache directories", () => 
     const fakeBin = fakeCodexBin(root);
     const env = {
       ...process.env,
+      HOME: root,
       PATH: `${fakeBin}${delimiter}${process.env.PATH}`,
     };
 
@@ -1760,6 +1804,7 @@ test("legacy goal-maker invocation prints rebrand notice only for human output",
     const codexHome = join(root, "codex-home");
     const env = {
       ...process.env,
+      HOME: root,
       GOALBUDDY_INVOKED_AS: "goal-maker",
       PATH: `${fakeCodexBin(root)}${delimiter}${process.env.PATH}`,
     };
@@ -1873,6 +1918,23 @@ test("errors when a path option is missing its value", () => {
   const result = runGoalMaker(["doctor", "--codex-home", "--json"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Missing value for --codex-home/);
+});
+
+test("prompt, dispatch, and receipt preserve --json after a missing option value", () => {
+  const cases = [
+    ["prompt", "--board", "--json"],
+    ["dispatch", "docs/goals/one", "--to", "--json"],
+    ["receipt", "docs/goals/one", "--task", "--json"],
+  ];
+  for (const args of cases) {
+    const result = runGoalMaker(args);
+    assert.equal(result.status, 1, `${args.join(" ")}\n${result.stderr || result.stdout}`);
+    assert.equal(result.stderr, "", args.join(" "));
+    assert.equal(result.stdout.trim().split("\n").length, 1, args.join(" "));
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(report).sort(), ["error", "error_code", "next_action", "ok"]);
+    assert.equal(report.error_code, "INVALID_ARGUMENT");
+  }
 });
 
 test("judge receipt contract includes worker_package in every surface", () => {
@@ -2276,7 +2338,7 @@ test("rebind exposes the typed digest-bound GoalBuddy control mutation", () => {
     for (const gitArgs of [
       ["init", "-q"],
       ["add", "goalbuddy/scripts/check-goal-state.mjs"],
-      ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "commit", "-qm", "fixture"],
+      ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"],
     ]) {
       const git = spawnSync("git", gitArgs, { cwd: sourceRoot, encoding: "utf8" });
       assert.equal(git.status, 0, git.stderr || git.stdout);
@@ -2427,6 +2489,10 @@ test("resume and parallel-plan bind every active child lane to one composite boa
     assert.equal(planReport.board_tree_digest, firstReport.board.tree.digest);
     assert.equal(planReport.candidates.length, 2);
     assert.equal(planReport.candidates.every((candidate) => candidate.safe_to_parallelize), true);
+    for (const candidate of planReport.candidates) {
+      assert.match(candidate.state_digest, /^[a-f0-9]{64}$/);
+      assert.match(candidate.render_prompt_command, new RegExp(`--expected-state-digest ${candidate.state_digest}$`));
+    }
 
     const childBefore = readFileSync(childStatePath, "utf8");
     writeFileSync(childStatePath, childBefore.replace("Implement the child lane.", "Implement the revised child lane."));
@@ -2539,9 +2605,10 @@ test("resume rejects a checker-green board when only the lossy parser can render
     assert.equal(report.board.active_task, undefined);
     assert.equal(report.board.approval_gates, undefined);
 
-    const prompt = runGoalMaker(["prompt", "docs/goals/strict-projection", "--json"], { cwd: root });
+    const stateDigest = createHash("sha256").update(readFileSync(statePath)).digest("hex");
+    const prompt = runGoalMaker(["prompt", "docs/goals/strict-projection", "--expected-state-digest", stateDigest, "--json"], { cwd: root });
     assert.equal(prompt.status, 1, prompt.stderr || prompt.stdout);
-    assert.match(prompt.stderr, /Block scalar YAML is not supported/);
+    assert.match(JSON.parse(prompt.stdout).error, /Block scalar YAML is not supported/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

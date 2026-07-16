@@ -55,6 +55,7 @@ function candidateForBoard(board) {
   const role = normalizeRole(task.type);
   return {
     board_path: board.path,
+    state_digest: board.stateDigest,
     task_id: task.id,
     role,
     recommended_agent: role === "scout" ? "goal_scout" : role === "judge" ? "goal_judge" : role === "worker" ? "goal_worker" : "PM",
@@ -86,7 +87,7 @@ function safetyReason(candidate, workers) {
 }
 
 function promptCommand(candidate) {
-  return `goalbuddy prompt --board ${quote(candidate.board_path)} --task ${candidate.task_id}`;
+  return `goalbuddy prompt --board ${quote(candidate.board_path)} --task ${candidate.task_id} --expected-state-digest ${candidate.state_digest}`;
 }
 
 function areDisjoint(left, right) {

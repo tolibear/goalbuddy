@@ -5,7 +5,9 @@ Design rationale for the policy upgrade landed in
 Strategy"), `goalbuddy/templates/goal.md` (charter "Execution Strategy"
 section), and the Codex Goal Compiler's adaptive-strategy reference. This is a
 focused policy upgrade, not a GoalBuddy redesign: `state.yaml`, the checker,
-Keeper, Ledger, statuses, receipts, and the parallelism model are unchanged.
+Ledger, statuses, receipts, and the parallelism model are unchanged. Complete
+canonical transitions are deterministic runtime operations; Keeper remains the
+exceptional inspection, repair, rebinding, and noncanonical-control role.
 
 ## Problem
 
@@ -65,7 +67,8 @@ line by line before this spec was written):
    material slices are recorded in PM-owned evidence — the next phase-gate or
    final-audit receipt the PM authors — no board notes, no new schema fields.
    Worker receipt `deviations` keeps its receipt-spec meaning (the Worker's
-   own in-scope judgment calls) and subagent receipts pass to Keeper verbatim.
+   own in-scope judgment calls) and subagent receipts pass losslessly to the
+   deterministic typed transition.
    PM confidence alone never justifies a skip.
 5. Independent implementation review and the GoalBuddy Judge are distinct:
    review produces adversarial evidence about a plan or diff; Judge holds

@@ -1,9 +1,10 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 const dispatcher = resolve("goalbuddy/scripts/dispatch-task.mjs");
 
@@ -22,6 +23,10 @@ goal:
   kind: specific
   tranche: "test"
   status: active
+agents:
+  scout: unknown
+  worker: unknown
+  judge: unknown
 active_task: T001
 tasks:
   - id: T001
@@ -36,11 +41,17 @@ tasks:
     stop_if:
       - "Need files outside allowed_files."
     receipt: null
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Queued audit must never dispatch early."
+    receipt: null
 `);
   const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
   git(["init", "-q"]);
   git(["-c", "user.email=test@example.com", "-c", "user.name=test", "add", "-A"]);
-  git(["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-qm", "init"]);
+  git(["-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false", "commit", "-qm", "init"]);
   return root;
 }
 
@@ -66,7 +77,9 @@ const RECEIPT = JSON.stringify({
 });
 
 function runDispatch(root, bin, extraArgs = []) {
-  return spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--json", ...extraArgs], {
+  const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"));
+  const digest = createHash("sha256").update(state).digest("hex");
+  return spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--expected-state-digest", digest, "--json", ...extraArgs], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
@@ -95,12 +108,56 @@ test("dispatch flags out-of-scope writes from an external worker", () => {
     const bin = fakeHarnessBin(root, "codex", `echo "tampered" >> README.md\necho '${RECEIPT}'`);
     const result = runDispatch(root, bin);
     assert.equal(result.status, 1, result.stdout);
+    assert.equal(result.stdout.trim().split("\n").length, 1);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
     assert.equal(report.scope_check.status, "violations");
-    assert.deepEqual(report.scope_check.violations, ["README.md"]);
+    assert.deepEqual(report.scope_check.out_of_scope, ["README.md"]);
+    assert.deepEqual(report.scope_check.missing_receipt_changes, ["README.md"]);
+    assert.deepEqual(report.scope_check.extra_receipt_claims, ["src/widget.mjs"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch reports scope violations before a simultaneous harness failure", () => {
+  const root = makeProject();
+  try {
+    const bin = fakeHarnessBin(root, "codex", "echo tampered >> README.md\nexit 7");
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--expected-state-digest", digest], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.trim().split("\n").length, 1);
+    assert.match(result.stderr, /^DISPATCH_SCOPE_FAILED:/);
+    assert.match(result.stderr, /README\.md/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch derives the harness working directory from an absolute board outside the caller cwd", () => {
+  const root = makeProject();
+  const caller = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-caller-"));
+  try {
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const boardPath = join(root, "docs", "goals", "one", "state.yaml");
+    const digest = createHash("sha256").update(readFileSync(boardPath)).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "--board", boardPath, "--to", "codex", "--expected-state-digest", digest, "--json"], {
+      cwd: caller,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).scope_check.status, "clean");
+    assert.equal(readFileSync(join(root, "src", "widget.mjs"), "utf8"), "export const widget = 2;\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(caller, { recursive: true, force: true });
   }
 });
 
@@ -112,7 +169,8 @@ test("dispatch flags any write from a read-only role", () => {
     assert.equal(result.status, 1, result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.scope_check.status, "violations");
-    assert.deepEqual(report.scope_check.violations, ["src/widget.mjs"]);
+    assert.deepEqual(report.scope_check.changed_files, ["src/widget.mjs"]);
+    assert.match(report.scope_check.violations.join("\n"), /Read-only task/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -121,7 +179,7 @@ test("dispatch flags any write from a read-only role", () => {
 test("dispatch extracts receipts wrapped in markdown fences", () => {
   const root = makeProject();
   try {
-    const bin = fakeHarnessBin(root, "codex", `printf 'Here you go:\\n\\n\`\`\`json\\n%s\\n\`\`\`\\n' '${RECEIPT}'`);
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\nprintf 'Here you go:\\n\\n\`\`\`json\\n%s\\n\`\`\`\\n' '${RECEIPT}'`);
     const result = runDispatch(root, bin);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).receipt.summary, "widget adjusted");
@@ -137,7 +195,8 @@ test("dispatch reports a missing harness CLI cleanly", () => {
     mkdirSync(bin, { recursive: true });
     const gitPath = spawnSync("command", ["-v", "git"], { encoding: "utf8", shell: true }).stdout.trim();
     symlinkSync(gitPath, join(bin, "git"));
-    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--json"], {
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--expected-state-digest", digest, "--json"], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, PATH: bin },
@@ -154,7 +213,8 @@ test("dispatch reports a missing harness CLI cleanly", () => {
 test("dispatch rejects unsupported harness targets", () => {
   const root = makeProject();
   try {
-    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "gemini", "--json"], {
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "gemini", "--expected-state-digest", digest, "--json"], {
       cwd: root,
       encoding: "utf8",
     });
@@ -166,11 +226,29 @@ test("dispatch rejects unsupported harness targets", () => {
   }
 });
 
+test("dispatch human failures start with one stable code and action", () => {
+  const root = makeProject();
+  try {
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "gemini", "--expected-state-digest", digest], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^INVALID_ARGUMENT: .* Next: /);
+    assert.equal(result.stderr.trim().split("\n").length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("dispatch times out hung harness CLIs", () => {
   const root = makeProject();
   try {
     const bin = fakeHarnessBin(root, "codex", "sleep 30");
-    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--timeout", "1", "--json"], {
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--expected-state-digest", digest, "--timeout", "1", "--json"], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
@@ -188,7 +266,8 @@ test("goalbuddy dispatch CLI wrapper forwards to the bundled script", () => {
   try {
     const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
     const cli = resolve("internal/cli/goal-maker.mjs");
-    const result = spawnSync(process.execPath, [cli, "dispatch", "docs/goals/one", "--to", "codex", "--json"], {
+    const digest = createHash("sha256").update(readFileSync(join(root, "docs", "goals", "one", "state.yaml"))).digest("hex");
+    const result = spawnSync(process.execPath, [cli, "dispatch", "docs/goals/one", "--to", "codex", "--expected-state-digest", digest, "--json"], {
       cwd: root,
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
@@ -202,10 +281,29 @@ test("goalbuddy dispatch CLI wrapper forwards to the bundled script", () => {
   }
 });
 
+test("goalbuddy dispatch wrapper forwards one compact JSON failure without wrapping", () => {
+  const root = makeProject();
+  try {
+    const cli = resolve("internal/cli/goal-maker.mjs");
+    const result = spawnSync(process.execPath, [cli, "dispatch", "docs/goals/one", "--to", "codex", "--expected-state-digest", "0".repeat(64), "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout.trim().split("\n").length, 1);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(report).sort(), ["error", "error_code", "next_action", "ok"]);
+    assert.equal(report.error_code, "STALE_STATE_DIGEST");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("dispatch rejects receipt-shaped fragments that are not real receipts", () => {
   const root = makeProject();
   try {
-    const bin = fakeHarnessBin(root, "codex", `echo '{"goalbuddy_receipt_v1": true}'\necho 'later, the real one:'\necho '${RECEIPT}'`);
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '{"goalbuddy_receipt_v1": true}'\necho 'later, the real one:'\necho '${RECEIPT}'`);
     const result = runDispatch(root, bin);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
@@ -221,6 +319,8 @@ test("dispatch extracts bare receipts returned without the envelope", () => {
     const bare = JSON.stringify({
       result: "done",
       task_id: "T001",
+      board_path: "docs/goals/one/state.yaml",
+      changed_files: ["src/widget.mjs"],
       decision: "approved",
       summary: "bare receipt",
     });
@@ -230,6 +330,75 @@ test("dispatch extracts bare receipts returned without the envelope", () => {
     const report = JSON.parse(result.stdout);
     assert.equal(report.receipt.summary, "bare receipt");
     assert.equal(report.receipt.harness, "codex");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch never launches a harness for stale state or a queued explicit task", () => {
+  for (const testCase of [
+    { name: "stale digest", args: ["--expected-state-digest", "0".repeat(64)] },
+    { name: "queued task", args: ["--task", "T002"] },
+  ]) {
+    const root = makeProject();
+    try {
+      const marker = join(root, "harness-ran");
+      const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+      const result = runDispatch(root, bin, testCase.args);
+      assert.equal(result.status, 1, `${testCase.name}: ${result.stderr || result.stdout}`);
+      assert.equal(existsSync(marker), false, testCase.name);
+      assert.match(JSON.parse(result.stdout).error_code, /STALE_STATE_DIGEST|TASK_NOT_CURRENT_ACTIVE/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("dispatch treats ignored GoalBuddy control writes as authority violations", () => {
+  const root = makeProject();
+  try {
+    writeFileSync(join(root, ".gitignore"), "docs/\n");
+    const receipt = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: [],
+        commands: [{ cmd: "true", status: "pass" }],
+        summary: "No product write claimed.",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `echo "tampered" >> docs/goals/one/goal.md\necho '${receipt}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "DISPATCH_SCOPE_FAILED");
+    assert.deepEqual(report.scope_check.control_changes, ["docs/goals/one/goal.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch detects a second modification to a path that was already dirty", () => {
+  const root = makeProject();
+  try {
+    writeFileSync(join(root, "README.md"), "# fixture\npre-dirty\n");
+    const receipt = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["README.md"],
+        commands: [{ cmd: "true", status: "pass" }],
+        summary: "Out-of-scope edit claimed.",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `echo "changed again" >> README.md\necho '${receipt}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.scope_check.changed_files, ["README.md"]);
+    assert.deepEqual(report.scope_check.out_of_scope, ["README.md"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

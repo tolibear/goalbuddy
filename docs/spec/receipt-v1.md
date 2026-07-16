@@ -50,8 +50,8 @@ harness: codex | claude-code   # request: which runtime should perform this task
 Invariants:
 
 - Task ids match `T` followed by exactly three digits (`T001`, `T999`). The validator rejects other shapes such as `T001b`; a sibling or follow-up task takes the next free number.
-- Exactly one task is `active` at a time unless parallel write scopes are provably disjoint.
-- Scout and Judge tasks are read-only. Worker tasks write only inside `allowed_files`. The coordinating PM owns every board decision; the control-plane Board Keeper applies exact authorized mutations.
+- Exactly one task is `active` per board. Parallel recovery identities use validated depth-one child boards; a worktree alone is byte isolation, not board authority or proof of semantic independence.
+- Scout and Judge tasks are read-only. Worker tasks write only inside `allowed_files`. The coordinating PM owns every board decision. Complete canonical decisions use GoalBuddy's digest-bound typed transitions directly; Board Keeper is reserved for inspection, repair, rebinding, ambiguity, and noncanonical control work.
 
 ## Receipt envelope
 
@@ -61,7 +61,7 @@ Agents performing a task return a single JSON object:
 { "goalbuddy_receipt_v1": { "result": "done | blocked", "task_id": "<T###>", "board_path": "<path to state.yaml>", "...role fields...": "see below" } }
 ```
 
-The PM decides the resulting status and successor, then gives the receipt to Board Keeper. Keeper copies its fields losslessly into the task card's `receipt:` mapping as YAML, including `task_id` and `board_path`. The applier rejects either identity field when it contradicts the selected task or board. Additive evidence fields are retained as inert data: GoalBuddy does not reinterpret them as product approval, security authority, or a new decision vocabulary.
+The PM validates the result and chooses one explicit queued successor, then invokes the digest-bound typed receipt transition. The receipt's `result` is the sole source of terminal status (`done` or `blocked`); `task_id` and `board_path` are mandatory and must identify the exact active receipt-free source task and board. The transition stores the envelope losslessly, validates the successor before mutation, installs atomically under the per-board lock, and returns before/after digests. Additive evidence fields are retained as inert data: GoalBuddy does not reinterpret them as product approval, security authority, or a new decision vocabulary.
 
 Newly hydrated Worker task cards accept only generic GoalBuddy fields. Product-specific `approval_phrase`, `approval_phrases`, and `boundary_classification` keys are rejected during hydration. Existing historical board text is not migrated or rewritten.
 

@@ -308,11 +308,18 @@ function resolveChildGoalArgs(rawArgs) {
       out.push(`${joinedMatch}=${value ? resolve(value) : value}`);
     } else if (pathOptions.has(arg)) {
       out.push(arg);
-      const value = rawArgs[++index] || "";
-      out.push(value ? resolve(value) : value);
+      const value = rawArgs[index + 1];
+      if (value !== undefined && !value.startsWith("--")) {
+        index += 1;
+        out.push(resolve(value));
+      }
     } else if (optionsWithValues.has(arg)) {
       out.push(arg);
-      out.push(rawArgs[++index] || "");
+      const value = rawArgs[index + 1];
+      if (value !== undefined && !value.startsWith("--")) {
+        index += 1;
+        out.push(value);
+      }
     } else if (!arg.startsWith("-")) {
       out.push(resolve(arg));
     } else {
@@ -338,13 +345,13 @@ Usage:
   ${canonicalCliName} board <docs/goals/slug> [--host <host>] [--port <port>] [--once] [--json]
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
-  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
-  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--status done|blocked] [--activate T###|none] [--allow-immutable-history] [--json]
+  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--timeout <seconds>] [--allow-immutable-history] [--json]
+  ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--allow-immutable-history] [--json]
   ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} rebind <docs/goals/slug> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <sha256> [--allow-immutable-history] [--json]
-  ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--expected-state-digest <sha256>] [--allow-immutable-history] [--json]
+  ${canonicalCliName} prompt <docs/goals/slug> --expected-state-digest <sha256> [--task T###] [--board <path/to/state.yaml>] [--allow-immutable-history] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
 Targets: install/update transactionally prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the transaction.

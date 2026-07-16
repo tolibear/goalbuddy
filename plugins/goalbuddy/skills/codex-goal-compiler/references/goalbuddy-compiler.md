@@ -58,7 +58,7 @@ python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target codex --jso
 python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target claude --json
 ```
 
-The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. It also returns the exact absolute installed Goal Prep and compiler paths plus installed/source tree fingerprints. Missing requirements or mismatched bytes block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, source provenance, and installed skill binding. Agent-file presence alone is insufficient because a Keeper must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block compilation and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
+The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. It also returns the exact absolute installed Goal Prep and compiler paths plus installed/source tree fingerprints. Missing requirements or mismatched bytes block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, source provenance, and installed skill binding. Agent-file presence alone is insufficient because the deterministic typed transition runtime must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block compilation and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
 
 ## GoalBuddy workflow
 
@@ -124,11 +124,11 @@ Do not emit optimization machinery for ordinary completion goals. Do not invent 
 
 ## Mixed-fleet safety
 
-GoalBuddy mixed-vendor dispatch is allowed only from a clean Git baseline because its path-set scope check cannot detect edits to paths already dirty before dispatch.
+GoalBuddy mixed-vendor dispatch uses a content-aware before/after manifest bound to the admitted task and exact board digest. It detects second edits to paths that were already dirty, rejects GoalBuddy control-file changes, normalizes absolute and relative receipt paths to one repository-root identity for evaluation, and requires exact equality between observed product changes and receipt `changed_files`.
 
 - Cross-harness continuation on an explicit board path remains available.
-- If `git status --porcelain` is nonempty, preserve dirty work and use the current harness's normal roles or reach a user-approved clean checkpoint.
-- Do not claim dirty-worktree mechanical scope enforcement.
+- A dirty baseline is supported and preserved, but dispatch never rolls it back. The PM owns inspection and cleanup after any scope failure.
+- Prefer a clean checkpoint when practical because it is easier for a human to inspect; do not make cleanliness a false authorization prerequisite.
 
 ## Board surface
 
@@ -176,4 +176,4 @@ Goal Prep returns preparation evidence to the current compiler context; it does 
 - Semantic warning denylist fires → preparation is not accepted.
 - Codex objective invalid → rewrite and revalidate.
 - Existing board request → stop; this compiler never repairs, resumes, or replaces it.
-- Dirty baseline plus mixed-fleet request → keep board, disable cross-vendor dispatch until a clean checkpoint.
+- Dirty baseline plus mixed-fleet request → preserve the baseline and let the content-aware manifest prove only changes made during the admitted dispatch. Prefer a clean checkpoint for human inspection, but disable dispatch only when the repository or task scope cannot be fingerprinted safely.

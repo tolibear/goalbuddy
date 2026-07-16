@@ -88,6 +88,7 @@ ${populatedWorker ? `  - id: T043
 const DONE_RECEIPT = {
   result: "done",
   task_id: "T001",
+  board_path: "docs/goals/one/state.yaml",
   changed_files: ["src/widget.mjs"],
   commands: [
     { cmd: "npm test", status: "pass" },
@@ -97,6 +98,15 @@ const DONE_RECEIPT = {
   summary: "widget adjusted",
   harness: "codex",
 };
+
+function failureReport(result) {
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
+function failureText(result) {
+  return failureReport(result).error;
+}
 
 function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hydrateSha256 = null) {
   const receiptPath = join(root, "receipt.json");
@@ -288,7 +298,7 @@ function makeBindingProof(root) {
   for (const args of [
     ["init", "-q"],
     ["add", "goalbuddy/scripts/check-goal-state.mjs"],
-    ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "commit", "-qm", "fixture checker"],
+    ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture checker"],
   ]) {
     const result = spawnSync("git", args, { cwd: sourceRoot, encoding: "utf8" });
     if (result.status !== 0) throw new Error(result.stderr || result.stdout);
@@ -415,7 +425,7 @@ test("apply-receipt rejects contradictory receipt identity without writing", () 
       const before = readFileSync(boardPath, "utf8");
       const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
       assert.equal(result.status, 1, result.stdout);
-      assert.match(result.stderr, /Receipt (?:task_id|board_path)/);
+      assert.match(failureText(result), /Receipt (?:task_id|board_path)/);
       assert.equal(readFileSync(boardPath, "utf8"), before);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -430,7 +440,7 @@ test("apply-receipt rejects a stale expected board digest without writing", () =
     const before = readFileSync(boardPath, "utf8");
     const result = runApply(root, ["--task", "T001", "--expected-state-digest", "0".repeat(64), "--activate", "T999"], DONE_RECEIPT);
     assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stderr, /state\.yaml digest drift/);
+    assert.match(failureText(result), /state\.yaml digest drift/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -448,10 +458,110 @@ test("apply-receipt requires a digest for every canonical typed transition", () 
       encoding: "utf8",
     });
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /requires --expected-state-digest/);
+    assert.match(failureText(result), /requires --expected-state-digest/);
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ordinary receipt admission rejects the lifecycle matrix without changing board bytes", () => {
+  const cases = [
+    {
+      name: "omitted successor",
+      args: ["--task", "T001"],
+      receipt: DONE_RECEIPT,
+      errorCode: "SUCCESSOR_NOT_QUEUED",
+    },
+    {
+      name: "successor none",
+      args: ["--task", "T001", "--activate", "none"],
+      receipt: DONE_RECEIPT,
+      errorCode: "SUCCESSOR_NOT_QUEUED",
+    },
+    {
+      name: "self successor",
+      args: ["--task", "T001", "--activate", "T001"],
+      receipt: DONE_RECEIPT,
+      errorCode: "SUCCESSOR_NOT_QUEUED",
+    },
+    {
+      name: "removed status flag",
+      args: ["--task", "T001", "--activate", "T999", "--status", "done"],
+      receipt: DONE_RECEIPT,
+      errorCode: "INVALID_ARGUMENT",
+    },
+    {
+      name: "missing receipt identity",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: { ...DONE_RECEIPT, board_path: undefined },
+      errorCode: "RECEIPT_IDENTITY_MISMATCH",
+    },
+    {
+      name: "unknown receipt result",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: { ...DONE_RECEIPT, result: "skipped" },
+      errorCode: "INVALID_ARGUMENT",
+    },
+    {
+      name: "unknown successor",
+      args: ["--task", "T001", "--activate", "T002"],
+      receipt: DONE_RECEIPT,
+      errorCode: "SUCCESSOR_NOT_QUEUED",
+    },
+    {
+      name: "failed dispatch envelope",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: { ok: false, receipt: DONE_RECEIPT, scope_check: { status: "violations" } },
+      errorCode: "DISPATCH_SCOPE_FAILED",
+    },
+    {
+      name: "scope-violating dispatch envelope",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: { ok: true, receipt: DONE_RECEIPT, scope_check: { status: "violations" } },
+      errorCode: "DISPATCH_SCOPE_FAILED",
+    },
+    {
+      name: "non-current source",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: DONE_RECEIPT,
+      errorCode: "TASK_NOT_CURRENT_ACTIVE",
+      mutate(text) {
+        return text
+          .replace("active_task: T001", "active_task: T999")
+          .replace('    status: active\n    objective: "Adjust the widget."', '    status: queued\n    objective: "Adjust the widget."')
+          .replace('    status: queued\n    objective: "Audit the outcome."', '    status: active\n    objective: "Audit the outcome."');
+      },
+    },
+    {
+      name: "done successor",
+      args: ["--task", "T001", "--activate", "T999"],
+      receipt: DONE_RECEIPT,
+      errorCode: "SUCCESSOR_NOT_QUEUED",
+      mutate(text) {
+        return text.replace(
+          '    status: queued\n    objective: "Audit the outcome."\n    receipt: null',
+          '    status: done\n    objective: "Audit the outcome."\n    receipt:\n      result: done\n      decision: approved\n      summary: "Prior audit completed."',
+        );
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const { root } = makeBoard();
+    try {
+      const statePath = join(root, "docs", "goals", "one", "state.yaml");
+      if (scenario.mutate) writeFileSync(statePath, scenario.mutate(readFileSync(statePath, "utf8")));
+      const before = readFileSync(statePath, "utf8");
+      const result = runApply(root, scenario.args, scenario.receipt);
+      const report = failureReport(result);
+      assert.equal(report.error_code, scenario.errorCode, scenario.name);
+      assert.equal(result.stderr, "", scenario.name);
+      assert.equal(result.stdout.trim().split("\n").length, 1, scenario.name);
+      assert.equal(readFileSync(statePath, "utf8"), before, scenario.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -528,7 +638,7 @@ test("apply-receipt hydrates a placeholder from the exact Judge worker_package",
 test("apply-receipt rejects task-card id mismatch, populated Worker packages, and unknown fields without writing", () => {
   for (const testCase of [
     { name: "id mismatch", board: { placeholder: true }, card: { ...HYDRATED_T042, id: "T043" }, pattern: /does not match --hydrate-task T042/ },
-    { name: "non-placeholder", board: {}, card: { ...HYDRATED_T042, id: "T001", status: "active" }, hydrate: "T001", pattern: /not a queued receipt-free Worker placeholder/ },
+    { name: "source cannot be its own hydrated successor", board: {}, card: { ...HYDRATED_T042, id: "T001", status: "active" }, hydrate: "T001", pattern: /distinct from the source/ },
     { name: "populated Worker package", board: { populatedWorker: true }, card: { ...HYDRATED_T042, id: "T043" }, hydrate: "T043", pattern: /not a placeholder: allowed_files is already populated/ },
     { name: "unsupported field", board: { placeholder: true }, card: { ...HYDRATED_T042, arbitrary_board_edit: true }, pattern: /unsupported fields: arbitrary_board_edit/ },
     { name: "product approval phrase", board: { placeholder: true }, card: { ...HYDRATED_T042, approval_phrase: "Approve production." }, pattern: /unsupported fields: approval_phrase/ },
@@ -541,7 +651,7 @@ test("apply-receipt rejects task-card id mismatch, populated Worker packages, an
       const hydrate = testCase.hydrate ?? "T042";
       const result = runApply(root, ["--task", "T001", "--hydrate-task", hydrate, "--activate", hydrate], DONE_RECEIPT, null, testCase.card);
       assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
-      assert.match(result.stderr, testCase.pattern);
+      assert.match(failureText(result), testCase.pattern);
       assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -555,7 +665,7 @@ test("apply-receipt rejects a task card whose bytes do not match the approved SH
     const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
     const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], DONE_RECEIPT, null, HYDRATED_T042, "0".repeat(64));
     assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stderr, /SHA-256 mismatch/);
+    assert.match(failureText(result), /SHA-256 mismatch/);
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -569,7 +679,7 @@ test("apply-receipt restores the original board when hydrated content fails the 
     const invalidReceipt = { ...DONE_RECEIPT, commands: [{ cmd: "npm test", status: "fail" }] };
     const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], invalidReceipt, null, HYDRATED_T042);
     assert.equal(result.status, 1, result.stdout);
-    assert.equal(JSON.parse(result.stdout).reverted, true);
+    assert.equal(JSON.parse(result.stdout).error_code, "CHECKER_FAILED");
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -584,7 +694,7 @@ test("apply-receipt rejects duplicate amendment task ids before writing", () => 
       { ...AMENDMENT_TASKS[0], id: "T999" },
     ]);
     assert.equal(result.status, 1, result.stdout);
-    assert.match(result.stderr, /Task T999 already exists/);
+    assert.match(failureText(result), /Task T999 already exists/);
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -612,7 +722,7 @@ test("apply-receipt reverts the board when the transition is invalid", () => {
     assert.equal(result.status, 1, result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
-    assert.ok(report.checker_errors.length > 0);
+    assert.equal(report.error_code, "CHECKER_FAILED");
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -632,11 +742,11 @@ test("apply-receipt rejects out-of-scope work with typed successor recovery guid
     const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
-    assert.match(report.checker_errors.join("\n"), /changed file outside allowed_files: src\/outside\.mjs/);
-    assert.match(report.recovery_guidance.join("\n"), /Do not widen or retry the active task/);
-    assert.match(report.recovery_guidance.join("\n"), /apply_amendment/);
-    assert.match(report.recovery_guidance.join("\n"), /apply_hydration/);
-    assert.match(report.recovery_guidance.join("\n"), /fully scoped successor/);
+    assert.equal(report.error_code, "CHECKER_FAILED");
+    assert.match(report.error, /Do not widen or retry the active task/);
+    assert.match(report.error, /apply_amendment/);
+    assert.match(report.error, /apply_hydration/);
+    assert.match(report.error, /fully scoped successor/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
 
     const human = spawnSync(process.execPath, [
@@ -652,9 +762,9 @@ test("apply-receipt rejects out-of-scope work with typed successor recovery guid
       "T999",
     ], { cwd: root, encoding: "utf8" });
     assert.equal(human.status, 1, human.stderr || human.stdout);
-    assert.match(human.stdout, /Recovery guidance:/);
-    assert.match(human.stdout, /apply_amendment/);
-    assert.match(human.stdout, /apply_hydration/);
+    assert.match(human.stderr, /^CHECKER_FAILED:/);
+    assert.match(human.stderr, /apply_amendment/);
+    assert.match(human.stderr, /apply_hydration/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -690,7 +800,8 @@ test("apply-receipt rejects done receipts that do not cover every declared verif
       assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
       const report = JSON.parse(result.stdout);
       assert.equal(report.ok, false, testCase.name);
-      assert.match(report.checker_errors.join("\n"), /missing passing verification command/i, testCase.name);
+      assert.equal(report.error_code, "CHECKER_FAILED", testCase.name);
+      assert.match(report.error, /missing passing verification command/i, testCase.name);
       assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before, testCase.name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -911,7 +1022,7 @@ test("completion preserves byte-identical done history while admitting only its 
     };
     const implicit = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
     assert.equal(implicit.status, 1);
-    assert.match(JSON.parse(implicit.stdout).immutable_history_rejection, /explicit --allow-immutable-history/);
+    assert.match(JSON.parse(implicit.stdout).error, /explicit --allow-immutable-history/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
 
     const result = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest, "--allow-immutable-history"], receipt);
@@ -948,7 +1059,7 @@ test("immutable-history compatibility rejects checker errors that touch the live
     });
     assert.equal(result.status, 1, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
-    assert.match(report.immutable_history_rejection, /live or missing task T999/);
+    assert.match(report.error, /live or missing task T999/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -996,7 +1107,7 @@ test("rebind updates only checks.goalbuddy_binding under the same immutable-hist
     writeFileSync(badInstalledChecker, "different bytes\n");
     const rejected = runRebind(root, ["--expected-state-digest", digest, "--allow-immutable-history"], binding, [badInstalledChecker]);
     assert.equal(rejected.status, 1);
-    assert.match(rejected.stderr, /Installed checker bytes do not match binding/);
+    assert.match(failureText(rejected), /Installed checker bytes do not match binding/);
     assert.equal(readFileSync(boardPath, "utf8"), before);
 
     const result = runRebind(root, ["--expected-state-digest", digest, "--allow-immutable-history"], binding, installedCheckerPaths);
@@ -1061,7 +1172,10 @@ test("concurrent same-digest completion writers serialize and cannot overwrite e
       encoding: "utf8",
     });
     assert.equal(secondResult.status, 1, secondResult.stdout);
-    assert.match(secondResult.stderr, /Another GoalBuddy transition is already in progress/);
+    const secondFailure = failureReport(secondResult);
+    assert.equal(secondFailure.error_code, "TRANSITION_LOCK_BUSY");
+    assert.match(secondFailure.error, /Another GoalBuddy transition is already in progress/);
+    assert.match(secondFailure.next_action, /Wait.*resume.*fresh state digest/i);
 
     const firstResult = await firstResultPromise;
     assert.equal(firstResult.status, 0, firstResult.stderr || firstResult.stdout);

@@ -11,9 +11,9 @@ const cli = resolve("internal/cli/goal-maker.mjs");
 test("prompt strictly renders the active task across an exact malformed historical receipt", () => {
   const fixture = createGoal(legacyBoard());
   try {
-    const strict = runPrompt(fixture.goalDir, []);
+    const strict = runPrompt(fixture.goalDir, ["--expected-state-digest", digest(fixture.state), "--json"]);
     assert.equal(strict.status, 1);
-    assert.match(strict.stderr, /Could not parse line/);
+    assert.equal(JSON.parse(strict.stdout).error_code, "CHECKER_FAILED");
 
     const result = runPrompt(fixture.goalDir, compatibilityArgs(fixture.state));
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -44,7 +44,7 @@ test("prompt immutable-history path rejects a stale expected digest", () => {
       "--json",
     ]);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /state\.yaml digest drift/);
+    assert.match(JSON.parse(result.stdout).error, /state\.yaml digest drift/);
     assert.equal(readFileSync(fixture.statePath, "utf8"), fixture.state);
   } finally {
     fixture.cleanup();
@@ -68,7 +68,7 @@ test("prompt immutable-history path rejects changed historical bytes", () => {
       "--json",
     ]);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /state\.yaml digest drift/);
+    assert.match(JSON.parse(result.stdout).error, /state\.yaml digest drift/);
     assert.equal(readFileSync(fixture.statePath, "utf8"), changed);
   } finally {
     fixture.cleanup();
@@ -80,7 +80,7 @@ test("prompt immutable-history path rejects malformed active task bytes", () => 
   try {
     const result = runPrompt(fixture.goalDir, compatibilityArgs(fixture.state));
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Could not parse line|Expected mapping|active-task mismatch/);
+    assert.match(JSON.parse(result.stdout).error, /Could not parse line|Expected mapping|active-task mismatch|live or missing task/);
   } finally {
     fixture.cleanup();
   }
@@ -91,8 +91,8 @@ test("prompt immutable-history path rejects live-tail checker errors", () => {
   try {
     const result = runPrompt(fixture.goalDir, compatibilityArgs(fixture.state));
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Immutable-history prompt projection rejected/);
-    assert.match(result.stderr, /not confined to exactly one task|touches live or missing task/);
+    assert.match(JSON.parse(result.stdout).error, /Immutable-history prompt projection rejected/);
+    assert.match(JSON.parse(result.stdout).error, /not confined to exactly one task|touches live or missing task/);
   } finally {
     fixture.cleanup();
   }
@@ -105,11 +105,11 @@ test("prompt keeps the normal checker-green strict rendering path", () => {
     .replace("        status: retained", "          status: retained");
   const fixture = createGoal(state);
   try {
-    const result = runPrompt(fixture.goalDir, ["--json"]);
+    const result = runPrompt(fixture.goalDir, ["--expected-state-digest", digest(state), "--json"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.metadata.projection_mode, "strict_full_state");
-    assert.equal(report.metadata.checker_status, null);
+    assert.equal(report.metadata.checker_status, "pass");
     assert.equal(report.metadata.immutable_history, null);
     assert.equal(report.task.id, "T082");
   } finally {

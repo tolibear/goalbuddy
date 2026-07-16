@@ -16,6 +16,12 @@ const canonicalAgentsTemplate = readFileSync("goalbuddy/templates/agents.md", "u
 const pluginAgentsTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/agents.md", "utf8");
 const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
 const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
+const readme = readFileSync("README.md", "utf8");
+const changelog = readFileSync("CHANGELOG.md", "utf8");
+const releaseNotes = readFileSync("docs/releases/0.5.0.md", "utf8");
+const receiptSpec = readFileSync("docs/spec/receipt-v1.md", "utf8");
+const adaptiveSpec = readFileSync("docs/spec/adaptive-execution-strategy.md", "utf8");
+const compilerReference = readFileSync("codex-goal-compiler/references/goalbuddy-compiler.md", "utf8");
 
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
@@ -180,6 +186,27 @@ test("one-location board edits stay direct only when no board read is needed", (
   assert.match(canonicalExecution, /do not reclassify it as a canonical typed transition or narrow direct edit/);
 });
 
+test("current public contracts agree on typed transition ownership and exact dispatch admission", () => {
+  assert.equal(pluginExecution, canonicalExecution);
+
+  for (const text of [canonicalExecution, readme, changelog, releaseNotes, receiptSpec, adaptiveSpec, compilerReference]) {
+    assert.match(text, /typed transition/i);
+    assert.doesNotMatch(text, /Keeper remains mandatory for every board read and nontrivial mutation/);
+    assert.doesNotMatch(text, /gives the receipt to Board Keeper/);
+    assert.doesNotMatch(text, /unless parallel write scopes are provably disjoint/);
+  }
+
+  assert.match(canonicalExecution, /--expected-state-digest <sha256>/);
+  assert.doesNotMatch(canonicalExecution, /--status done/);
+  assert.match(canonicalExecution, /content-aware before\/after manifest/);
+  assert.match(readme, /match receipt `changed_files` exactly/);
+  assert.match(releaseNotes, /one exact checker-admitted current task/);
+  assert.match(receiptSpec, /The receipt's `result` is the sole source of terminal status/);
+  assert.match(adaptiveSpec, /subagent receipts pass losslessly to the\n   deterministic typed transition/);
+  assert.match(compilerReference, /A dirty baseline is supported and preserved/);
+  assert.match(changelog, /Public failures are compact and actionable/);
+});
+
 test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
     assert.match(text, /## Quiet Control Plane/);
@@ -340,6 +367,7 @@ test("Codex install keeps Goal Prep in the plugin and removes compatibility skil
     const codexHome = join(root, "codex-home");
     const env = {
       ...process.env,
+      HOME: root,
       PATH: `${fakeCodexBin(root)}${delimiter}${process.env.PATH}`,
     };
     const install = spawnSync(process.execPath, [

@@ -115,7 +115,7 @@ Any receipt may include an optional `harness` field (for example `codex` or `cla
 
 ### Recovery Audit
 
-A genuine recovery boundary is any cold start, new session, post-compaction recovery, cross-harness handoff, or return after interrupted closeout, verification, or Worker execution. It is not an ordinary transition immediately after the current PM received a validated Keeper receipt for the closeout and successor activation in the same uninterrupted context.
+A genuine recovery boundary is any cold start, new session, post-compaction recovery, cross-harness handoff, or return after interrupted closeout, verification, or Worker execution. It is not an ordinary transition immediately after the current PM received a validated direct-transition result for the closeout and successor activation in the same uninterrupted context.
 
 At every genuine recovery boundary:
 
@@ -153,7 +153,7 @@ The PM should normally see only the compact resume projection, active task summa
 For canonical typed transitions, invoke the bundled/public deterministic surface directly with the latest validated digest:
 
 ```bash
-goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --status done --activate T042 --json
+goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --activate T042 --json
 goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --add-tasks task-cards.json --activate T046 --json
 goalbuddy receipt docs/goals/<slug> --task T041 --receipt receipt.json --expected-state-digest <sha256> --hydrate-task T042 --activate T042 --json
 goalbuddy wait docs/goals/<slug> --task T042 --receipt wait.json --expected-state-digest <sha256> --json
@@ -187,13 +187,13 @@ Keeper and Ledger are required installed control-plane roles. If a genuinely Kee
 A single board may also mix harnesses within one run: the PM stays where it is and dispatches an individual task to a different vendor's agent — for example a Codex worker on a Claude Code board, or a Claude judge on a Codex board — using the bundled dispatcher:
 
 ```bash
-node <skill-path>/scripts/dispatch-task.mjs docs/goals/<slug> --to codex
+node <skill-path>/scripts/dispatch-task.mjs docs/goals/<slug> --to codex --expected-state-digest <sha256>
 ```
 
 Rules for external dispatch:
 
 - Dispatch to an external harness only when the user asked for a specific harness or model, or the task card carries an optional `harness:` field naming one. Never dispatch externally by default — it spends the user's quota on another vendor.
-- The dispatcher renders the task prompt, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and mechanically verifies write scope with git: worker changes must match `allowed_files`, and read-only roles must change nothing.
+- The dispatcher admits exactly the checker-validated active task at the expected digest, rereads the board immediately before launch, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and compares it with a content-aware before/after manifest. Worker net changes must match `allowed_files` and the receipt's `changed_files` exactly; GoalBuddy control-file writes, out-of-root claims, duplicate or unchanged claims, and any read-only-role write fail closed. Existing dirty files are fingerprinted, so a second edit during dispatch is visible.
 - The dispatcher never edits `state.yaml`. The PM persists the reported receipt — including its `harness` stamp — and applies it once through the direct digest-bound typed transition, just as with any native-agent receipt.
 - Do not mark a dispatched task `done` unless the dispatch report's scope check is clean and the receipt's verify commands pass. A scope violation means inspect the working tree, decide what to keep, and record a blocked receipt with the facts.
 - If the target CLI is missing, unauthenticated, or times out, fall back to the normal path: PM fallback or the required GoalBuddy agent, per the dispatch rules above.

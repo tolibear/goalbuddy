@@ -92,7 +92,9 @@ class CompilerContractTests(unittest.TestCase):
             "atomic_exact_human_wait_resume",
             "atomic_goal_completion",
             "Five-proof mapping",
-            "clean Git baseline",
+            "content-aware before/after manifest",
+            "dirty baseline is supported and preserved",
+            "exact equality",
             "goal_worker_ultra",
             "Do not invent budgets",
         ):

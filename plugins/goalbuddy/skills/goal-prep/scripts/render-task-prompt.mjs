@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
+import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -25,24 +26,43 @@ if (isDirectRun()) {
       console.log(formatPrompt(result.payload));
     }
   } catch (error) {
-    console.error(error.message);
+    printPublicFailure(error, { json: process.argv.slice(2).includes("--json") });
     process.exitCode = 1;
   }
 }
 
 export function renderTaskPrompt(options) {
+  const admitted = admitCurrentTask(options);
+  return { json: options.json, payload: admitted.payload };
+}
+
+export function admitCurrentTask(options) {
+  if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest || "")) {
+    throw publicError("STALE_STATE_DIGEST", "prompt requires --expected-state-digest with exactly 64 lowercase hex characters.");
+  }
   const boardPath = resolveBoardPath(options);
   const board = loadBoard(boardPath, options);
   const task = selectTask(board, options.taskId);
+  const activeTasks = board.tasks.filter((candidate) => candidate?.status === "active");
+  if (board.goal?.status !== "active") {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Prompt requires goal.status active; got ${board.goal?.status || "null"}.`);
+  }
+  if (activeTasks.length !== 1 || activeTasks[0]?.id !== board.activeTask) {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Prompt requires exactly one active task matching active_task ${board.activeTask || "null"}; found ${activeTasks.map((candidate) => candidate?.id).filter(Boolean).join(", ") || "none"}.`);
+  }
+  if (options.taskId && options.taskId !== board.activeTask) {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Task ${options.taskId} is not the current active task ${board.activeTask}.`);
+  }
+  if (task.id !== board.activeTask || task.status !== "active" || task.receipt !== null) {
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Prompt requires current active receipt-free task ${board.activeTask}; got ${task.id} (${task.status}, receipt ${task.receipt === null ? "null" : "present"}).`);
+  }
   const role = normalizeRole(task.type);
   const defaults = ROLE_DEFAULTS[role] || ROLE_DEFAULTS.pm;
   const reasoning = normalizeReasoning(task.reasoning_hint, defaults.reasoning);
   const warnings = promptWarnings(board, task);
   const allowedFiles = stringList(task.allowed_files);
 
-  return {
-    json: options.json,
-    payload: {
+  const payload = {
       metadata: {
         recommended_agent: defaults.agent,
         required_spawn_agent_type: defaults.agent === "PM" ? null : defaults.agent,
@@ -76,7 +96,13 @@ export function renderTaskPrompt(options) {
         expected_output: stringList(task.expected_output),
       },
       receipt_schema: receiptSchema(role),
-    },
+    };
+  return {
+    board,
+    task,
+    role,
+    harness: typeof task.harness === "string" ? task.harness.trim() : "",
+    payload,
   };
 }
 
@@ -94,17 +120,20 @@ export function parseArgs(args) {
     if (arg === "--json") {
       options.json = true;
     } else if (arg === "--task") {
-      options.taskId = args[++index] || "";
+      options.taskId = requiredOptionValue(args, index, arg);
+      index += 1;
     } else if (arg.startsWith("--task=")) {
-      options.taskId = arg.slice("--task=".length);
+      options.taskId = joinedOptionValue(arg, "--task");
     } else if (arg === "--board") {
-      options.boardPath = args[++index] || "";
+      options.boardPath = requiredOptionValue(args, index, arg);
+      index += 1;
     } else if (arg.startsWith("--board=")) {
-      options.boardPath = arg.slice("--board=".length);
+      options.boardPath = joinedOptionValue(arg, "--board");
     } else if (arg === "--expected-state-digest") {
-      options.expectedStateDigest = args[++index] || "";
+      options.expectedStateDigest = requiredOptionValue(args, index, arg);
+      index += 1;
     } else if (arg.startsWith("--expected-state-digest=")) {
-      options.expectedStateDigest = arg.slice("--expected-state-digest=".length);
+      options.expectedStateDigest = joinedOptionValue(arg, "--expected-state-digest");
     } else if (arg === "--allow-immutable-history") {
       options.allowImmutableHistory = true;
     } else if (arg === "--parallel-plan") {
@@ -134,22 +163,15 @@ export function loadBoard(boardPath, options = {}) {
   const stateText = readFileSync(boardPath, "utf8");
   const stateDigest = sha256(stateText);
   if (options.expectedStateDigest && options.expectedStateDigest !== stateDigest) {
-    throw new Error(`state.yaml digest drift: expected ${options.expectedStateDigest}, got ${stateDigest}.`);
-  }
-  if (!options.allowImmutableHistory) {
-    return boardFromDocument(boardPath, stateText, parseGoalStateText(stateText, { allowFallback: false }), {
-      mode: "strict_full_state",
-      checkerStatus: null,
-      immutableHistory: null,
-    });
+    throw publicError("STALE_STATE_DIGEST", `state.yaml digest drift: expected ${options.expectedStateDigest}, got ${stateDigest}.`);
   }
   const checker = checkExactSnapshot(boardPath, stateText);
   if (checker.state_digest !== stateDigest) {
-    throw new Error("GoalBuddy checker did not validate the exact state.yaml snapshot supplied to prompt rendering.");
+    throw publicError("CHECKER_FAILED", "GoalBuddy checker did not validate the exact state.yaml snapshot supplied to prompt rendering.");
   }
   const stateAfterCheck = readFileSync(boardPath, "utf8");
   if (stateAfterCheck !== stateText) {
-    throw new Error("state.yaml changed while GoalBuddy was validating the immutable-history prompt projection.");
+    throw publicError("STALE_STATE_DIGEST", "state.yaml changed while GoalBuddy was validating the prompt snapshot.");
   }
 
   if (checker.ok === true) {
@@ -160,6 +182,11 @@ export function loadBoard(boardPath, options = {}) {
     });
   }
 
+  if (!options.allowImmutableHistory) {
+    const detail = checker.errors?.slice(0, 3).join("; ") || "checker rejected the board";
+    throw publicError("CHECKER_FAILED", `GoalBuddy checker rejected the exact prompt snapshot: ${detail}`);
+  }
+
   const compatibility = immutableHistoryCompatibility({
     original: stateText,
     candidate: stateAfterCheck,
@@ -167,10 +194,10 @@ export function loadBoard(boardPath, options = {}) {
     candidateReport: checker,
   });
   if (!compatibility.ok) {
-    throw new Error(`Immutable-history prompt projection rejected: ${compatibility.reason}`);
+    throw publicError("CHECKER_FAILED", `Immutable-history prompt projection rejected: ${compatibility.reason}`);
   }
   if (options.taskId && options.taskId !== checker.active_task) {
-    throw new Error(`Immutable-history prompt projection may render only active task ${checker.active_task}; got ${options.taskId}.`);
+    throw publicError("TASK_NOT_CURRENT_ACTIVE", `Immutable-history prompt projection may render only active task ${checker.active_task}; got ${options.taskId}.`);
   }
 
   const document = parseActiveTaskProjection(stateText, checker.active_task);
@@ -260,7 +287,7 @@ function parseActiveTaskProjection(stateText, activeTaskId) {
 }
 
 function promptUsage() {
-  return "Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml] [--expected-state-digest <sha256>] [--allow-immutable-history]";
+  return "Usage: goalbuddy prompt <goal-root> [--task T###] [--board path/to/state.yaml] --expected-state-digest <sha256> [--allow-immutable-history]";
 }
 
 export function resolveBoardPath(options) {
@@ -382,10 +409,10 @@ function stringList(value) {
 }
 
 function changedFilesPathStyle(allowedFiles) {
-  if (!allowedFiles.length) return "board-relative";
+  if (!allowedFiles.length) return "repository-relative";
   const absoluteCount = allowedFiles.filter((path) => /^\//.test(path)).length;
   if (absoluteCount === allowedFiles.length) return "absolute";
-  if (absoluteCount === 0) return "board-relative";
+  if (absoluteCount === 0) return "repository-relative";
   return "mirror-each-allowed-file";
 }
 
