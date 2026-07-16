@@ -100,7 +100,11 @@ function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
       "if \"%~1\"==\"features\" if \"%~2\"==\"list\" (",
       `  echo goals                               under development  ${goalsEnabled ? "true" : "false"}& exit /b 0`,
       ")",
-      "if \"%~1\"==\"plugin\" if \"%~2\"==\"marketplace\" if \"%~3\"==\"add\" echo Added marketplace goalbuddy& exit /b 0",
+      "if \"%~1\"==\"plugin\" if \"%~2\"==\"marketplace\" if \"%~3\"==\"remove\" (type nul > \"%HOME%\\.goalbuddy-marketplace-removed\"& echo Removed marketplace goalbuddy& exit /b 0)",
+      "if \"%~1\"==\"plugin\" if \"%~2\"==\"marketplace\" if \"%~3\"==\"add\" (",
+      "  if \"%GOALBUDDY_TEST_REQUIRE_MARKETPLACE_REMOVE%\"==\"1\" if not exist \"%HOME%\\.goalbuddy-marketplace-removed\" (echo marketplace goalbuddy is already added from a different source 1>&2& exit /b 1)",
+      "  echo Added marketplace goalbuddy& exit /b 0",
+      ")",
       "exit /b 2",
       "",
     ].join("\r\n");
@@ -115,7 +119,14 @@ function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
       "if [ \"$1\" = \"features\" ] && [ \"$2\" = \"list\" ]; then",
       `  echo "goals                               under development  ${goalsEnabled ? "true" : "false"}"; exit 0`,
       "fi",
+      "if [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"marketplace\" ] && [ \"$3\" = \"remove\" ]; then",
+      "  : > \"$HOME/.goalbuddy-marketplace-removed\"",
+      "  echo \"Removed marketplace goalbuddy\"; exit 0",
+      "fi",
       "if [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"marketplace\" ] && [ \"$3\" = \"add\" ]; then",
+      "  if [ \"$GOALBUDDY_TEST_REQUIRE_MARKETPLACE_REMOVE\" = \"1\" ] && [ ! -f \"$HOME/.goalbuddy-marketplace-removed\" ]; then",
+      "    echo \"marketplace goalbuddy is already added from a different source\" >&2; exit 1",
+      "  fi",
       "  echo \"Added marketplace goalbuddy\"; exit 0",
       "fi",
       "exit 2",
@@ -1643,12 +1654,16 @@ test("update replaces stale marketplace provenance and rejects a different sourc
       `source = ${JSON.stringify(localSource)}`,
       "",
     ].join("\n"));
-    const env = fakeCodexEnv(root);
+    const env = {
+      ...fakeCodexEnv(root),
+      GOALBUDDY_TEST_REQUIRE_MARKETPLACE_REMOVE: "1",
+    };
 
     const repaired = runGoalMaker(["update", "--target", "codex", "--codex-home", codexHome, "--json"], { env });
     assert.equal(repaired.status, 0, repaired.stderr || repaired.stdout);
     assert.equal(JSON.parse(repaired.stdout).marketplace_source, realpathSync("."));
     assert.match(readFileSync(configPath, "utf8"), new RegExp(`source = ${escapeRegExp(JSON.stringify(realpathSync(".")))}`));
+    assert.equal(existsSync(join(root, ".goalbuddy-marketplace-removed")), true);
 
     const overridden = runGoalMaker([
       "update",

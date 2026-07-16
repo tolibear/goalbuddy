@@ -1493,6 +1493,13 @@ function installPlugin({ quiet = false } = {}) {
   const pluginManifest = JSON.parse(readFileSync(pluginManifestPath, "utf8"));
   const pluginCachePath = pluginCacheRoot(pluginManifest.version);
   mkdirSync(codexHome(), { recursive: true });
+  const configuredSource = marketplaceSourceFromConfig();
+  if (configuredSource && configuredSource !== source) {
+    const removed = runCodex(["plugin", "marketplace", "remove", pluginName, "--json"]);
+    if (!removed.ok) {
+      throw new Error(`Failed to replace Codex plugin marketplace: ${firstLine(removed.stderr || removed.stdout)}`);
+    }
+  }
   const marketplace = runCodex(["plugin", "marketplace", "add", source]);
   if (!marketplace.ok) {
     throw new Error(`Failed to add Codex plugin marketplace: ${firstLine(marketplace.stderr || marketplace.stdout)}`);

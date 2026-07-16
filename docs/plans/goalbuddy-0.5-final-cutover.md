@@ -27,6 +27,8 @@ After this cutover, Daniel can invoke one installed `codex-goal-compiler` skill 
   Evidence: Five canonical agent TOMLs replace `sandbox_mode` with `default_permissions`; Worker also defines the `workspace-network` profile. These exact semantics must be ported before activation.
 - Observation: The restored public router and the 0.5 runtime remain cleanly separated by compiler contract v1.
   Evidence: Compiler tests cover all route exits, backend-specific progressive disclosure, exact installed Goal Prep binding, additive capabilities, native-goal isolation, and a stop-before-execution GoalBuddy handoff; the complete candidate suite passes.
+- Observation: Bun 1.3.14 preserves a duplicate local dependency key when `bun add -g <new-path>` is used over an existing same-name local package, and the initial 0.5 installer did not replace an already-named Codex marketplace sourced from a different checkout.
+  Evidence: The first global add left both GoalBuddy paths in `bun.lock`; explicit remove/re-add corrected the package binding. Both live install attempts then rolled back cleanly on Codex's "already added from a different source" rejection. The candidate now removes that named stale marketplace inside the same activation transaction before adding the verified source, with a regression test that fails unless removal occurs first.
 
 ## Decision Log
 
