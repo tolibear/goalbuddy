@@ -1,180 +1,292 @@
 ---
 name: codex-goal-compiler
-compatibility: "Python 3 plus GoalBuddy compiler contract v1; compiles new GoalBuddy v2 boards for Codex or Claude Code."
-description: "Compiles a decision-complete specification, accepted implementation plan, or agreed conversation contract into a new validated GoalBuddy board. Use for: 'compile this spec into a GoalBuddy board', 'turn this accepted plan into a goal board', 'use Codex Goal Compiler', or 'make a board from what we decided'. Does not choose among direct work, planning, native goals, Omega, recurring automation, or existing-board recovery; does not invent missing product decisions, implement the work, mutate an existing board, or start /goal."
+compatibility: "Codex with native /goal support for standalone goals; Python 3 for bundled validators; GoalBuddy compiler contract v1 for board compilation; Claude Code supported for direct/GoalBuddy routing or later Codex handoff."
+description: "Turns agreed conversation context, an accepted plan, review findings, or a completed implementation into the correct Codex goal route. Use for: 'turn this into a goal', 'goalize this', 'make a goal.md', 'put this review round in goal mode', 'compile this plan into a goal', 'make a GoalBuddy board', or 'what kind of goal should this be?'. Routes among direct work, planning or Goal Prep, a standalone native /goal goal.md, GoalBuddy, and recurring automation. Do not use merely to execute a small change, invent an unaccepted plan, or create recurring automation unless the user explicitly asks to goalize or route the work."
 metadata:
   version: "4.0.0"
-  short-description: "Decision-complete source → validated GoalBuddy board"
+  short-description: "Conversation or plan → the right Codex goal route"
 ---
 
 # Codex Goal Compiler
 
-Compile one decision-complete source contract into one new validated GoalBuddy board. Mine accepted decisions from the current conversation and named artifacts so the user does not have to restate them.
+Use one front door to turn agreed work into the correct execution form. Mine the current conversation, accepted plans, review findings, repository facts, and explicit user decisions before asking the user to restate them.
 
-The compiler has one public transformation:
+The compiler may route to:
 
-```text
-accepted spec | accepted plan | agreed conversation contract
-                              ↓
-                 docs/goals/<slug>/
-```
+1. **Direct work** — no goal file.
+2. **Planning or Goal Prep first** — the outcome is not yet ready to compile.
+3. **Standalone native Codex goal** — one durable `goal.md`, no GoalBuddy board.
+4. **GoalBuddy board** — durable tasks, receipts, roles, resumability, and multi-workstream state.
+5. **Loop, Automation, or Schedule** — recurring or event-driven work.
 
-It does not choose an execution system. It does not plan the product, implement it, start `/goal`, repair an existing board, or replace GoalBuddy's schema.
+The user should not need to remember separate compiler skills or choose the backend before the context has been inspected.
 
-## Trigger boundary
+## Trigger boundary and intended use
 
-Use this skill when the user explicitly asks to compile settled work into a GoalBuddy board, including:
+Use this skill when the user wants agreed work converted into a durable goal form or wants help deciding which goal backend fits. The work may come from the current conversation, an accepted plan, a completed board, a review, a PR or diff, or another owner-approved artifact.
 
-- a large accepted product specification;
-- an accepted implementation or migration plan;
-- the current conversation after its material decisions are settled;
-- a small decision-complete plan when the user explicitly wants a board.
+Do not trigger merely because the user asks for a small implementation, a new plan, or recurring automation. Those are outputs this skill may recommend after an explicit goalization or routing request; they are not reasons to intercept ordinary work.
 
-For an explicit small request, compile the smallest honest board that still satisfies the source contract, oracle, and completion-proof floor; otherwise return `not_compilable`. Do not second-guess the owner's request by routing elsewhere.
+Near-misses:
 
-Do not use it for:
+- A clear one-turn fix with no request for goal mode → direct implementation, not goal compilation.
+- A vague outcome with no accepted definition of done → planning or Goal Prep, not a polished goal artifact.
+- A recurring procedure with no request to goalize it → loop, automation, or schedule.
+- A request to execute an existing goal → the selected runtime executes it; this compiler does not recompile or start it unless explicitly asked.
 
-- vague intent that still needs product, architecture, authority, scope, or proof decisions;
-- creating or reviewing a plan or specification;
-- choosing between direct work, native `/goal`, Omega, GoalBuddy, a loop, or automation;
-- implementing a change;
-- resuming, migrating, auditing, or repairing an existing board;
-- starting `/goal` after a board already exists.
+The skill compiles and validates the route artifact. It does not perform the underlying implementation, start a GoalBuddy board, or invoke `/goal` unless the user explicitly requests execution and the selected route permits it.
 
-If an adjacent workflow is more appropriate, state only that this compiler's input contract is not satisfied. Do not select, invoke, or orchestrate the adjacent workflow from this skill.
+## Core invariant
 
-## Source contract
-
-A source is decision-complete enough to compile when it supplies or safely fixes all load-bearing facts:
-
-- one owner outcome and intended beneficiary;
-- observable completion proof and a live oracle signal;
-- accepted scope, non-goals, constraints, and authority boundaries;
-- accepted product or architecture decisions that would change implementation shape;
-- known sequencing, dependencies, approval gates, and irreversible boundaries;
-- a realistic verification path, including known environment limits;
-- enough starting context to choose a safe first phase.
-
-Do not require exhaustive implementation detail. A large specification may intentionally leave implementation plans just in time. The missing fact is material only when guessing it could change outcome, authority, risk, user-visible behavior, architecture, or final proof.
-
-Use this precedence when sources disagree:
-
-1. applicable system, harness, and repository instructions;
-2. latest explicit user decision;
-3. explicitly accepted spec, plan, review decision, or owner-approved artifact;
-4. current repository facts and executed evidence already supplied to the compiler;
-5. earlier conversation context;
-6. clearly labeled conservative inference.
-
-Do not reopen accepted decisions merely because alternatives exist. Do not invent files, tests, metrics, permissions, budgets, credentials, or approvals.
-
-## Not-compilable result
-
-If the source contract is not decision-complete, create no board and return:
+Keep one user-facing skill and two internal compilers:
 
 ```text
-Compile: not_compilable
-Source: <conversation | spec path | plan path | other>
-Missing decisions:
-- <only facts that materially block a truthful board>
-Why they matter: <one concise explanation>
-Board created: no
+codex-goal-compiler
+├── native-goal compiler
+└── GoalBuddy compiler
 ```
 
-Do not ask a diagnostic ladder, draft a replacement plan, run another skill, or emit route-selection advice. The user may resolve the missing decisions however they prefer and invoke the compiler again.
+Goal Prep is not a second routing front door. It is the GoalBuddy compiler's explicit internal backend and an optional manual expert surface.
 
-## Read before compilation
+Do not merge their storage or schemas.
 
-When the source is ready, read these references and treat them as the compilation contract:
+- Standalone native goals live at `docs/codex-goals/<slug>/goal.md`.
+- GoalBuddy boards live at `docs/goals/<slug>/` and are owned entirely by the installed GoalBuddy runtime.
+- Never create `state.yaml`, task cards, receipts, agents, or board metadata for a standalone goal.
+- Never imitate a GoalBuddy board with a partial custom schema.
 
-- `references/goalbuddy-compiler.md` — ownership, runtime preflight, future-only path, semantic acceptance, and checkpoint;
-- `references/adaptive-execution-strategy.md` — how a board preserves dynamic planning, review, simplification, and Judge choices without pre-scheduling vendor tools;
-- `references/handoff-prompts.md` — source-to-intake mapping and the exact internal Goal Prep handoff.
+## Read before routing
 
-If the repository provides `AGENTS.md`, `PLANS.md`, `plans.md`, or another governing plan contract, read the applicable files before compiling. Do not invent absent instructions.
+Read `references/routing.md` first and treat it as the authoritative source for
+route selection and context precedence. Do not load backend-specific compiler
+references until routing selects that backend:
 
-## Compilation workflow
+- Standalone native goal → read `references/native-goal-compiler.md`.
+- GoalBuddy → read `references/goalbuddy-compiler.md`,
+  `references/adaptive-execution-strategy.md`, and
+  `references/handoff-prompts.md`.
+- Direct work, planning, or recurring work → do not load compiler-backend
+  references.
 
-1. Read the current conversation and every named accepted source artifact.
-2. Test the source against the decision-complete contract above.
-3. Determine the active target: `codex` or `claude`, unless the user explicitly supplied it.
-4. Run only that target's `scripts/check_goalbuddy_runtime.py` preflight. Retain its exact `contract.skills.goal_prep.path`, `contract.skills.compiler.path`, and tree fingerprints; they are the only installed skill bindings authorized for this compile.
-5. Choose a lowercase-hyphen slug and run `scripts/check_new_goal_path.py` before reading or writing the root.
-6. Synthesize the owner outcome, oracle, completion proof, likely misfire, done/not-done traps, verification loop, boundaries, concurrency, and first safe phase.
-7. Preserve accepted source facts and challenge only material ambiguity. Do not silently alter the accepted design.
-8. Compile the adaptive execution strategy. For large work, preserve vertical slices and choose an honest upfront, just-in-time, or hybrid planning horizon. Record semantic capabilities, never vendor skill names or a pre-scheduled ceremony list.
-9. For Codex, construct and validate the hybrid `/goal` objective defined in `references/goalbuddy-compiler.md`; for Claude, prepare the portable `/goal Follow ...` command.
-10. Explicitly load the installed Goal Prep `SKILL.md` at `<contract.skills.goal_prep.path>/SKILL.md` in this same compiler context and give it the exact handoff from `references/handoff-prompts.md`. Do not rediscover Goal Prep through harness search paths or a similarly named skill. If the path or fingerprint no longer matches the accepted preflight contract, stop and rerun preflight.
-11. Have Goal Prep create the file-only board from its canonical templates and schema. Never spawn a subagent or separate task merely to prepare it.
-12. Run GoalBuddy's official checker and every semantic acceptance gate in `references/goalbuddy-compiler.md`.
-13. Fix compilation defects and rerun validation. Do not waive them in prose.
-14. Return the compilation checkpoint below. Stop without starting `/goal`.
+When Omega is installed and the choice is between Omega and a goal, consult
+Omega's installed routing guidance. Skip that optional dependency when absent.
 
-## Compilation invariants
+If a repository or configured agent resource provides `PLANS.md`, `plans.md`, or another governing plan contract, read it when relevant. Do not invent its contents when it is absent.
 
-- Create one new direct child at `docs/goals/<slug>/` only.
-- On any file, directory, or broken-symlink collision, stop without inspecting the collision.
-- Goal Prep owns `goal.md`, `state.yaml`, notes, task and receipt fields, templates, agents, checker behavior, and runtime semantics.
-- The compiler owns source synthesis, oracle and proof design, ambiguity challenge, source-plan preservation, adaptive strategy, and semantic acceptance.
-- Keep the accepted specification or plan in its native artifact. Bind the board to its path and stable revision when available, then carry only load-bearing decisions, slices, constraints, and proof expectations; never paste the complete source into `goal.md` or `state.yaml`.
-- Default to a file-only board. Do not start the local board server or open a browser unless the user explicitly asked for visual tracking.
-- Preserve the five proof expectations through official GoalBuddy fields and tasks; never invent compiler-owned board schema.
-- Preserve user-provided limits exactly. Never synthesize a time, token, turn, or paid-service budget.
-- Never select the quarantined legacy `goal_worker_ultra` role for a new board.
-- Never run unrelated product implementation or repository-wide product suites during board preparation.
-- Never start `/goal`, call `create_goal`, dispatch a Worker, or perform product work from the compiler.
+## Routing order
 
-## Dynamic execution shape
+Decide in this order:
 
-The board must preserve what the user liked about successful large runs without freezing every future tool call:
+1. **Is the work recurring or event-driven?**
+   - Route to `/loop`, Codex Automation, or Claude `/schedule`.
+   - A recurring procedure is not one perpetual goal.
 
-- compile durable vertical slices, dependencies, owner gates, and proof requirements;
-- let execution author or revise implementation plans just in time at material seams;
-- require the PM to review every diff and use independent plan/review/simplification capabilities more often on long autonomous material work;
-- keep small mechanical slices light;
-- let the lead orchestrator choose lead or delegated Judges from live risk and ambiguity;
-- bind review evidence to the exact plan or diff it examined;
-- let the PM split, combine, reorder, or refine queued work as evidence arrives without changing owner intent or completed history.
+2. **Is the outcome still vague, contested, or missing measurable completion?**
+   - Route to planning or Goal Prep.
+   - Ask one focused question only when the answer changes outcome, proof, permission, or route.
 
-GoalBuddy's execution contract maps those semantic capabilities to the active harness. The compiler does not encode Claude-, Codex-, or model-specific tool names into board truth.
+3. **Can one normal implementation turn safely finish and verify the work?**
+   - Recommend direct work.
+   - If the user explicitly wants native goal mode and the outcome is honest in one file, use the standalone route.
 
-## Compilation checkpoint
+4. **Is it a bounded plan-to-branch implementation package that does not need persistent goal state?**
+   - Route to Omega when installed rather than forcing either goal backend.
+   - If the user explicitly wants native `/goal`, honor that preference when one file can represent the work honestly.
+
+5. **Is there one bounded, coherent outcome that benefits from persistence?**
+   - Use a standalone native goal.
+
+6. **Does the work need durable task state, receipts, independently owned workstreams, cross-session or cross-harness continuation, many blocked slices, or board monitoring?**
+   - Use GoalBuddy.
+
+Explicit user preference matters:
+
+- Respect an explicit request for a standalone goal when one file can represent the work honestly; warn about lost board capabilities when relevant.
+- Respect an explicit GoalBuddy request after confirming runtime readiness and a board-worthy outcome.
+- Never silently create or resume a GoalBuddy board.
+
+## Context mining
+
+Use this precedence when sources conflict:
+
+1. Applicable system, host, and repository instructions.
+2. Latest explicit user decision in the current conversation.
+3. An explicitly accepted plan, review decision, or owner-approved artifact.
+4. Current repository facts and executed tool evidence.
+5. Earlier conversation context.
+6. Clearly labeled model inference.
+
+Extract only load-bearing context:
+
+- intended owner outcome;
+- current state and starting point;
+- latest accepted decisions;
+- accepted sequence or plan reference;
+- observable Definition of Done and final proof;
+- false-positive completion to avoid;
+- constraints, non-goals, permissions, and approval gates;
+- fast and final verification;
+- material assumptions and blockers;
+- whether progress needs one living record or a durable task graph.
+
+Do not copy the full conversation into the goal. Do not reopen accepted decisions merely because alternatives exist. Do not invent files, tests, metrics, authority, budgets, or approvals.
+
+## Default workflow
+
+1. Inspect the current conversation and any named plan, board, review, PR, diff, issue, or artifact.
+2. Determine the active harness and intended execution target.
+3. Select exactly one route using `references/routing.md`.
+4. Report the selected route and one-sentence rationale before writing stateful artifacts.
+5. Compile using the selected internal compiler.
+6. Run the route-specific deterministic validation.
+7. Fix validation failures; do not waive them through prose.
+8. Report the artifact created, validation result, and exact start or continuation command.
+9. Do not start execution automatically unless the user explicitly asks and the route's start policy permits it.
+
+## Standalone native goal route
+
+Use for:
+
+- bounded or medium-sized work deserving native `/goal` persistence;
+- a coherent outcome already agreed in conversation;
+- an accepted plan that does not need task slicing or receipts;
+- one review, remediation, hardening, cleanup, or follow-up round after a completed board;
+- work likely to fit one sustained Codex goal-mode run, even if it survives compaction.
+
+This route is native to Codex. In Claude Code, use direct work or GoalBuddy unless the user explicitly wants a Codex handoff file for later use.
+
+Workflow:
+
+1. Read `references/native-goal-compiler.md`.
+2. Choose a lowercase-hyphen slug.
+3. Check the future path:
+
+```bash
+python3 <compiler-skill>/scripts/check_new_native_goal_path.py docs/codex-goals/<slug> --json
+```
+
+4. Render `assets/native-goal.md` without unresolved placeholders.
+5. Write exactly one file:
 
 ```text
-Compile: pass | blocked
-Target: codex | claude
-Source: <conversation | spec path | plan path | other>
-Goal path: docs/goals/<slug>/goal.md | none
-Runtime preflight: pass | blocked: <reason>
-Official checker: pass | blocked: <reason>
-Semantic acceptance: pass | blocked: <reason>
-Planning horizon: upfront | just_in_time | hybrid
-First safe phase: <concise phase>
-Git baseline: clean | dirty; preserved
-Board surface: file-only | visual requested
-Start command: <Codex hybrid /goal objective | Claude /goal Follow docs/goals/<slug>/goal.md. | none>
-Execution started: no
-Open questions: none | <material blocker>
+docs/codex-goals/<slug>/goal.md
 ```
 
-For Claude walk-away use, the user may append the measurable completion clause defined in `references/goalbuddy-compiler.md`. The compiler still does not start it or invent a turn cap.
+6. Validate it:
 
-## Failure and safety
+```bash
+python3 <compiler-skill>/scripts/validate_native_goal.py docs/codex-goals/<slug>/goal.md
+```
 
-- Runtime missing or stale: block compilation with the exact preflight result; do not reconstruct GoalBuddy schema.
-- Source not decision-complete: return `not_compilable`; create no path.
-- Path collision: stop without inspecting it.
-- Weak oracle, final proof, or unresolved placeholder: reject semantic acceptance.
-- Dirty Git state: preserve it. Disable mixed-vendor dispatch expectations unless a later execution run reaches an approved clean checkpoint.
-- Existing board request: stop; explicit Goal Prep repair or GoalBuddy execution owns that job.
-- Product, architecture, permission, or scope change discovered during compilation: stop and name the decision instead of choosing it.
-- Destructive, credential-sensitive, production, billing, deployment, publication, or external action: never perform it during compilation.
+7. Print:
+
+```text
+/goal Follow docs/codex-goals/<slug>/goal.md.
+```
+
+Do not create a board server, `state.yaml`, receipts, agents, task cards, or board metadata.
+
+### Post-board review default
+
+When a GoalBuddy board or major implementation is complete and one bounded review/remediation round remains, default to a standalone native goal unless the follow-up itself needs durable multi-task coordination.
+
+The completed board may be read-only evidence. Do not resume, mutate, or replace it unless the user explicitly asks.
+
+## GoalBuddy route
+
+Use for broad, long-running, interruption-prone, multi-workstream, or cross-session work that benefits from GoalBuddy's official task, receipt, role, checker, and resume surfaces.
+
+Read `references/goalbuddy-compiler.md`, `references/adaptive-execution-strategy.md`, and `references/handoff-prompts.md` before compiling.
+
+Key rules:
+
+- Run only the selected harness's GoalBuddy runtime preflight.
+- Consume GoalBuddy compiler contract v1 through `scripts/check_goalbuddy_runtime.py`. Require board schema v2 plus the closed safety-capability subset for atomic amendment, atomic placeholder hydration, lossless receipt identity, strict multiline YAML projection, closed Judge decisions, atomic exact-human wait/resume, and atomic goal completion. Treat missing capabilities or mismatched installed/source skill fingerprints as blocked; accept additive contract fields and capabilities.
+- Report product version separately from the resolved CLI path, source kind, Git HEAD, dirty state, and installed skill fingerprints; a local dirty checkout is never a pristine published package claim.
+- Use a new `docs/goals/<slug>` root and the future-only path guard.
+- Retain `contract.skills.compiler.path` and `contract.skills.goal_prep.path` plus their tree fingerprints from the accepted contract. Treat the exact Goal Prep path as an explicit internal dependency whose implicit/model invocation may be disabled. After selecting GoalBuddy, explicitly load and execute that `SKILL.md` directly in the current compiler context. Do not rediscover Goal Prep through harness search paths or rely on implicit skill matching. If either bound tree fingerprint changes, stop and rerun preflight. Goal Prep owns board schema. Never spawn a subagent, collaboration agent, or separate Codex task merely to prepare the board.
+- Preserve the five proof expectations through official GoalBuddy surfaces.
+- Prepare and validate the board before any start. File-only preparation runs the official board checker plus the compiler's semantic acceptance gates, not unrelated repository-wide product or source suites.
+- Return to the compiler immediately after checker and acceptance results are available; do not leave a preparation loop running after the board is accepted.
+- Default to a file-only board; do not open the visual board unless requested.
+- Print the target-correct start command and stop. GoalBuddy execution begins in a later user-approved turn or session.
+
+Do not bundle GoalBuddy templates, recreate its checker, invent board fields, or route new work through the legacy `goal_worker_ultra` role.
+
+This direct-current-context rule is limited to Goal Prep board preparation. It does not prohibit intended Scout, Judge, Worker, Keeper, Ledger, Council, or other explicitly requested delegation during planning, execution, recovery, or review.
+
+## Direct, planning, and recurring exits
+
+### Direct work
+
+Return a concise routing recommendation rather than manufacturing a goal. If useful, summarize the agreed task and verification expectation so the current agent can proceed immediately.
+
+### Planning or Goal Prep
+
+When a missing decision changes architecture, authority, risk, scope, or final proof, ask the smallest focused question or route to the installed planning/Goal Prep surface. Do not hide uncertainty behind a polished goal file.
+
+### Loop, Automation, or Schedule
+
+Route a stable procedure applied repeatedly to changing inputs to the appropriate recurring system. A single exceptional item may receive its own native goal or GoalBuddy board when independently justified.
+
+## Dependency and runtime fallback
+
+Treat dependencies as route-specific rather than global blockers.
+
+- **Omega unavailable:** do not block goal compilation. Choose direct work when one turn can finish the task, a standalone native goal when persistence helps, or GoalBuddy when durable board state is genuinely required.
+- **Native `/goal` unavailable:** create a native goal only as an explicit later-Codex handoff. Otherwise route to direct work, planning, or GoalBuddy according to the outcome.
+- **GoalBuddy or Goal Prep unavailable/stale:** block only the GoalBuddy route. Offer a standalone native goal only when one file can represent the work honestly; otherwise report the exact missing dependency and stop. Never reconstruct GoalBuddy schema locally.
+- **Recurring runtime unavailable:** recommend the correct loop/automation/schedule route and report the missing capability. Do not manufacture a perpetual native goal or board as a substitute.
+- **Governing plan resource unavailable:** continue from accepted conversation and repository evidence when sufficient. Do not invent `PLANS.md`, `plans.md`, or an agent resource.
+
+When a fallback changes durability, resumability, ownership, receipts, or cross-session behavior, state the lost capability before compiling the alternative.
+
+## Permission and safety rules
+
+- Preserve unrelated dirty work.
+- Ask before destructive, irreversible, externally visible, credential-sensitive, production, billing, deployment, publication, or material scope-expanding actions.
+- Do not request private chain-of-thought or reasoning transcripts.
+- Do not weaken tests, alter scorers, hard-code evaluation cases, or fabricate completion evidence.
+- Ground completion claims in executed checks or inspected evidence.
+- Preserve user-provided time, token, or paid-service limits exactly; do not invent budgets.
+
+## Final checkpoint
+
+```text
+Route: <direct | omega | planning | native_goal | goalbuddy | recurring | blocked>
+Reason: <one sentence>
+Target: <codex | claude | later Codex handoff | n/a>
+Source context: <conversation | plan | completed board | review | other>
+Artifact: <none | docs/codex-goals/<slug>/goal.md | docs/goals/<slug>/goal.md>
+Validation: <pass | blocked: reason | n/a>
+Start command: </goal Follow ... | hybrid Codex /goal | n/a>
+Start: <not requested | command printed | started | blocked>
+Open questions: <none | only material questions>
+```
+
+For GoalBuddy, append the detailed checkpoint defined in `references/goalbuddy-compiler.md`.
+
+## Failure handling
+
+- **No clear outcome:** ask one focused question or route to planning.
+- **Too small:** recommend direct work; honor explicit native-goal preference when honest.
+- **Standalone goal grows beyond one coherent file:** keep it bounded and recommend GoalBuddy or a follow-up goal.
+- **GoalBuddy path collision:** stop without inspecting the collision; choose a new slug or ask.
+- **Native-goal path collision:** stop without overwriting; choose a new slug or ask.
+- **GoalBuddy runtime missing or stale:** block only the GoalBuddy route; do not prevent a valid native-goal route.
+- **Recurring work:** route away from goal compilation.
+- **Validation failure:** fix the artifact or report the exact blocker; never claim readiness.
 
 ## Resources
 
-- `references/goalbuddy-compiler.md` — board compiler contract and acceptance gates.
-- `references/adaptive-execution-strategy.md` — adaptive strategy compilation.
-- `references/handoff-prompts.md` — exact Goal Prep handoff and target outputs.
-- `scripts/check_goalbuddy_runtime.py` — selected-target GoalBuddy contract preflight.
-- `scripts/check_new_goal_path.py` — future-only board-root guard.
-- `scripts/validate_codex_goal_objective.py` — validates the Codex hybrid start command printed after compilation.
+- `references/routing.md` — unified route selection, overrides, and examples.
+- `references/native-goal-compiler.md` — standalone native goal contract and review-follow-up mode.
+- `references/goalbuddy-compiler.md` — GoalBuddy runtime, proof, preparation, and start contract.
+- `references/adaptive-execution-strategy.md` — GoalBuddy quality-policy compilation contract.
+- `references/handoff-prompts.md` — GoalBuddy handoff blocks and target outputs.
+- `assets/native-goal.md` — canonical standalone goal template.
+- `scripts/check_new_native_goal_path.py` — future-only native-goal path guard.
+- `scripts/validate_native_goal.py` — standalone goal validator.
+- `scripts/check_goalbuddy_runtime.py` — selected-harness GoalBuddy preflight.
+- `scripts/check_new_goal_path.py` — future-only GoalBuddy root guard.
+- `scripts/validate_codex_goal_objective.py` — GoalBuddy Codex hybrid-objective validator.

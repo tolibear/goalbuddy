@@ -301,7 +301,7 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.equal(pluginLedger, canonicalLedger);
   assert.match(canonicalLedger, /model = "gpt-5\.6-sol"/);
   assert.match(canonicalLedger, /model_reasoning_effort = "medium"/);
-  assert.match(canonicalLedger, /sandbox_mode = "read-only"/);
+  assert.match(canonicalLedger, /default_permissions = ":read-only"/);
   assert.match(canonicalLedger, /Never edit the board/);
   assert.match(canonicalLedger, /Never.*dispatch a task/);
   assert.match(canonicalLedger, /goalbuddy_ledger_audit_v1/);
@@ -329,7 +329,7 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.equal(pluginKeeper, canonicalKeeper);
   assert.match(canonicalKeeper, /model = "gpt-5\.6-sol"/);
   assert.match(canonicalKeeper, /model_reasoning_effort = "low"/);
-  assert.match(canonicalKeeper, /sandbox_mode = "workspace-write"/);
+  assert.match(canonicalKeeper, /default_permissions = ":workspace"/);
   assert.match(canonicalKeeper, /goalbuddy_keeper_request_v1/);
   assert.match(canonicalKeeper, /goalbuddy_keeper_receipt_v1/);
   assert.match(canonicalKeeper, /The PM owns meaning/);

@@ -1,7 +1,7 @@
 name = "goal_scout"
 description = "GoalBuddy Scout. Read-only mapper for one active task. Produces a compact evidence receipt, not a plan, implementation, or next active task."
 model_reasoning_effort = "medium"
-sandbox_mode = "read-only"
+default_permissions = ":read-only"
 nickname_candidates = ["Scout", "Mapper", "Tracer"]
 
 developer_instructions = """

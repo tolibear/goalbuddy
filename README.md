@@ -41,7 +41,7 @@ In Claude Code, use:
 /codex-goal-compiler
 ```
 
-Codex Goal Compiler has one job: preserve the accepted source, compile an adaptive execution strategy, and create a new checker-valid GoalBuddy board. If material product decisions are missing, it returns `not_compilable` and creates nothing. It does not route to other workflows, implement, repair an existing board, or start `/goal`. Goal Prep is its non-model-invocable schema backend and remains available only for intentional manual intake or board repair.
+Codex Goal Compiler is the one goal-routing front door. It inspects the accepted source and chooses direct work, planning, a standalone native Codex goal, a GoalBuddy board, Omega, or recurring automation. When GoalBuddy is the right route, its focused backend preserves accepted decisions, compiles an adaptive execution strategy, creates one checker-valid board, prints the target-correct start command, and stops. If material product decisions are missing, it returns `not_compilable` and creates nothing. Goal Prep is non-model-invocable by default and remains the compiler's exact schema backend plus an intentional manual intake/repair surface.
 
 In Claude Code, GoalBuddy installs a real `/goal` command that runs the execution loop. In Codex, native `/goal` is the separate OpenAI-gated feature GoalBuddy prepares boards for.
 
@@ -182,7 +182,7 @@ Use `goalbuddy resume docs/goals/<slug> --json` to obtain the current state dige
 GoalBuddy owns both canonical skill trees, installation topology, execution agents, board schema, runtime commands, and a stable compiler-facing contract:
 
 ```text
-codex-goal-compiler  -> compiles decision-complete source into a new validated board
+codex-goal-compiler  -> selects the goal route; compiles native goals or new GoalBuddy boards when selected
 goal-prep            -> owns board schema and explicit manual intake/repair
 goalbuddy contract   -> reports target readiness and runtime capabilities
 ```
@@ -225,7 +225,7 @@ See [GoalBuddy 0.5.0: Focused Compiler, Quiet Runtime](docs/releases/0.5.0.md) f
 
 GoalBuddy is MIT licensed. This personal distribution is installed from the local Git checkout and is deliberately marked private so it cannot overwrite the upstream npm package.
 
-The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Codex Goal Compiler on decision-complete source, review the generated board, then start `/goal` with the printed command.
+The implementation lives in this repo, but the happy path is intentionally tiny: install it, run Codex Goal Compiler on agreed work, accept its route, and—when it creates a GoalBuddy board—start `/goal` with the printed command.
 
 For release process details, see [docs/releases](docs/releases/README.md).
 

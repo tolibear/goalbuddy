@@ -4,7 +4,7 @@ GoalBuddy is Daniel Alnajjar's private, locally installed GoalBuddy distribution
 
 ## Repo Shape
 
-- `codex-goal-compiler/` is the canonical user-facing GoalBuddy board compiler.
+- `codex-goal-compiler/` is the canonical user-facing goal router. It owns route selection and contains separate native-goal and GoalBuddy board compiler backends.
 - `goalbuddy/` is the canonical Goal Prep and execution skill payload used as the compiler's explicit backend.
 - `goalbuddy/agents/` holds Codex TOML agent definitions (`goal_*.toml`).
 - `plugins/goalbuddy/agents/` holds Claude Code markdown subagents (`goal-*.md`).
@@ -28,7 +28,7 @@ When improving this repo, consider the compiler contract, `codex-goal-compiler/S
 
 - Keep the runtime dependency-free unless there is a strong reason.
 - Keep both canonical skill trees installable and byte-exact with their plugin mirrors.
-- Keep one public compilation surface: Codex Goal Compiler turns decision-complete source into new validated GoalBuddy boards. Goal Prep remains a non-model-invocable compiler backend and explicit manual intake/repair surface.
+- Keep one public goal-routing surface: Codex Goal Compiler chooses direct work, planning, standalone native goals, GoalBuddy boards, Omega, or recurring automation. Its GoalBuddy backend turns decision-complete source into a new validated board; Goal Prep remains non-model-invocable by default and available as the compiler's exact schema backend plus an explicit manual intake/repair surface.
 - GoalBuddy owns installation topology and runtime capabilities. The compiler consumes only the versioned `goalbuddy contract` projection and a required capability subset; never teach it GoalBuddy's file inventory, exact agent count, or internal doctor schema again.
 - Keep installation working for both Codex (default) and Claude Code (`--target claude`).
 - Do not add compatibility shims for future contract changes. Version the contract and fail closed.

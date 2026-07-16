@@ -8,7 +8,7 @@ Version 0.5.0 unifies compiler and runtime ownership without changing the board 
 
 - `.codex-plugin/plugin.json`: Codex plugin manifest and Codex UI copy.
 - `.claude-plugin/plugin.json`: Claude Code plugin manifest.
-- `skills/codex-goal-compiler/`: the user-facing decision-complete-source to GoalBuddy-board compiler.
+- `skills/codex-goal-compiler/`: the user-facing goal router with separate native-goal and GoalBuddy board compiler backends.
 - `skills/goal-prep/`: the GoalBuddy board-preparation and execution backend.
 - `agents/`: Claude Code task-agent definitions (`goal-scout.md`, `goal-judge.md`, `goal-worker.md`) plus the execution-time `goal-keeper.md` and recovery-only `goal-ledger.md` control-plane agents.
 - `skills/codex-goal-compiler/SKILL.md`: canonical `$codex-goal-compiler` / `/codex-goal-compiler` entry point.

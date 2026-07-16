@@ -1,6 +1,6 @@
 interface:
   display_name: "Codex Goal Compiler"
-  short_description: "Decision-complete source to a validated GoalBuddy board"
-  default_prompt: "Use $codex-goal-compiler to compile this decision-complete specification, accepted plan, or agreed conversation contract into one new validated GoalBuddy board. Preserve accepted decisions, vertical slices, observable completion proof, and an adaptive execution strategy. Explicitly load Goal Prep as the internal schema backend in the current compiler context. If material source decisions are missing, return not_compilable and create nothing. Do not implement or start execution. Do not route to another workflow or mutate an existing board."
+  short_description: "Agreed work to the right Codex goal route"
+  default_prompt: "Use $codex-goal-compiler to turn agreed context into the correct goal route. Choose among direct work, planning, a standalone native /goal goal.md, GoalBuddy, Omega, and recurring automation. Default one bounded post-board review/remediation round to a standalone goal. Preserve accepted decisions and observable proof. When GoalBuddy wins, consume compiler contract v1, load the exact installed Goal Prep path as the internal board backend in this context, create and validate a new file-only board, print the start command, and stop without execution."
 policy:
   allow_implicit_invocation: true

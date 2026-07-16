@@ -25,7 +25,8 @@ runtime.
 Fill the goal template's `## Execution Strategy` section from the source
 plan/spec and conversation context:
 
-- **Planning horizon** — `upfront | just_in_time | hybrid`, with one line of
+- **Planning horizon** — choose upfront, just-in-time, or hybrid (`upfront |
+  just_in_time | hybrid`), with one line of
   why. Default `just_in_time` for large multi-slice product goals (author or
   revise each slice plan at its seam); `upfront` only when the source spec is
   already decision-complete per slice; `hybrid` when some subprograms deserve
@@ -33,8 +34,10 @@ plan/spec and conversation context:
 - **Quality ladder** — restate the normal ladder for material slices:
   hardened plan → bounded Worker implementation → PM diff review →
   independent implementation review → adjudicated fixes → verification →
-  receipt. Simplification is available as a review lens and as a standalone
-  pass after large or cross-cutting changes.
+  receipt. The lead orchestrator must review every diff. Keep small mechanical
+  slices light when materiality and live evidence justify it; do not turn the
+  ladder into ceremony for its own sake. Simplification is available as a
+  review lens and as a standalone pass after large or cross-cutting changes.
 - **Materiality refinements** — the contract's categorical list (auth, money,
   permissions, migrations, data integrity, public contracts, irreversible
   actions, meaningful interaction changes) is the floor. Add goal-specific

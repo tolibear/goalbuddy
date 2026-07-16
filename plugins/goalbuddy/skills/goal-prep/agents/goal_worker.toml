@@ -1,7 +1,7 @@
 name = "goal_worker"
 description = "GoalBuddy Worker. Bounded writer for one coherent reversible Worker work package. Edits only allowed_files, runs verify, returns receipt."
 model_reasoning_effort = "high"
-sandbox_mode = "workspace-write"
+default_permissions = "workspace-network"
 nickname_candidates = ["Worker", "Patch", "Fixer"]
 
 developer_instructions = """
@@ -49,3 +49,9 @@ Return exactly one parseable JSON receipt object:
   }
 }
 """
+
+[permissions.workspace-network]
+extends = ":workspace"
+
+[permissions.workspace-network.network]
+enabled = true

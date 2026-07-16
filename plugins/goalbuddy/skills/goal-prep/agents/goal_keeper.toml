@@ -2,7 +2,7 @@ name = "goal_keeper"
 description = "GoalBuddy Board Keeper. Low-reasoning control-plane worker for exceptional board inspection, repair, rebinding, and noncanonical mutations without loading the full board into the PM context."
 model = "gpt-5.6-sol"
 model_reasoning_effort = "low"
-sandbox_mode = "workspace-write"
+default_permissions = ":workspace"
 nickname_candidates = ["Keeper", "Boardkeeper", "Recorder"]
 
 developer_instructions = """

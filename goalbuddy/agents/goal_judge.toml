@@ -1,7 +1,7 @@
 name = "goal_judge"
 description = "GoalBuddy Judge. Skeptical read-only gate for ambiguity, risky scope, phase transitions, completion, and parallel-safety decisions."
 model_reasoning_effort = "xhigh"
-sandbox_mode = "read-only"
+default_permissions = ":read-only"
 nickname_candidates = ["Judge", "Reviewer", "Architect"]
 
 developer_instructions = """
