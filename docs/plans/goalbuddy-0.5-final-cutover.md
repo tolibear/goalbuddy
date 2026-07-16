@@ -14,10 +14,10 @@ After this cutover, Daniel can invoke one installed `codex-goal-compiler` skill 
 - [x] (2026-07-16) Restored the single public routing front door around the focused 0.5 GoalBuddy backend, including native-goal resources and route-specific progressive disclosure.
 - [x] (2026-07-16) Ported the approved Codex `default_permissions` agent schema without weakening 0.5 role contracts.
 - [x] (2026-07-16) Synchronized plugin mirrors and updated current product documentation, composer copy, and tests.
-- [ ] Run package dry-run, isolated-install validation, and representative compiler acceptance; focused tests are 92/92 Node plus 48/48 Python, and full `npm run check` is 212/212 Node plus 48/48 Python.
-- [ ] Land the candidate and activate it transactionally for Codex and Claude.
-- [ ] Prove both contracts and doctors, installed source identity, and representative old-board byte preservation.
-- [ ] Retire the old skills-repository compiler source and push both repositories.
+- [x] (2026-07-16) Ran package dry-run, isolated-install validation, and representative compiler acceptance; focused tests are 92/92 Node plus 48/48 Python, and full `npm run check` is 212/212 Node plus 48/48 Python.
+- [x] (2026-07-16) Landed the candidate through `d04385e` and activated it transactionally for Codex and Claude.
+- [x] (2026-07-16) Proved both contracts and doctors, installed source identity, and representative old-board byte preservation.
+- [x] (2026-07-16) Retired the old skills-repository compiler source through `604fbf0` and pushed `skills/main`.
 
 ## Surprises & Discoveries
 
@@ -44,13 +44,17 @@ After this cutover, Daniel can invoke one installed `codex-goal-compiler` skill 
 
 ## Outcomes & Retrospective
 
-Pending completion.
+GoalBuddy 0.5 is the live product for both harnesses. Codex loads the bundled compiler and Goal Prep from the 0.5 plugin; Claude loads the same source-owned payload through its personal skill and command surfaces. Both contracts report product 0.5.0, compiler contract 1, board schema 2, matching source/installed fingerprints, and no errors. The standalone skills-repository compiler was removed only after activation proved the bundled replacement, so there was no broken interval.
+
+The activation exposed two useful installer failures before succeeding: Bun retained a duplicate local dependency until an explicit remove/re-add, and Codex rejected a named marketplace whose source path changed. Transaction rollback preserved the previous installation both times. The landed installer now replaces that stale named marketplace within the same transaction and has regression coverage.
+
+No existing board was rewritten. Trading and wedding-media board-root manifests remained byte-identical across activation. Their paused sessions can now compile fresh 0.5 successor boards from the remaining decision-complete work while retaining the old roots as historical evidence.
 
 ## Context and Orientation
 
 The isolated candidate is `/Users/danielalnajjar/Code/.worktrees/goalbuddy-product-0.5` on branch `codex/goalbuddy-product-0.5`. Its `codex-goal-compiler/` directory is the canonical bundled compiler, `goalbuddy/` is the canonical Goal Prep and execution payload, and `plugins/goalbuddy/skills/` contains byte-exact installed mirrors. The package CLI at `internal/cli/goal-maker.mjs` owns transactional installation, contracts, doctors, and source binding.
 
-The current compiler in `/Users/danielalnajjar/Code/skills/shared/skills/codex-goal-compiler` is version 3.2.1 and supplies the routing and standalone native-goal contracts that the candidate removed. The final compiler must reuse those current routing and native-goal resources, update GoalBuddy admission to compiler contract v1, and preserve the candidate's focused `references/goalbuddy-compiler.md`, adaptive strategy, handoff, preflight, board-path guard, and Codex-objective validator. It must not restore 0.4's exact-version or exact-agent-count coupling.
+The former standalone compiler in `/Users/danielalnajjar/Code/skills/shared/skills/codex-goal-compiler` supplied the routing and standalone native-goal contracts that were incorporated into the product-owned compiler. The skills-repository copy is now retired. The installed compiler uses contract v1 and preserves the focused `references/goalbuddy-compiler.md`, adaptive strategy, handoff, preflight, board-path guard, and Codex-objective validator without restoring 0.4's exact-version or exact-agent-count coupling.
 
 The canonical live GoalBuddy checkout at `/Users/danielalnajjar/Code/goalbuddy` contains approved uncommitted permission-schema changes. Port their semantics into the isolated candidate; do not mutate or clean that checkout. The clean skills-transfer worktree `/Users/danielalnajjar/Code/.worktrees/skills-goalbuddy-cutover` owns deletion of the old standalone compiler only after the 0.5 installation proves the bundled copy is live.
 
@@ -84,7 +88,16 @@ Mirror synchronization and tests are deterministic. Source changes remain isolat
 
 ## Artifacts and Notes
 
-Record the final candidate commit, package archive contents, test totals, installation transaction report, both contract reports, both doctor reports, installed fingerprints, old-board hashes, and skills-transfer commit in this section as work completes.
+- Final candidate commit: `d04385e66e57ef9f3d9b90693eaa2a00a409ed8f` on `codex/goalbuddy-product-0.5`.
+- Package dry-run: GoalBuddy 0.5.0, 139 files.
+- Test totals: focused 92/92 Node and 48/48 Python; full 212/212 Node and 48/48 Python.
+- Activation: rollback-safe transaction committed for Codex and Claude from the local candidate checkout.
+- Installed compiler fingerprint: `25fdeaf2542ff1417879274f8e3e6f23a15057101e2d98e38538007dd96a7fd8`.
+- Installed Goal Prep fingerprint: `c9add536dcbb147a3f4c05ff105e65136eb6cb7853118f7f4fb6bfec968d96fb`.
+- Installed source payload fingerprint: `d3aba55865199adee7db2da50c7f584bb4d93e098f3037adfd9ab9ed992576bd`.
+- Trading board-root manifest before/after: `af8f7072a9cf2eab3fa186b144b3018e26d258b9b8155107304ca325fa133175`.
+- Wedding-media board-root manifest before/after: `481549ed8304804c202390564ee9d50f1338d02b0e96f7fddcce84bbc1758cbc`.
+- Skills ownership-transfer commit: `604fbf0` on pushed `skills/main`.
 
 ## Interfaces and Dependencies
 
