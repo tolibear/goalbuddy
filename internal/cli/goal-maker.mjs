@@ -413,6 +413,13 @@ function standaloneCompilerRoot() {
   return join(homedir(), ".agents", "skills", compilerSkillName);
 }
 
+function recognizedStandaloneCompilerTarget() {
+  return resolve(
+    process.env.GOALBUDDY_LEGACY_COMPILER_ROOT
+      || join(homedir(), "Code", "skills", "shared", "skills", compilerSkillName),
+  );
+}
+
 function legacyClaudeSkillRoot() {
   return join(claudeHome(), "skills", canonicalSkillDirectory);
 }
@@ -694,6 +701,7 @@ function preflightInstallTransaction(targets) {
     if (standalone && !standalone.isSymbolicLink()) {
       throw new Error(`Standalone Codex Goal Compiler is not a symlink and cannot be retired automatically: ${standaloneCompilerRoot()}`);
     }
+    if (standalone) inspectRecognizedStandaloneCompilerLink();
   }
   if (targets.includes("claude")) {
     requiredPaths.push(join(claudePluginSource, "commands", "goal.md"));
@@ -786,15 +794,44 @@ function removeTransactionCreatedDirectories(paths = []) {
 }
 
 function retireStandaloneCompilerLink() {
+  const inspected = inspectRecognizedStandaloneCompilerLink();
+  if (!inspected) return { status: "absent", path: standaloneCompilerRoot(), previous_target: null };
+  const { path, previousTarget, resolvedTarget, fingerprint } = inspected;
+  rmSync(path, { force: true });
+  return {
+    status: "removed_symlink",
+    path,
+    previous_target: previousTarget,
+    resolved_target: resolvedTarget,
+    previous_fingerprint: fingerprint,
+  };
+}
+
+function inspectRecognizedStandaloneCompilerLink() {
   const path = standaloneCompilerRoot();
   const entry = lstatSync(path, { throwIfNoEntry: false });
-  if (!entry) return { status: "absent", path, previous_target: null };
+  if (!entry) return null;
   if (!entry.isSymbolicLink()) {
     throw new Error(`Refusing to remove non-symlink standalone compiler: ${path}`);
   }
   const previousTarget = readlinkSync(path);
-  rmSync(path, { force: true });
-  return { status: "removed_symlink", path, previous_target: previousTarget };
+  const resolvedTarget = resolve(dirname(path), previousTarget);
+  const recognizedTarget = recognizedStandaloneCompilerTarget();
+  if (resolvedTarget !== recognizedTarget) {
+    throw new Error(
+      `Refusing to remove unrecognized standalone compiler symlink ${path}; `
+      + `resolved target ${resolvedTarget} does not match recognized legacy source ${recognizedTarget}.`,
+    );
+  }
+  if (!existsSync(join(resolvedTarget, "SKILL.md"))) {
+    throw new Error(`Recognized standalone compiler target is missing SKILL.md: ${resolvedTarget}`);
+  }
+  return {
+    path,
+    previousTarget,
+    resolvedTarget,
+    fingerprint: skillTreeFingerprint(resolvedTarget),
+  };
 }
 
 function verifyInstalledTargets(targets) {
@@ -1186,6 +1223,8 @@ function compilerContract() {
     ? buildCodexDoctorReport({ requireGoalReady: true })
     : buildClaudeDoctorReport();
   const report = runtime.report;
+  const goalPrepPath = target === "codex" ? report.plugin.skill_path : claudeSkillRoot();
+  const compilerPath = target === "codex" ? report.plugin.compiler_skill_path : claudeCompilerSkillRoot();
   const targetReport = target === "codex"
     ? {
         name: "codex",
@@ -1213,6 +1252,10 @@ function compilerContract() {
     contract_version: compilerContractVersion,
     product_version: packageInfo.version,
     board_schema_version: boardSchemaVersion,
+    skills: {
+      goal_prep: installedSkillBinding(goalPrepPath, skillSource),
+      compiler: installedSkillBinding(compilerPath, compilerSkillSource),
+    },
     capabilities: Object.entries(runtimeCapabilities)
       .filter(([, supported]) => supported === true)
       .map(([capability]) => capability)
@@ -1231,6 +1274,14 @@ function compilerContract() {
     for (const error of payload.errors) console.log(`- ${error}`);
   }
   process.exit(payload.ok ? 0 : 1);
+}
+
+function installedSkillBinding(path, sourcePath) {
+  return {
+    path,
+    tree_fingerprint: skillTreeFingerprint(path),
+    source_tree_fingerprint: skillTreeFingerprint(sourcePath),
+  };
 }
 
 function sourceMetadata() {
@@ -2018,9 +2069,16 @@ function directoryFingerprint(root, { exclude = new Set() } = {}) {
 }
 
 function skillTreeFingerprint(root) {
-  return directoryFingerprint(root, {
-    exclude: new Set([...installFingerprintExcludes(), ".DS_Store", ".goalbuddy-board", "__pycache__"]),
-  });
+  if (!existsSync(root)) return "";
+  const hash = createHash("sha256");
+  const exclude = new Set([...installFingerprintExcludes(), ".DS_Store", ".goalbuddy-board", "__pycache__"]);
+  for (const file of listFiles(root, { exclude }).sort()) {
+    hash.update(file);
+    hash.update("\0");
+    hash.update(readFileSync(join(root, file)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
 }
 
 function listFiles(root, { exclude = new Set(), prefix = "" } = {}) {

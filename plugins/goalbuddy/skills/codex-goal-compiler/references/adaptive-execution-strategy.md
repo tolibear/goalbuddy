@@ -51,6 +51,26 @@ plan/spec and conversation context:
   Worker `deviations` keeps its receipt-spec meaning — and no board notes or
   new schema fields.
 
+## Adaptive write scope
+
+Compile the narrowest truthful Worker authority envelope for each slice; do
+not force a large greenfield slice to predict every future filename:
+
+- exact files for small, decision-complete work and sensitive ownership
+  boundaries;
+- bounded component or directory globs for broad vertical slices that may
+  legitimately create or reorganize files;
+- never a repository-wide convenience glob merely to avoid planning;
+- empty scope on future queued Worker placeholders when the implementation
+  boundary is not yet known, followed by atomic just-in-time hydration of
+  `allowed_files`, `verify`, and `stop_if` immediately before activation.
+
+The source plan's file list is evidence, not automatically the execution
+envelope. Preserve it verbatim when it is complete. Otherwise choose the
+smallest bounded envelope that truthfully covers the approved slice and put
+forbidden boundaries in `stop_if`. Crossing the active envelope blocks the
+Worker; scope is never widened retroactively after writes exist.
+
 ## Proof requirements stay on slices
 
 Each material slice's card carries its proof requirement through the official

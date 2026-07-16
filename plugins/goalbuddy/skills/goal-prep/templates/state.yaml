@@ -95,7 +95,8 @@ tasks:
       - "T001 receipt"
     constraints:
       - "Do not implement."
-      - "Pick the largest safe useful slice with clear allowed_files, verify commands, and stop conditions."
+      - "Pick the largest safe useful slice with the narrowest truthful allowed_files envelope, verify commands, and stop conditions."
+      - "Use exact files for small or sensitive work and bounded component or directory globs for broad vertical slices that may create files; never use a repository-wide convenience glob."
     expected_output:
       - "Decision"
       - "Exact Worker objective"

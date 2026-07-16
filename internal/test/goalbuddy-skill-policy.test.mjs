@@ -193,6 +193,15 @@ test("the quiet control plane keeps mechanics internal without hiding real block
     assert.match(text, /Never hide a real discrepancy, approval gate, failed verification, possible duplicate Worker, or unsafe state/);
     assert.match(text, /communication boundary, not a reduction in durable proof/);
     assert.match(text, /product-facing progress updates under the Quiet Control Plane/);
+    assert.match(text, /## Scarce Orchestrator Budget/);
+    assert.match(text, /not the complete board or session transcript/);
+    assert.match(text, /Do not paste full reports, repeated command output, or subagent transcripts into the lead context/);
+    assert.match(text, /Reuse one warm Keeper for related operations inside one uninterrupted digest-bound sequence/);
+    assert.match(text, /a genuine recovery still uses a fresh audit identity/);
+    assert.match(text, /do not create polling or status-churn turns/);
+    assert.match(text, /Do not delegate the work for which the lead orchestrator is selected/);
+    assert.match(text, /Claude Code may use ExecPlans, Workflow Plan, Workflow Review, Workflow Simplify/);
+    assert.match(text, /Codex may use ExecPlans, Omega Plan, Omega Review, Omega Simplify/);
   }
 
   for (const text of [canonicalSkill, pluginSkill, claudeGoalCommand]) {
@@ -240,14 +249,17 @@ test("slice policy is simple and mirrored across templates and agent payloads", 
   assert.equal(pluginWorker, canonicalWorker);
   assert.equal(pluginJudge, canonicalJudge);
   assert.doesNotMatch(canonicalState, /Pick small reviewable work/);
-  assert.match(canonicalState, /Pick the largest safe useful slice with clear allowed_files, verify commands, and stop conditions/);
+  assert.match(canonicalState, /Pick the largest safe useful slice with the narrowest truthful allowed_files envelope/);
+  assert.match(canonicalState, /bounded component or directory globs for broad vertical slices that may create files/);
   assert.match(canonicalState, /max_consecutive_tiny_tasks: 2/);
   assert.match(canonicalWorker, /model_reasoning_effort = "high"/);
   assert.match(canonicalWorker, /complete the whole assigned slice/i);
   assert.match(canonicalWorker, /Never stop with uncommitted changes and no receipt/);
   assert.match(canonicalWorker, /"deviations": \[\]/);
   assert.match(canonicalJudge, /largest safe useful slice/i);
-  assert.match(canonicalJudge, /copy the plan section's own file list into allowed_files verbatim/);
+  assert.match(canonicalJudge, /written plan's file list as evidence, not automatically the authority envelope/);
+  assert.match(canonicalJudge, /narrowest truthful scope/);
+  assert.match(canonicalJudge, /queued placeholder for later atomic hydration/);
 });
 
 test("recovery ledger is a read-only reconciler rather than a task actor", () => {
@@ -396,6 +408,10 @@ test("adaptive execution strategy governs quality routing in contract and charte
     assert.match(text, /preserve the checkpoint, repair and retry only the failed gate/);
     assert.match(text, /never enter board truth/);
     assert.match(text, /Independent implementation review is not a Judge task/);
+    assert.match(text, /### Adaptive write scope/);
+    assert.match(text, /execution authority envelope, not a prediction contest/);
+    assert.match(text, /bounded component or directory globs/);
+    assert.match(text, /never widen authority retroactively after work exists/);
     assert.doesNotMatch(text, /review only at risk or phase boundaries/);
   }
   for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {

@@ -50,11 +50,19 @@ if len(args) == 4 and args[:2] == ['contract', '--target'] and args[3] == '--jso
         target_report.update(native_goal_ready=True, duplicate_compiler_present=False)
     else:
         target_report['goal_command_ready'] = True
+    goal_prep_path = os.environ['FAKE_GOAL_PREP_PATH']
+    compiler_path = os.environ['FAKE_COMPILER_PATH']
+    goal_prep_fingerprint = os.environ['FAKE_GOAL_PREP_FINGERPRINT']
+    compiler_fingerprint = os.environ['FAKE_COMPILER_FINGERPRINT']
     payload = {
         'ok': True,
         'contract_version': 1,
         'product_version': '0.5.0',
         'board_schema_version': 2,
+        'skills': {
+            'goal_prep': {'path': goal_prep_path, 'tree_fingerprint': goal_prep_fingerprint, 'source_tree_fingerprint': goal_prep_fingerprint},
+            'compiler': {'path': compiler_path, 'tree_fingerprint': compiler_fingerprint, 'source_tree_fingerprint': compiler_fingerprint},
+        },
         'capabilities': capabilities,
         'source': {'kind': 'local_git_checkout', 'root': '/tmp/goalbuddy', 'commit': 'a' * 40, 'dirty': False, 'installed_bytes_match': True, 'verified': True},
         'target': target_report,
@@ -81,7 +89,16 @@ raise SystemExit(2)
 
 
 def run(cli: Path, target: str, *, use_override: bool = True, **overrides: str) -> tuple[int, dict[str, object]]:
-    env = {**os.environ, **overrides}
+    goal_prep_path = REPO / "goalbuddy"
+    compiler_path = REPO / "codex-goal-compiler"
+    env = {
+        **os.environ,
+        "FAKE_GOAL_PREP_PATH": str(goal_prep_path),
+        "FAKE_COMPILER_PATH": str(compiler_path),
+        "FAKE_GOAL_PREP_FINGERPRINT": _fingerprint(goal_prep_path),
+        "FAKE_COMPILER_FINGERPRINT": _fingerprint(compiler_path),
+        **overrides,
+    }
     if use_override:
         env["GOALBUDDY_BIN"] = str(cli)
     else:
@@ -94,6 +111,20 @@ def run(cli: Path, target: str, *, use_override: bool = True, **overrides: str) 
         env=env,
     )
     return result.returncode, json.loads(result.stdout)
+
+
+def _fingerprint(root: Path) -> str:
+    import hashlib
+
+    excluded = {".DS_Store", ".goalbuddy-board", ".goalbuddy-install.json", ".goal-maker-install.json", "__pycache__"}
+    digest = hashlib.sha256()
+    files = sorted(path for path in root.rglob("*") if path.is_file() and not any(part in excluded for part in path.relative_to(root).parts))
+    for path in files:
+        digest.update(path.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 class GoalBuddyRuntimeCliTests(unittest.TestCase):

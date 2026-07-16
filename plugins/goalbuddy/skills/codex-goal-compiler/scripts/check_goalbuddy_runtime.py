@@ -9,15 +9,25 @@ capability subset, so additive runtime changes do not break goal compilation.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 REQUIRED_CONTRACT_VERSION = 1
 REQUIRED_BOARD_SCHEMA_VERSION = 2
+FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
+FINGERPRINT_EXCLUDES = {
+    ".DS_Store",
+    ".goalbuddy-board",
+    ".goalbuddy-install.json",
+    ".goal-maker-install.json",
+    "__pycache__",
+}
 REQUIRED_RUNTIME_CAPABILITIES = frozenset(
     {
         "atomic_amendment_transition",
@@ -72,6 +82,25 @@ def run_json(command: list[str], *, timeout: float) -> tuple[int, dict[str, Any]
     return result.returncode, decoded, ""
 
 
+def skill_tree_fingerprint(root: Path) -> str:
+    if not root.is_dir():
+        return ""
+    digest = hashlib.sha256()
+    files = sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and not any(part in FINGERPRINT_EXCLUDES for part in path.relative_to(root).parts)
+    )
+    for path in files:
+        relative = path.relative_to(root).as_posix()
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def contract_semantic_errors(target: str, contract: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     required_fields = {
@@ -79,6 +108,7 @@ def contract_semantic_errors(target: str, contract: dict[str, Any]) -> list[str]
         "contract_version",
         "product_version",
         "board_schema_version",
+        "skills",
         "capabilities",
         "source",
         "target",
@@ -100,6 +130,33 @@ def contract_semantic_errors(target: str, contract: dict[str, Any]) -> list[str]
         )
     if not isinstance(contract.get("product_version"), str) or not contract.get("product_version"):
         errors.append("GoalBuddy contract product_version must be a non-empty string")
+
+    skills = contract.get("skills")
+    if not isinstance(skills, dict):
+        errors.append("GoalBuddy contract skills must be an object")
+    else:
+        for skill_name in ("goal_prep", "compiler"):
+            binding = skills.get(skill_name)
+            if not isinstance(binding, dict):
+                errors.append(f"GoalBuddy contract skills.{skill_name} must be an object")
+                continue
+            path_value = binding.get("path")
+            fingerprint = binding.get("tree_fingerprint")
+            source_fingerprint = binding.get("source_tree_fingerprint")
+            if not isinstance(path_value, str) or not Path(path_value).is_absolute():
+                errors.append(f"GoalBuddy contract skills.{skill_name}.path must be absolute")
+                continue
+            if not isinstance(fingerprint, str) or not FINGERPRINT_RE.fullmatch(fingerprint):
+                errors.append(f"GoalBuddy contract skills.{skill_name}.tree_fingerprint must be sha256")
+                continue
+            if not isinstance(source_fingerprint, str) or not FINGERPRINT_RE.fullmatch(source_fingerprint):
+                errors.append(f"GoalBuddy contract skills.{skill_name}.source_tree_fingerprint must be sha256")
+                continue
+            actual_fingerprint = skill_tree_fingerprint(Path(path_value))
+            if actual_fingerprint != fingerprint:
+                errors.append(f"GoalBuddy contract skills.{skill_name} path bytes do not match its fingerprint")
+            if fingerprint != source_fingerprint:
+                errors.append(f"GoalBuddy contract skills.{skill_name} installed bytes do not match source bytes")
 
     capabilities = contract.get("capabilities")
     if not isinstance(capabilities, list) or not all(isinstance(item, str) for item in capabilities):

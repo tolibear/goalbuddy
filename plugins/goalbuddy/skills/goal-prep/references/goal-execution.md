@@ -92,6 +92,21 @@ Surface control-plane mechanics only when at least one condition holds:
 
 When an exception applies, name the product impact first, then the minimum mechanism detail needed to make the decision understandable. Never hide a real discrepancy, approval gate, failed verification, possible duplicate Worker, or unsafe state merely to sound quiet. This is a communication boundary, not a reduction in durable proof, recovery auditing, or mutation safety.
 
+## Scarce Orchestrator Budget
+
+Quiet output is not enough. Protect the lead orchestrator's context, tool calls, and output tokens so its scarce attention stays on the owner contract, specifications and plans, architecture, orchestration, direct diff review, review adjudication, and final completion judgment.
+
+Use the smallest authoritative projection that supports the current decision:
+
+- At startup and recovery, give the lead PM the validated continuation projection and Ledger verdict, not the complete board or session transcript. Escalate to full-board or session-log inspection only when compact evidence is missing, contradictory, or unsafe.
+- For task execution, give Workers the rendered task prompt. For review and adjudication, give the lead PM the exact diff or content-addressed artifact, compact receipts, verification results, and material findings. Do not paste full reports, repeated command output, or subagent transcripts into the lead context.
+- Delegate full-board inspection and mutation mechanics to Ledger and Keeper, and deterministic validation to scripts. Reuse one warm Keeper for related operations inside one uninterrupted digest-bound sequence; a genuine recovery still uses a fresh audit identity. Batch nonessential annotations into the next substantive transition, and do not create polling or status-churn turns.
+- Require delegated lanes to return compact receipts, findings, or decisions rather than narrated work logs. A cheaper lane is appropriate only when replacing the lead PM does not reduce decision quality.
+
+Do not delegate the work for which the lead orchestrator is selected: owner/spec decisions, implementation-plan authorship or revision, architecture and taste, direct review of material diffs, adjudication of independent review findings, material board restructuring, and final completion. When any compact projection is insufficient for one of those decisions, spend the lead context deliberately.
+
+Harness-native capability names stay runtime-only. Claude Code may use ExecPlans, Workflow Plan, Workflow Review, Workflow Simplify, dynamic GPT-5.6 workflows, and Codex Exec. Codex may use ExecPlans, Omega Plan, Omega Review, Omega Simplify, and Codex Workers. Boards record semantic capabilities and artifact bindings, never these vendor-specific route names.
+
 ## Boards Move Between Harnesses
 
 A board may arrive mid-run from a different harness: a goal started in Codex can be resumed in Claude Code and vice versa. `state.yaml` is the only durable board truth, but a durable record can still be stale, malformed, mid-closeout, or inconsistent with repository reality. On recovery, never reconstruct progress from chat history, and never blindly trust an active-task label as proof that continuation or redispatch is safe. Receipts written by another harness are as authoritative as your own once the recovery audit below finds the board congruent.
@@ -215,6 +230,18 @@ A slice is automatically material when it touches auth, money, permissions, migr
 Material slices normally receive, in order: a hardened plan, implementation by a bounded Worker, direct diff review by the PM, an independent implementation review, adjudication of findings with bounded fixes, verification, and a receipt. Simplification is available both as a review lens and as a standalone pass after large, cross-cutting, or complexity-producing changes.
 
 Small, mechanical, decision-complete changes may skip rungs. PM confidence alone is never a sufficient reason to skip independent review on a material slice during a long autonomous run. When the PM reduces the ladder for a material slice, record that downward deviation in PM-owned evidence: the rationale and evidence of the next phase-gate or final-audit Judge/PM receipt the PM authors. Never append it to a Worker's receipt — Worker `deviations` keeps its receipt-spec meaning (the Worker's own in-scope judgment calls against the task text), and subagent receipts pass to Keeper verbatim. Do not add board notes or new schema fields for it; if per-slice durability ever proves necessary, design a PM-owned additive field explicitly rather than overloading `deviations`.
+
+### Adaptive write scope
+
+`allowed_files` is an execution authority envelope, not a prediction contest. Choose the narrowest truthful scope at the seam where the work is understood:
+
+- Use exact files for small, decision-complete changes and sensitive ownership boundaries.
+- Use bounded component or directory globs for broad vertical slices that legitimately create or reorganize files.
+- Never use a repository-wide convenience glob merely to avoid planning.
+- Leave future queued Worker placeholders unhydrated when their truthful scope is not known. The just-in-time plan or Judge package hydrates `allowed_files`, `verify`, and `stop_if` atomically immediately before activation.
+- Put forbidden boundaries and escalation conditions in `stop_if`. If execution needs to cross the active envelope, stop and create a structured successor or amendment before those writes; never widen authority retroactively after work exists.
+
+The plan's file inventory is evidence, not automatically the authority envelope. Preserve exact plan paths when they are complete; otherwise derive a bounded envelope that covers the whole approved slice and explain any broader directory scope in the task objective or constraints.
 
 ### Independent review is not Judge
 

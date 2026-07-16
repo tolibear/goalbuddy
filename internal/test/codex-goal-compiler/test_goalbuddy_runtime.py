@@ -34,11 +34,25 @@ def valid_contract(target: str) -> dict[str, object]:
         target_report.update(native_goal_ready=True, duplicate_compiler_present=False)
     else:
         target_report["goal_command_ready"] = True
+    goal_prep_path = REPO / "goalbuddy"
+    compiler_path = REPO / "codex-goal-compiler"
     return {
         "ok": True,
         "contract_version": 1,
         "product_version": "0.5.0",
         "board_schema_version": 2,
+        "skills": {
+            "goal_prep": {
+                "path": str(goal_prep_path),
+                "tree_fingerprint": mod.skill_tree_fingerprint(goal_prep_path),
+                "source_tree_fingerprint": mod.skill_tree_fingerprint(goal_prep_path),
+            },
+            "compiler": {
+                "path": str(compiler_path),
+                "tree_fingerprint": mod.skill_tree_fingerprint(compiler_path),
+                "source_tree_fingerprint": mod.skill_tree_fingerprint(compiler_path),
+            },
+        },
         "capabilities": list(RUNTIME_CAPABILITIES),
         "source": {
             "kind": "local_git_checkout",
@@ -97,6 +111,22 @@ class Tests(unittest.TestCase):
         for contract in cases:
             with self.subTest(contract=contract):
                 self.assertTrue(mod.contract_semantic_errors("codex", contract))
+
+    def test_rejects_skill_path_fingerprint_and_source_drift(self):
+        contract = valid_contract("codex")
+        contract["skills"]["goal_prep"]["path"] = "relative/path"
+        errors = mod.contract_semantic_errors("codex", contract)
+        self.assertTrue(any("path must be absolute" in error for error in errors), errors)
+
+        contract = valid_contract("codex")
+        contract["skills"]["goal_prep"]["tree_fingerprint"] = "0" * 64
+        errors = mod.contract_semantic_errors("codex", contract)
+        self.assertTrue(any("path bytes do not match" in error for error in errors), errors)
+
+        contract = valid_contract("codex")
+        contract["skills"]["goal_prep"]["source_tree_fingerprint"] = "f" * 64
+        errors = mod.contract_semantic_errors("codex", contract)
+        self.assertTrue(any("installed bytes do not match source" in error for error in errors), errors)
 
     def test_timeout_configuration_requires_a_finite_positive_number(self):
         original = os.environ.get("GOALBUDDY_TIMEOUT_SECONDS")

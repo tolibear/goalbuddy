@@ -98,13 +98,13 @@ If the repository provides `AGENTS.md`, `PLANS.md`, `plans.md`, or another gover
 1. Read the current conversation and every named accepted source artifact.
 2. Test the source against the decision-complete contract above.
 3. Determine the active target: `codex` or `claude`, unless the user explicitly supplied it.
-4. Run only that target's `scripts/check_goalbuddy_runtime.py` preflight.
+4. Run only that target's `scripts/check_goalbuddy_runtime.py` preflight. Retain its exact `contract.skills.goal_prep.path`, `contract.skills.compiler.path`, and tree fingerprints; they are the only installed skill bindings authorized for this compile.
 5. Choose a lowercase-hyphen slug and run `scripts/check_new_goal_path.py` before reading or writing the root.
 6. Synthesize the owner outcome, oracle, completion proof, likely misfire, done/not-done traps, verification loop, boundaries, concurrency, and first safe phase.
 7. Preserve accepted source facts and challenge only material ambiguity. Do not silently alter the accepted design.
 8. Compile the adaptive execution strategy. For large work, preserve vertical slices and choose an honest upfront, just-in-time, or hybrid planning horizon. Record semantic capabilities, never vendor skill names or a pre-scheduled ceremony list.
 9. For Codex, construct and validate the hybrid `/goal` objective defined in `references/goalbuddy-compiler.md`; for Claude, prepare the portable `/goal Follow ...` command.
-10. Explicitly load the selected harness's installed Goal Prep `SKILL.md` in this same compiler context and give it the exact handoff from `references/handoff-prompts.md`.
+10. Explicitly load the installed Goal Prep `SKILL.md` at `<contract.skills.goal_prep.path>/SKILL.md` in this same compiler context and give it the exact handoff from `references/handoff-prompts.md`. Do not rediscover Goal Prep through harness search paths or a similarly named skill. If the path or fingerprint no longer matches the accepted preflight contract, stop and rerun preflight.
 11. Have Goal Prep create the file-only board from its canonical templates and schema. Never spawn a subagent or separate task merely to prepare it.
 12. Run GoalBuddy's official checker and every semantic acceptance gate in `references/goalbuddy-compiler.md`.
 13. Fix compilation defects and rerun validation. Do not waive them in prose.

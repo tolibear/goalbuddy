@@ -58,12 +58,12 @@ python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target codex --jso
 python3 <compiler-skill>/scripts/check_goalbuddy_runtime.py --target claude --json
 ```
 
-The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. Missing requirements block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, and source provenance. Agent-file presence alone is insufficient because a Keeper must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block compilation and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
+The checker consumes GoalBuddy compiler contract v1 and requires board schema v2 plus seven capabilities: `atomic_amendment_transition`, `atomic_placeholder_hydration_transition`, `lossless_receipt_identity`, `strict_multiline_yaml_projection`, `closed_judge_decision_vocabulary`, `atomic_exact_human_wait_resume`, and `atomic_goal_completion`. It also returns the exact absolute installed Goal Prep and compiler paths plus installed/source tree fingerprints. Missing requirements or mismatched bytes block preflight; additive capabilities do not. GoalBuddy itself owns doctor topology, installed agent inventory, compiler/backend presence, target readiness, source provenance, and installed skill binding. Agent-file presence alone is insufficient because a Keeper must be able to apply either Judge outcome without a partial task edit/close/activate sequence, preserve receipt identity, enter and resume an exact-human wait through the digest-bound atomic surface, complete a goal through one digest-bound final-audit transition, and fail closed at strict parser and decision boundaries. If preflight fails, block compilation and report the exact repair. Do not infer readiness from another harness or fall back to private schema.
 
 ## GoalBuddy workflow
 
 1. Confirm the accepted specification, plan, or conversation contract satisfies the compiler's decision-complete source contract. Otherwise return `not_compilable` without creating a board.
-2. Run selected-target preflight.
+2. Run selected-target preflight and retain the exact `contract.skills` paths and fingerprints.
 3. Guard the new board path.
 4. Synthesize readiness:
    - interpreted outcome;
@@ -78,7 +78,7 @@ The checker consumes GoalBuddy compiler contract v1 and requires board schema v2
    - concurrency summary.
 5. Run the quality pass in `references/handoff-prompts.md`.
 6. For Codex, construct and validate the hybrid objective with `validate_codex_goal_objective.py`. Target under 400 characters; hard cap 4,000.
-7. In the current compiler context, explicitly load and execute the selected harness's installed Goal Prep `SKILL.md` as a declared internal dependency. Its implicit/model invocation may be disabled by design; do not rely on trigger matching. Never spawn a subagent, collaboration agent, or separate Codex task merely to prepare the board.
+7. In the current compiler context, explicitly load and execute `<contract.skills.goal_prep.path>/SKILL.md` as a declared internal dependency. Do not rediscover it through harness search paths or a similarly named skill. If its current tree fingerprint differs from the accepted contract, stop and rerun preflight. Its implicit/model invocation may be disabled by design; do not rely on trigger matching. Never spawn a subagent, collaboration agent, or separate Codex task merely to prepare the board.
 8. Run the official board checker and the compiler acceptance gates: require checker `ok: true`, no unresolved placeholders, no weak oracle/final-proof warnings, installed agents, and visible official mapping for all proof expectations. File-only preparation does not run unrelated repository-wide product or source suites.
 9. Return to the compiler immediately after checker and semantic acceptance, then print one user-facing checkpoint. Do not keep a board-preparation loop alive after acceptance.
 10. Stop. Print the target-correct command for a later execution turn; never start `/goal` from the compiler.
@@ -103,7 +103,7 @@ Every GoalBuddy compile must preserve:
    - real-surface QA → executable verification or separate QA task/evidence;
    - adversarial QA → Judge decision/evidence/missing evidence;
    - cleanup/receipt → changed files, deviations, cleanup/final audit, atomic receipt application.
-10. **Adaptive execution strategy** — the charter's `## Execution Strategy` section instantiated per `references/adaptive-execution-strategy.md`: planning horizon, quality ladder, materiality refinements, risk triggers, and semantic capabilities. Never a pre-scheduled sequence of workflow invocations, and never vendor skill names in board or charter text.
+10. **Adaptive execution strategy** — the charter's `## Execution Strategy` section instantiated per `references/adaptive-execution-strategy.md`: planning horizon, quality ladder, materiality refinements, risk triggers, semantic capabilities, and the narrowest truthful write-scope strategy. Never a pre-scheduled sequence of workflow invocations, and never vendor skill names in board or charter text.
 11. **Preflight** — baseline commit, Git state, applicable `AGENTS.md`, agents, target adapter.
 
 Do not copy a generic `gates:` object into GoalBuddy cards or receipts unless the installed runtime defines it.

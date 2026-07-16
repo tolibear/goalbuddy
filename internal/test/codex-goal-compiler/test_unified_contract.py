@@ -110,6 +110,18 @@ class CompilerContractTests(unittest.TestCase):
             self.assertIn(needle, self.skill)
         self.assertIn("Planning horizon", self.strategy)
         self.assertIn("capabilities are semantic", self.strategy)
+        self.assertIn("Adaptive write scope", self.strategy)
+        self.assertIn("bounded component or directory globs", self.strategy)
+        self.assertIn("atomic just-in-time hydration", self.strategy)
+        self.assertIn("never widened retroactively", self.strategy)
+
+    def test_preflight_binds_the_exact_installed_goal_prep(self):
+        combined = "\n".join((self.skill, self.goalbuddy))
+        self.assertIn("contract.skills.goal_prep.path", combined)
+        self.assertIn("contract.skills.compiler.path", combined)
+        self.assertIn("tree fingerprints", combined)
+        self.assertIn("Do not rediscover Goal Prep", combined)
+        self.assertIn("stop and rerun preflight", combined)
 
     def test_large_source_is_bound_not_copied_into_board_truth(self):
         combined = "\n".join((self.skill, self.goalbuddy, self.handoff))

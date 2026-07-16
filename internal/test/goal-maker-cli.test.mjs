@@ -276,6 +276,11 @@ test("contract exposes the stable Codex compiler boundary after an isolated inst
     assert.equal(report.contract_version, 1);
     assert.equal(report.product_version, packageVersion);
     assert.equal(report.board_schema_version, 2);
+    assert.equal(report.skills.goal_prep.path, join(codexHome, "plugins", "cache", "goalbuddy", "goalbuddy", packageVersion, "skills", "goal-prep"));
+    assert.equal(report.skills.compiler.path, join(codexHome, "plugins", "cache", "goalbuddy", "goalbuddy", packageVersion, "skills", "codex-goal-compiler"));
+    assert.match(report.skills.goal_prep.tree_fingerprint, /^[0-9a-f]{64}$/);
+    assert.equal(report.skills.goal_prep.tree_fingerprint, report.skills.goal_prep.source_tree_fingerprint);
+    assert.equal(report.skills.compiler.tree_fingerprint, report.skills.compiler.source_tree_fingerprint);
     assert.deepEqual(report.capabilities, Object.keys(runtimeCapabilities).sort());
     assert.equal(report.target.name, "codex");
     assert.equal(report.target.install_model, "plugin");
@@ -309,6 +314,10 @@ test("contract exposes the stable Claude compiler boundary after an isolated ins
     assert.equal(report.target.compiler_installed, true);
     assert.equal(report.target.agents_ready, true);
     assert.equal(report.target.goal_command_ready, true);
+    assert.equal(report.skills.goal_prep.path, join(claudeHome, "skills", "goal-prep"));
+    assert.equal(report.skills.compiler.path, join(claudeHome, "skills", "codex-goal-compiler"));
+    assert.equal(report.skills.goal_prep.tree_fingerprint, report.skills.goal_prep.source_tree_fingerprint);
+    assert.equal(report.skills.compiler.tree_fingerprint, report.skills.compiler.source_tree_fingerprint);
     assert.deepEqual(report.errors, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -341,7 +350,7 @@ test("install retires only a recognized standalone compiler symlink", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-retire-compiler-link-"));
   try {
     const codexHome = join(root, "codex-home");
-    const oldCompiler = join(root, "old-compiler");
+    const oldCompiler = join(root, "Code", "skills", "shared", "skills", "codex-goal-compiler");
     const standalone = join(root, ".agents", "skills", "codex-goal-compiler");
     mkdirSync(oldCompiler, { recursive: true });
     writeFileSync(join(oldCompiler, "SKILL.md"), "old compiler\n");
@@ -354,10 +363,44 @@ test("install retires only a recognized standalone compiler symlink", () => {
     const report = JSON.parse(install.stdout);
     assert.equal(report.standalone_compiler_cleanup.status, "removed_symlink");
     assert.equal(report.standalone_compiler_cleanup.previous_target, oldCompiler);
+    assert.equal(report.standalone_compiler_cleanup.resolved_target, oldCompiler);
+    assert.match(report.standalone_compiler_cleanup.previous_fingerprint, /^[0-9a-f]{64}$/);
     assert.equal(lstatSync(standalone, { throwIfNoEntry: false }), undefined);
 
     const doctor = runGoalMaker(["doctor", "--target", "codex", "--codex-home", codexHome], { env });
     assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("install refuses an unrecognized standalone compiler symlink before mutating either harness", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-refuse-unknown-compiler-link-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const claudeHome = join(root, "claude-home");
+    const unknownCompiler = join(root, "other", "codex-goal-compiler");
+    const standalone = join(root, ".agents", "skills", "codex-goal-compiler");
+    mkdirSync(unknownCompiler, { recursive: true });
+    writeFileSync(join(unknownCompiler, "SKILL.md"), "user-owned compiler\n");
+    mkdirSync(dirname(standalone), { recursive: true });
+    symlinkSync(unknownCompiler, standalone, "dir");
+    const before = snapshotPath(join(root, ".agents"));
+    const env = fakeCodexEnv(root);
+
+    const install = runGoalMaker([
+      "install",
+      "--codex-home",
+      codexHome,
+      "--claude-home",
+      claudeHome,
+      "--json",
+    ], { env });
+    assert.equal(install.status, 1, install.stderr || install.stdout);
+    assert.match(install.stderr, /unrecognized standalone compiler symlink/);
+    assert.equal(existsSync(codexHome), false);
+    assert.equal(existsSync(claudeHome), false);
+    assert.deepEqual(snapshotPath(join(root, ".agents")), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -438,6 +481,7 @@ test("install restores every owned runtime byte after a failure at each activati
       };
       const env = {
         ...fakeCodexEnv(root),
+        GOALBUDDY_LEGACY_COMPILER_ROOT: oldCompiler,
         GOALBUDDY_TEST_FAIL_AFTER: checkpoint,
       };
       const install = runGoalMaker([
