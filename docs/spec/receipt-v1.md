@@ -156,7 +156,7 @@ harness: codex | claude-code | <other runtime name>
 
 identifying the runtime that performed the task. Boards are portable across harnesses (the format is plain repo files), and this field lets a board's history show which harness produced each receipt after a handoff. Optional and additive — validators must tolerate its absence and its presence.
 
-A receipt may point to long-form evidence through a relative forward-slash `note: notes/<task-id>-<slug>.md` path. The file must exist inside the owning board. An empty `notes/` directory is never required and need not be committed; create it when the first explicit note pointer is written.
+A receipt may point to long-form evidence through a relative forward-slash `note: notes/<task-id>-<slug>.md` path. The file must exist inside the owning board. An empty `notes/` directory is never required and need not be committed; create it when the first explicit note pointer is written. New receipts may use `note` only in this canonical pointer form. The serialized-board checker preserves pre-contract prose, empty, and external-path `note` values as inert historical evidence so existing boards require no rewrite.
 
 A terminal wait for an exact human reply uses one closed shape: `result: blocked`, `waiting_for_user_approval: true`, and a nonempty `required_reply`, on a board that explicitly enables `rules.exact_human_approval_can_terminal_wait: true`. No approval-class field is recognized or inferred.
 

@@ -121,7 +121,7 @@ test("does not require an empty notes directory", () => {
   }
 });
 
-test("requires only explicit receipt.note paths and keeps prose inert", () => {
+test("validates explicit notes/ pointers while preserving legacy receipt.note values", () => {
   const completedScout = validScoutBoard
     .replace("active_task: T001", "active_task: T002")
     .replace('    status: active\n    objective: "Map the repo and identify improvement candidates."', '    status: done\n    objective: "Map the repo and identify improvement candidates."')
@@ -142,7 +142,13 @@ test("requires only explicit receipt.note paths and keeps prose inert", () => {
     result = runChecker(root);
     assert.equal(result.status, 0, JSON.stringify(result.stdout));
 
-    for (const invalid of ["../escape.md", "notes/../escape.md", "notes\\T001.md", "/tmp/T001.md", "notes/"]) {
+    for (const legacy of [".context/infra/t022-qa/qa-receipt.md", "M-G adjudication and receipt history", ""]) {
+      writeState(root, completedScout.replace("note: notes/T001.md", `note: ${JSON.stringify(legacy)}`));
+      result = runChecker(root);
+      assert.equal(result.status, 0, `${legacy}: ${JSON.stringify(result.stdout)}`);
+    }
+
+    for (const invalid of ["notes/../escape.md", "notes/T001.md/", "notes/"]) {
       writeState(root, completedScout.replace("note: notes/T001.md", `note: ${JSON.stringify(invalid)}`));
       result = runChecker(root);
       assert.equal(result.status, 1, invalid);

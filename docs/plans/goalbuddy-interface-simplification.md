@@ -31,7 +31,8 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 - [x] (2026-07-17) Completed Milestone 4 with truthful mutation reports and one disclosed, exact-session, write-forbidden receipt repair after clean scope proof.
 - [x] (2026-07-17) Completed Milestone 5 with a 12,835-byte kernel, one exceptional recipe reference, pointer-thin agent receipt instructions, and a fail-closed prepared `/goal` command.
 - [x] (2026-07-17) Completed Milestone 6 so absent unused `notes/` is valid while explicit contained note pointers remain checked.
-- [x] (2026-07-17) Completed Milestone 7: 244 Node tests and 49 compiler tests pass, packaging and byte-exact mirrors pass, disposable installs match candidate bytes, and fresh Claude Opus, Codex, and child-board journeys exercised the public candidate surfaces.
+- [x] (2026-07-17) Completed Milestone 7: the final compatibility-adjusted gate passes 245 Node tests and 49 compiler tests, packaging and byte-exact mirrors pass, disposable installs match candidate bytes, and fresh Claude Opus, Codex, child-board, and real-board compatibility journeys exercised the public candidate surfaces.
+- [x] (2026-07-17) Post-implementation unknowns replay found and corrected a legacy `receipt.note` compatibility regression before activation; the serialized checker now preserves historical prose/external-path values while live receipt admission requires canonical `notes/...` pointers.
 - [ ] Obtain separate explicit approval before activation; activation itself is not part of this implementation run.
 
 ## Surprises & Discoveries
@@ -74,6 +75,9 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 
 - Observation: Merely naming `${CLAUDE_HOME:-$HOME/.claude}` still invited a fresh Claude lead to spend turns resolving environment provenance. Deriving the skill as the sibling of the already-read `<claude-home>/commands/goal.md` removed that search without hard-coding a home.
   Evidence: the final fresh Opus journey read the command, charter, sibling kernel, ran resume, and checked product state without loading Goal Prep, Codex Goal Compiler, raw `state.yaml`, the exceptional reference, source checkout, or plugin mirrors.
+
+- Observation: The first isolated implementation interpreted every historical `receipt.note` value as a new `notes/...` pointer. The live Wedding Media Ship board passes the base runtime but failed the candidate on five prose, empty, or `.context/...` note values, contradicting the no-migration contract.
+  Evidence: candidate `resume-board.mjs` against `/Users/danielalnajjar/.codex/worktrees/laughing-wilson-b6fe08-bce168ff/placecard/docs/goals/wedding-media-ship` failed while base commit `ab3724c` passed. The corrected checker classifies only exact `notes/...` syntax as a durable pointer; the shared live receipt validator rejects new noncanonical note values before installation.
 
 ## Decision Log
 
@@ -125,6 +129,10 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
   Rationale: An empty directory has no durable Git identity or proven recovery role. The meaningful invariant is that declared evidence resolves, not that an unused directory exists.
   Date/Author: 2026-07-17 / Codex.
 
+- Decision: Keep the serialized checker tolerant of historical non-`notes/` receipt values while requiring canonical `notes/...` syntax for every newly dispatched or applied receipt.
+  Rationale: Existing boards used `receipt.note` for prose and `.context/...` evidence before the pointer contract existed. Compatibility belongs in the historical checker; the shared live validator remains the strict boundary for new proof, so preserving old bytes does not reopen the ambiguity for future receipts.
+  Date/Author: 2026-07-17 / Codex.
+
 - Decision: Preserve the existing read-only Goal Ledger audit at genuine recovery boundaries. The non-goal is a new persisted or runtime ledger, not removal of recovery reconciliation.
   Rationale: The Ledger prevented duplicate work in real runs and keeps complete board bytes out of the lead context. It is a recovery role, not a second source of truth.
   Date/Author: 2026-07-17 / Codex.
@@ -162,8 +170,9 @@ Final evidence:
 - The real fresh Codex journey used one read command plus the exact candidate resume command, selected `T001`, preserved `README.md`-only authority, and chose direct mechanical dispatch. It did not load excluded surfaces.
 - The public child-board journey returned two checked board-tree entries, two active lanes, and one composite `board_tree_sha256` digest without reading raw boards into the lead.
 - The malformed-receipt success fixture performs one invalid first attempt and exactly one zero-write repair attempt. The second-invalid, authority-violation, changed-contract, and repair-write fixtures fail closed with no additional retry. Field repair rate remains intentionally unmeasured until later live operation.
-- Focused public CLI coverage passed `72/72`; the final receipt/apply/checker/dispatch audit passed `106/106`. The final full gate passed `244/244` Node tests plus `49/49` compiler tests, `npm run pack:dry-run`, mirror synchronization, and `git diff --check`.
-- The final disposable source and installed payload fingerprints both equal `7a3e2a64ca5539105e001bb3f40d301509c90d83a65175cc20e307c061c11084`. Claude doctor/contract are ready. Disposable Codex bytes and all five agents are clean; its contract reports not-ready only because that isolated `CODEX_HOME` intentionally has no login, while the authenticated read-only Codex journey succeeded against the same candidate source.
+- Focused public CLI coverage passed `72/72`; the final receipt/apply/checker/dispatch audit passed `106/106`. After the compatibility replay, the final full gate passed `245/245` Node tests plus `49/49` compiler tests, `npm run pack:dry-run`, mirror synchronization, and `git diff --check`.
+- The post-compatibility disposable source and installed payload fingerprints both equal `4d90fa7cd77d6d9d3da79700c20709594920543025d26ef32f1831da3acf7d60`, and the installed Goal Prep tree equals its source fingerprint `976cd6381c6a01fd0d6581a9da9f0cf2bc2bdcf8cfcc18a29fb94911019f162d`. Claude doctor/contract are ready. Disposable Codex bytes and all five agents are clean; its contract reports not-ready only because that isolated `CODEX_HOME` intentionally has no login, while the authenticated read-only Codex journey succeeded against the same candidate source.
+- Candidate `resume` now checks both authoritative live boards without mutation: North Star Runway is checker-green at `T018`, and Wedding Media Ship is checker-green at `T033`. This live-corpus replay is the compatibility gate the original representative fixtures lacked.
 - The remaining limitation is deliberate: recovery cannot infer that an unbound active Worker is dead. The Ledger returns `uncertain` and requires PM liveness adjudication instead of risking duplicate dispatch.
 
 No live runtime, active board, project worktree, or historical receipt was changed. Activation remains unauthorized and requires the plan's separate explicit owner approval plus a fresh quiescence audit.
@@ -296,7 +305,7 @@ Milestone acceptance: the kernel is at most 18,000 bytes; canonical and plugin c
 
 ### Milestone 6: Remove the empty-directory trap
 
-Change `goalbuddy/scripts/check-goal-state.mjs` so an absent `notes/` directory is valid when no `tasks[].receipt.note` scalar points into `notes/`. Treat that field as a note pointer only under the closed syntax established in Milestone 1: a relative forward-slash path beginning `notes/`, resolved inside the owning root or child board. Reject absolute paths, backslash aliases, empty terminal names, `.` or `..` traversal, and resolved escape. Require the referenced file to exist. Do not inspect `note_needed`, `commands[].note`, `inputs`, `evidence`, summaries, rationales, or arbitrary strings for path-like text. If Milestone 1 enumerates another pre-existing explicitly documented long-note pointer, add it here by name and test it; do not introduce a semantic string classifier. Apply the same rule to depth-one child boards.
+Change `goalbuddy/scripts/check-goal-state.mjs` so an absent `notes/` directory is valid when no `tasks[].receipt.note` scalar points into `notes/`. Treat that field as a note pointer only under the closed syntax established in Milestone 1: a relative forward-slash path beginning `notes/`, resolved inside the owning root or child board. The serialized checker preserves historical prose, empty, and external-path values that do not use that syntax; the shared live receipt validator rejects those forms on every new dispatch or apply. For declared `notes/...` pointers, reject backslash aliases, empty terminal names, `.` or `..` traversal, and resolved escape, and require the referenced file to exist. Do not inspect `note_needed`, `commands[].note`, `inputs`, `evidence`, summaries, rationales, or arbitrary strings for path-like text. If Milestone 1 enumerates another pre-existing explicitly documented long-note pointer, add it here by name and test it; do not introduce a semantic string classifier. Apply the same rule to depth-one child boards.
 
 Keep `goalbuddy init` free to create `notes/` locally for convenience, but do not add `.gitkeep` solely to satisfy validation. Update templates, local board tests, checker tests, and documentation to describe notes as created on first use rather than a durable empty-directory invariant.
 

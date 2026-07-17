@@ -593,11 +593,11 @@ for (const task of tasks) {
 function validateReceiptNote(task) {
   if (!task.receipt.present || task.receipt.value === null || typeof task.receipt.has !== "function" || !task.receipt.has("note")) return;
   const note = task.receipt.scalar("note");
-  if (typeof note !== "string" || note.trim() === "") {
-    errors.push(`receipt note for ${task.id} must be a nonempty relative notes/ path`);
-    return;
-  }
-  if (note.includes("\\") || !note.startsWith("notes/") || note.endsWith("/") || note.startsWith("/") || /^[A-Za-z]:/.test(note)) {
+  // Historical boards used receipt.note for prose and external evidence paths.
+  // Only the closed notes/... syntax declares a durable board-local pointer.
+  // New receipts are held to that syntax by receipt-contract.mjs before install.
+  if (typeof note !== "string" || !note.startsWith("notes/")) return;
+  if (note.includes("\\") || note.endsWith("/")) {
     errors.push(`receipt note for ${task.id} must be a relative forward-slash path rooted at notes/: ${note}`);
     return;
   }

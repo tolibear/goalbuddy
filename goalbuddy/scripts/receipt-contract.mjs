@@ -117,6 +117,7 @@ export function validateTaskReceipt(receipt, { role, taskId, boardPath, verify =
   if (Object.hasOwn(receipt, "harness") && (typeof receipt.harness !== "string" || receipt.harness.trim() === "")) {
     add("harness", "harness must be a nonempty string when present", receipt.harness);
   }
+  if (Object.hasOwn(receipt, "note")) validateNotePointer(receipt.note, add);
   if (!isJsonSafe(receipt)) add("$", "receipt must contain only JSON-safe data", receipt);
 
   for (const field of RESERVED_BY_ROLE[role] || []) {
@@ -203,6 +204,21 @@ function validatePm(receipt, add) {
   if (Object.hasOwn(receipt, "decision") && !JUDGE_DECISIONS.has(receipt.decision)) add("decision", "PM decision uses unsupported vocabulary", receipt.decision);
   if (Object.hasOwn(receipt, "full_outcome_complete") && typeof receipt.full_outcome_complete !== "boolean") {
     add("full_outcome_complete", "full_outcome_complete must be boolean", receipt.full_outcome_complete);
+  }
+}
+
+function validateNotePointer(note, add) {
+  if (typeof note !== "string" || note.trim() === "") {
+    add("note", "note must be a nonempty relative notes/ path when present", note);
+    return;
+  }
+  if (note.includes("\\") || !note.startsWith("notes/") || note.endsWith("/") || note.startsWith("/") || /^[A-Za-z]:/.test(note)) {
+    add("note", "note must be a relative forward-slash path rooted at notes/", note);
+    return;
+  }
+  const segments = note.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    add("note", "note must not contain empty, dot, or traversal segments", note);
   }
 }
 

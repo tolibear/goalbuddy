@@ -35,6 +35,27 @@ test("validation is pure and preserves additive JSON-safe evidence", () => {
   assert.equal(assertTaskReceipt(receipt, { role: "worker", taskId: "T001", boardPath: receipt.board_path, verify: ["npm test"] }), receipt);
 });
 
+test("new receipts accept only canonical board-local note pointers", () => {
+  const base = receiptExample({ role: "scout", result: "done" });
+  for (const note of ["notes/T001-evidence.md", "notes/nested/T001.md"]) {
+    const receipt = { ...base, note };
+    assert.deepEqual(validateTaskReceipt(receipt, {
+      role: "scout",
+      taskId: "T001",
+      boardPath: receipt.board_path,
+    }), [], note);
+  }
+
+  for (const note of ["", ".context/T001.md", "prose evidence", "../escape.md", "notes/../escape.md", "notes\\T001.md", "/tmp/T001.md", "notes/"]) {
+    const receipt = { ...base, note };
+    assert.ok(validateTaskReceipt(receipt, {
+      role: "scout",
+      taskId: "T001",
+      boardPath: receipt.board_path,
+    }).some((finding) => finding.path === "note"), note);
+  }
+});
+
 test("rejects malformed Worker proof without normalization", () => {
   const bareCommands = { ...receiptExample({ role: "worker", result: "done" }), commands: ["npm test"] };
   const findings = validateTaskReceipt(bareCommands, { role: "worker", taskId: "T001", boardPath: bareCommands.board_path, verify: ["npm test"] });
