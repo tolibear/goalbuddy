@@ -36,7 +36,7 @@ function isDirectRun() {
 }
 
 export function parseDispatchArgs(args) {
-  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", timeoutSeconds: 1200, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
+  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", timeoutSeconds: null, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -58,8 +58,8 @@ export function parseDispatchArgs(args) {
     else if (arg === "--resume-session") { options.resumeSession = requiredOptionValue(args, index, arg); index += 1; }
     else if (arg.startsWith("--resume-session=")) options.resumeSession = joinedOptionValue(arg, "--resume-session");
     else if (arg === "--confirmed-not-live") options.confirmedNotLive = true;
-    else if (arg === "--timeout") { options.timeoutSeconds = Number(requiredOptionValue(args, index, arg)) || 1200; index += 1; }
-    else if (arg.startsWith("--timeout=")) options.timeoutSeconds = Number(joinedOptionValue(arg, "--timeout")) || 1200;
+    else if (arg === "--timeout") { options.timeoutSeconds = parseTimeoutSeconds(requiredOptionValue(args, index, arg)); index += 1; }
+    else if (arg.startsWith("--timeout=")) options.timeoutSeconds = parseTimeoutSeconds(joinedOptionValue(arg, "--timeout"));
     else if (arg.startsWith("-")) throw new Error(`Unknown argument: ${arg}`);
     else if (!options.goalRoot) options.goalRoot = arg;
     else throw new Error(`Unexpected argument: ${arg}`);
@@ -80,6 +80,14 @@ export function parseDispatchArgs(args) {
     throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact resume requires --confirmed-not-live after the PM or Ledger proves the original Worker is terminal or lost.");
   }
   return options;
+}
+
+function parseTimeoutSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw publicError("INVALID_ARGUMENT", "--timeout must be a positive number of seconds.");
+  }
+  return seconds;
 }
 
 export async function dispatchTask(options) {
@@ -235,7 +243,7 @@ function runHarness(to, prompt, { cwd, model, reasoningEffort, serviceTier, sand
         try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
       }
     };
-    const timer = setTimeout(() => { timedOut = true; terminate(); }, timeoutSeconds * 1000);
+    const timer = timeoutSeconds === null ? null : setTimeout(() => { timedOut = true; terminate(); }, timeoutSeconds * 1000);
     child.stdout?.on("data", (chunk) => {
       const text = chunk.toString("utf8");
       stdout += text;
@@ -270,11 +278,11 @@ function runHarness(to, prompt, { cwd, model, reasoningEffort, serviceTier, sand
     });
     child.stderr?.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
     child.on("error", (error) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       resolveRun({ error: error.code === "ENOENT" ? `The ${to} CLI ("${command.file}") was not found on PATH. Install it or choose another --to target.` : error.message, status: null, stdout, stderr, sessionError: false });
     });
     child.on("close", (status) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       if (timedOut) return resolveRun({ error: `The ${to} CLI timed out after ${timeoutSeconds}s.`, status, stdout, stderr, sessionError: false });
       if (sessionError) return resolveRun({ error: sessionError, status, stdout, stderr, sessionError: true });
       if (to === "codex" && role === "worker" && !startedThreadId) return resolveRun({ error: "Codex did not emit a thread.started session identity.", status, stdout, stderr, sessionError: true });

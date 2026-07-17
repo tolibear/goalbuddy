@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { parseDispatchArgs } from "../../goalbuddy/scripts/dispatch-task.mjs";
 
 const dispatcher = resolve("goalbuddy/scripts/dispatch-task.mjs");
 
@@ -282,6 +283,14 @@ test("dispatch times out hung harness CLIs", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("dispatch has no implicit deadline and accepts only explicit positive timeouts", () => {
+  const baseArgs = ["docs/goals/one", "--to", "codex", "--expected-state-digest", "0".repeat(64)];
+  assert.equal(parseDispatchArgs(baseArgs).timeoutSeconds, null);
+  assert.equal(parseDispatchArgs([...baseArgs, "--timeout", "1.5"]).timeoutSeconds, 1.5);
+  assert.throws(() => parseDispatchArgs([...baseArgs, "--timeout", "0"]), /--timeout must be a positive number/);
+  assert.throws(() => parseDispatchArgs([...baseArgs, "--timeout", "not-a-number"]), /--timeout must be a positive number/);
 });
 
 test("goalbuddy dispatch CLI wrapper forwards to the bundled script", () => {
