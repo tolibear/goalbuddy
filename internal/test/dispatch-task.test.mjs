@@ -140,16 +140,20 @@ test("Codex dispatch closes stdin and pins the configured execution profile", ()
   }
 });
 
-test("Codex dispatch can explicitly disable Fast and binds the selected tier", () => {
+test("Codex dispatch can select reasoning effort and disable Fast", () => {
   const root = makeProject();
   const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-tier-"));
   try {
     const argsPath = join(evidenceRoot, "codex-args.txt");
     const bin = fakeHarnessBin(root, "codex", `printf '%s\\n' "$@" > '${argsPath}'\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
-    const result = runDispatch(root, bin, ["--service-tier", "default"]);
+    const result = runDispatch(root, bin, ["--reasoning-effort", "high", "--service-tier", "default"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(readFileSync(argsPath, "utf8"), /service_tier="default"/);
+    const args = readFileSync(argsPath, "utf8");
+    assert.match(args, /model_reasoning_effort="high"/);
+    assert.match(args, /service_tier="default"/);
+    assert.match(args, /recommended_reasoning: high/);
     const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
+    assert.match(state, /reasoning_effort: high/);
     assert.match(state, /service_tier: default/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -319,7 +323,12 @@ test("dispatch times out hung harness CLIs", () => {
 test("dispatch has no implicit deadline and accepts only explicit positive timeouts", () => {
   const baseArgs = ["docs/goals/one", "--to", "codex", "--expected-state-digest", "0".repeat(64)];
   assert.equal(parseDispatchArgs(baseArgs).timeoutSeconds, null);
+  assert.equal(parseDispatchArgs(baseArgs).reasoningEffort, "");
   assert.equal(parseDispatchArgs(baseArgs).serviceTier, "");
+  for (const effort of ["low", "medium", "high", "xhigh", "max", "ultra"]) {
+    assert.equal(parseDispatchArgs([...baseArgs, "--reasoning-effort", effort]).reasoningEffort, effort);
+  }
+  assert.throws(() => parseDispatchArgs([...baseArgs, "--reasoning-effort", "extreme"]), /must be low, medium, high, xhigh, max, or ultra/);
   assert.equal(parseDispatchArgs([...baseArgs, "--service-tier", "default"]).serviceTier, "default");
   assert.throws(() => parseDispatchArgs([...baseArgs, "--service-tier", "turbo"]), /must be fast, default, or flex/);
   assert.equal(parseDispatchArgs([...baseArgs, "--timeout", "1.5"]).timeoutSeconds, 1.5);
@@ -589,6 +598,11 @@ test("wrong-session and changed-contract resume attempts fail before process lau
     assert.equal(existsSync(marker), false);
 
     result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live", "--service-tier", "default"]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
+    assert.equal(existsSync(marker), false);
+
+    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live", "--reasoning-effort", "high"]);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
     assert.equal(existsSync(marker), false);

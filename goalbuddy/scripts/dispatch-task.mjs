@@ -10,7 +10,7 @@ import { sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requiredOptionValue } from "./public-error.mjs";
 import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
 import { bindCodexWorkerSession } from "./apply-receipt.mjs";
-import { isCodexServiceTier, isCodexThreadId } from "./codex-exec-contract.mjs";
+import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -37,7 +37,7 @@ function isDirectRun() {
 }
 
 export function parseDispatchArgs(args) {
-  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", serviceTier: "", timeoutSeconds: null, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
+  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", reasoningEffort: "", serviceTier: "", timeoutSeconds: null, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -52,6 +52,8 @@ export function parseDispatchArgs(args) {
     else if (arg.startsWith("--to=")) options.to = joinedOptionValue(arg, "--to");
     else if (arg === "--model") { options.model = requiredOptionValue(args, index, arg); index += 1; }
     else if (arg.startsWith("--model=")) options.model = joinedOptionValue(arg, "--model");
+    else if (arg === "--reasoning-effort") { options.reasoningEffort = parseReasoningEffort(requiredOptionValue(args, index, arg)); index += 1; }
+    else if (arg.startsWith("--reasoning-effort=")) options.reasoningEffort = parseReasoningEffort(joinedOptionValue(arg, "--reasoning-effort"));
     else if (arg === "--service-tier") { options.serviceTier = parseServiceTier(requiredOptionValue(args, index, arg)); index += 1; }
     else if (arg.startsWith("--service-tier=")) options.serviceTier = parseServiceTier(joinedOptionValue(arg, "--service-tier"));
     else if (arg === "--brief") { options.briefPath = requiredOptionValue(args, index, arg); index += 1; }
@@ -68,7 +70,7 @@ export function parseDispatchArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot && !options.boardPath) {
-    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
+    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
   }
   if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
     throw publicError("STALE_STATE_DIGEST", "dispatch requires --expected-state-digest with exactly 64 lowercase hex characters.");
@@ -93,6 +95,14 @@ function parseServiceTier(value) {
   return tier;
 }
 
+function parseReasoningEffort(value) {
+  const effort = String(value || "").toLowerCase();
+  if (!isCodexSolReasoningEffort(effort)) {
+    throw publicError("INVALID_ARGUMENT", "--reasoning-effort must be low, medium, high, xhigh, max, or ultra for gpt-5.6-sol.");
+  }
+  return effort;
+}
+
 function parseTimeoutSeconds(value) {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -111,6 +121,9 @@ export async function dispatchTask(options) {
   }
   if (options.serviceTier && to !== "codex") {
     return failure("INVALID_ARGUMENT", "--service-tier applies only to Codex dispatch.", { task_id: task.id });
+  }
+  if (options.reasoningEffort && to !== "codex") {
+    return failure("INVALID_ARGUMENT", "--reasoning-effort applies only to Codex dispatch.", { task_id: task.id });
   }
   const root = repositoryRoot(dirname(board.path));
   normalizeRepositoryPath(root, board.path);
@@ -355,7 +368,7 @@ function effectiveExecutionProfile({ options, to, role, existingBinding }) {
   }
   const requested = {
     model: options.model || "gpt-5.6-sol",
-    reasoningEffort: "medium",
+    reasoningEffort: options.reasoningEffort || "medium",
     serviceTier: options.serviceTier || "fast",
     sandbox: READ_ONLY_ROLES.has(role) ? "read-only" : "danger-full-access",
   };
@@ -367,7 +380,7 @@ function effectiveExecutionProfile({ options, to, role, existingBinding }) {
     sandbox: existingBinding.sandbox,
   };
   for (const [key, value] of Object.entries(requested)) {
-    const explicitlyOverridden = key === "model" ? Boolean(options.model) : key === "serviceTier" ? Boolean(options.serviceTier) : false;
+    const explicitlyOverridden = key === "model" ? Boolean(options.model) : key === "reasoningEffort" ? Boolean(options.reasoningEffort) : key === "serviceTier" ? Boolean(options.serviceTier) : false;
     if (explicitlyOverridden && value !== bound[key]) {
       throw publicError("CODEX_SESSION_RESUME_FAILED", `Resume ${key} override differs from the bound Worker contract; no process was launched.`);
     }

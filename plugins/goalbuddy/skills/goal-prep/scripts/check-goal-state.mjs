@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { isCodexServiceTier, isCodexThreadId } from "./codex-exec-contract.mjs";
+import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
@@ -679,7 +679,7 @@ function validateCodexWorkerSession(task, session) {
   if (!isCodexThreadId(session.session_id)) errors.push(`${label}.session_id must be an RFC 9562 UUID`);
   if (session.task_id !== task.id) errors.push(`${label}.task_id must equal ${task.id}`);
   if (typeof session.model !== "string") errors.push(`${label}.model must be a string`);
-  if (session.reasoning_effort !== "medium") errors.push(`${label}.reasoning_effort must be medium`);
+  if (!isCodexSolReasoningEffort(session.reasoning_effort)) errors.push(`${label}.reasoning_effort is invalid for gpt-5.6-sol`);
   if (!isCodexServiceTier(session.service_tier)) errors.push(`${label}.service_tier is invalid`);
   if (!['workspace-write', 'read-only', 'danger-full-access'].includes(session.sandbox)) errors.push(`${label}.sandbox is invalid`);
   for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "launch_state_digest"]) {
