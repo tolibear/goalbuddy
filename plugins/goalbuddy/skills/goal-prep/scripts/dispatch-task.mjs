@@ -92,15 +92,12 @@ export async function dispatchTask(options) {
   }
   const root = repositoryRoot(dirname(board.path));
   normalizeRepositoryPath(root, board.path);
-  const effectiveModel = options.resumeSession && existingBinding ? existingBinding.model : options.model;
-  if (options.resumeSession && options.model && options.model !== existingBinding?.model) {
-    throw publicError("CODEX_SESSION_RESUME_FAILED", "Resume model override differs from the bound Worker contract; no process was launched.");
-  }
+  const executionProfile = effectiveExecutionProfile({ options, to, role, existingBinding });
   const boundOptions = options.resumeSession && existingBinding?.brief_path && !options.briefPath
     ? { ...options, briefPath: existingBinding.brief_path, briefSha256: existingBinding.brief_sha256 }
     : options;
   const boundInput = loadBoundInput(root, boundOptions);
-  const dispatchContractSha256 = compileDispatchContract({ payload, to, model: effectiveModel, sandbox: payload.metadata.sandbox, brief: boundInput });
+  const dispatchContractSha256 = compileDispatchContract({ payload, to, executionProfile, brief: boundInput });
   if (!options.resumeSession && to === "codex" && role === "worker" && existingBinding) {
     return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest } });
   }
@@ -132,13 +129,12 @@ export async function dispatchTask(options) {
   const continuationPrompt = `Continue the original GoalBuddy contract for task ${task.id}. Preserve its existing authority and return the required goalbuddy_receipt_v1.`;
   const run = await runHarness(to, options.resumeSession ? continuationPrompt : prompt, {
     cwd: root,
-    model: effectiveModel,
-    sandbox: payload.metadata.sandbox,
+    ...executionProfile,
     role,
     timeoutSeconds: options.timeoutSeconds,
     resumeSession: options.resumeSession,
     onThreadStarted: to === "codex" && role === "worker" && !options.resumeSession ? (sessionId) => {
-      const evidence = codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: board.stateDigest, model: effectiveModel, sandbox: payload.metadata.sandbox });
+      const evidence = codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: board.stateDigest, executionProfile });
       bindingReport = bindCodexWorkerSession({
         goalRoot: board.path,
         taskId: task.id,
@@ -222,8 +218,8 @@ function scopeFailureMessage(scope, prefix) {
   return details.length > 0 ? `${prefix} ${details.join("; ")}` : prefix;
 }
 
-function runHarness(to, prompt, { cwd, model, sandbox, role, timeoutSeconds, resumeSession = "", onThreadStarted = null, expectedThreadId = "" }) {
-  const command = harnessCommand(to, prompt, { model, sandbox, role, resumeSession });
+function runHarness(to, prompt, { cwd, model, reasoningEffort, serviceTier, sandbox, role, timeoutSeconds, resumeSession = "", onThreadStarted = null, expectedThreadId = "" }) {
+  const command = harnessCommand(to, prompt, { model, reasoningEffort, serviceTier, sandbox, role, resumeSession });
   return new Promise((resolveRun) => {
     let stdout = "";
     let stderr = "";
@@ -232,7 +228,7 @@ function runHarness(to, prompt, { cwd, model, sandbox, role, timeoutSeconds, res
     let threadNotified = false;
     let sessionError = "";
     let timedOut = false;
-    const child = spawn(command.file, command.args, { cwd, shell: process.platform === "win32", env: process.env, detached: process.platform !== "win32" });
+    const child = spawn(command.file, command.args, { cwd, shell: process.platform === "win32", env: process.env, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     const terminate = () => {
       if (process.platform === "win32") child.kill("SIGTERM");
       else {
@@ -287,11 +283,13 @@ function runHarness(to, prompt, { cwd, model, sandbox, role, timeoutSeconds, res
   });
 }
 
-export function harnessCommand(to, prompt, { model = "", sandbox = "workspace-write", role = "worker", resumeSession = "" } = {}) {
+export function harnessCommand(to, prompt, { model = "", reasoningEffort = "", serviceTier = "", sandbox = "workspace-write", role = "worker", resumeSession = "" } = {}) {
   if (to === "codex") {
     const args = resumeSession ? ["exec", "resume", resumeSession] : ["exec"];
     args.push("--json", "--skip-git-repo-check", "-c", `sandbox_mode=${JSON.stringify(sandbox)}`);
     if (model) args.push("-c", `model=${JSON.stringify(model)}`);
+    if (reasoningEffort) args.push("-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
+    if (serviceTier) args.push("-c", `service_tier=${JSON.stringify(serviceTier)}`);
     args.push(prompt);
     return { file: "codex", args };
   }
@@ -301,8 +299,39 @@ export function harnessCommand(to, prompt, { model = "", sandbox = "workspace-wr
   return { file: "claude", args };
 }
 
-export function compileDispatchContract({ payload, to, model = "", sandbox, brief = null }) {
-  return sha256(JSON.stringify({ version: 1, renderer_version: 1, task: payload.task, role: payload.task.type, to, model, sandbox, brief }));
+export function compileDispatchContract({ payload, to, executionProfile, brief = null }) {
+  return sha256(JSON.stringify({ version: 1, renderer_version: 1, task: payload.task, role: payload.task.type, to, model: executionProfile.model, sandbox: executionProfile.sandbox, brief }));
+}
+
+function effectiveExecutionProfile({ options, to, role, existingBinding }) {
+  if (to !== "codex") {
+    return {
+      model: options.model,
+      reasoningEffort: "",
+      serviceTier: "",
+      sandbox: READ_ONLY_ROLES.has(role) ? "read-only" : "workspace-write",
+    };
+  }
+  const requested = {
+    model: options.model || "gpt-5.6-sol",
+    reasoningEffort: "medium",
+    serviceTier: "fast",
+    sandbox: READ_ONLY_ROLES.has(role) ? "read-only" : "danger-full-access",
+  };
+  if (!options.resumeSession || !existingBinding) return requested;
+  const bound = {
+    model: existingBinding.model,
+    reasoningEffort: "medium",
+    serviceTier: "fast",
+    sandbox: existingBinding.sandbox,
+  };
+  for (const [key, value] of Object.entries(requested)) {
+    const explicitlyOverridden = key === "model" ? Boolean(options.model) : false;
+    if (explicitlyOverridden && value !== bound[key]) {
+      throw publicError("CODEX_SESSION_RESUME_FAILED", `Resume ${key} override differs from the bound Worker contract; no process was launched.`);
+    }
+  }
+  return bound;
 }
 
 function loadBoundInput(root, options) {
@@ -316,7 +345,7 @@ function loadBoundInput(root, options) {
   return Object.freeze({ path, sha256: actual });
 }
 
-function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest, model = "", sandbox = "workspace-write" }) {
+function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest, executionProfile }) {
   const codexHome = realpathSync(resolve(process.env.CODEX_HOME || resolve(process.env.HOME || "", ".codex")));
   return {
     harness: "codex",
@@ -326,8 +355,8 @@ function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, disp
     workspace_root_sha256: sha256(realpathSync(root)),
     codex_home_sha256: sha256(codexHome),
     dispatch_contract_sha256: dispatchContractSha256,
-    model,
-    sandbox,
+    model: executionProfile.model,
+    sandbox: executionProfile.sandbox,
     brief_path: boundInput?.path ?? null,
     brief_sha256: boundInput?.sha256 ?? null,
     launch_state_digest: boardStateDigest,
@@ -337,7 +366,7 @@ function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, disp
 function validateResumeBinding({ options, existingBinding, task, board, root, boardRepositoryPath, dispatchContractSha256, boundInput }) {
   if ((options.to || "codex") !== "codex" || task.type !== "worker") throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact Codex resume is available only for a Codex Worker task.");
   if (!existingBinding || existingBinding.session_id !== options.resumeSession || existingBinding.task_id !== task.id) throw publicError("CODEX_SESSION_RESUME_FAILED", "The active task does not carry the requested exact Codex session binding.");
-  const expected = codexSessionEvidence({ sessionId: options.resumeSession, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: existingBinding.launch_state_digest, model: existingBinding.model, sandbox: existingBinding.sandbox });
+  const expected = codexSessionEvidence({ sessionId: options.resumeSession, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: existingBinding.launch_state_digest, executionProfile: { model: existingBinding.model, reasoningEffort: "medium", serviceTier: "fast", sandbox: existingBinding.sandbox } });
   for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "sandbox", "brief_path", "brief_sha256"]) {
     if (existingBinding[key] !== expected[key]) throw publicError("CODEX_SESSION_RESUME_FAILED", `Codex session binding no longer matches ${key}; no process was launched.`);
   }

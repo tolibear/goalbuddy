@@ -103,6 +103,28 @@ test("dispatch runs an external worker and reports a clean scope", () => {
   }
 });
 
+test("Codex dispatch closes stdin and pins the configured execution profile", () => {
+  const root = makeProject();
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-profile-"));
+  try {
+    const argsPath = join(evidenceRoot, "codex-args.txt");
+    const bin = fakeHarnessBin(root, "codex", `printf '%s\\n' "$@" > '${argsPath}'\nif read _line; then exit 41; fi\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const args = readFileSync(argsPath, "utf8");
+    assert.match(args, /model="gpt-5\.6-sol"/);
+    assert.match(args, /model_reasoning_effort="medium"/);
+    assert.match(args, /service_tier="fast"/);
+    assert.match(args, /sandbox_mode="danger-full-access"/);
+    const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
+    assert.match(state, /model: gpt-5\.6-sol/);
+    assert.match(state, /sandbox: danger-full-access/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+});
+
 test("dispatch flags out-of-scope writes from an external worker", () => {
   const root = makeProject();
   try {
