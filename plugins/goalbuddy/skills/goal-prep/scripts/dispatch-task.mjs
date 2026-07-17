@@ -10,6 +10,7 @@ import { sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requiredOptionValue } from "./public-error.mjs";
 import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
 import { bindCodexWorkerSession } from "./apply-receipt.mjs";
+import { isCodexServiceTier, isCodexThreadId } from "./codex-exec-contract.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -36,7 +37,7 @@ function isDirectRun() {
 }
 
 export function parseDispatchArgs(args) {
-  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", timeoutSeconds: null, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
+  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", serviceTier: "", timeoutSeconds: null, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -51,6 +52,8 @@ export function parseDispatchArgs(args) {
     else if (arg.startsWith("--to=")) options.to = joinedOptionValue(arg, "--to");
     else if (arg === "--model") { options.model = requiredOptionValue(args, index, arg); index += 1; }
     else if (arg.startsWith("--model=")) options.model = joinedOptionValue(arg, "--model");
+    else if (arg === "--service-tier") { options.serviceTier = parseServiceTier(requiredOptionValue(args, index, arg)); index += 1; }
+    else if (arg.startsWith("--service-tier=")) options.serviceTier = parseServiceTier(joinedOptionValue(arg, "--service-tier"));
     else if (arg === "--brief") { options.briefPath = requiredOptionValue(args, index, arg); index += 1; }
     else if (arg.startsWith("--brief=")) options.briefPath = joinedOptionValue(arg, "--brief");
     else if (arg === "--brief-sha256") { options.briefSha256 = requiredOptionValue(args, index, arg); index += 1; }
@@ -65,7 +68,7 @@ export function parseDispatchArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot && !options.boardPath) {
-    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
+    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
   }
   if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
     throw publicError("STALE_STATE_DIGEST", "dispatch requires --expected-state-digest with exactly 64 lowercase hex characters.");
@@ -73,13 +76,21 @@ export function parseDispatchArgs(args) {
   if (Boolean(options.briefPath) !== Boolean(options.briefSha256) || (options.briefSha256 && !/^[a-f0-9]{64}$/.test(options.briefSha256))) {
     throw publicError("INVALID_ARGUMENT", "dispatch requires --brief and --brief-sha256 together with a 64-character lowercase digest.");
   }
-  if (options.resumeSession && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.resumeSession)) {
+  if (options.resumeSession && !isCodexThreadId(options.resumeSession)) {
     throw publicError("CODEX_SESSION_RESUME_FAILED", "--resume-session must be an exact UUID; --last is never accepted.");
   }
   if (options.resumeSession && !options.confirmedNotLive) {
     throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact resume requires --confirmed-not-live after the PM or Ledger proves the original Worker is terminal or lost.");
   }
   return options;
+}
+
+function parseServiceTier(value) {
+  const tier = String(value || "").toLowerCase();
+  if (!isCodexServiceTier(tier)) {
+    throw publicError("INVALID_ARGUMENT", "--service-tier must be fast, default, or flex.");
+  }
+  return tier;
 }
 
 function parseTimeoutSeconds(value) {
@@ -98,14 +109,25 @@ export async function dispatchTask(options) {
   if (!HARNESSES.has(to)) {
     return failure("INVALID_ARGUMENT", `Unknown or missing dispatch target "${to}". Use --to codex or --to claude-code (or set harness: on the task card).`, { task_id: task.id });
   }
+  if (options.serviceTier && to !== "codex") {
+    return failure("INVALID_ARGUMENT", "--service-tier applies only to Codex dispatch.", { task_id: task.id });
+  }
   const root = repositoryRoot(dirname(board.path));
   normalizeRepositoryPath(root, board.path);
   const executionProfile = effectiveExecutionProfile({ options, to, role, existingBinding });
+  const dispatchPayload = {
+    ...payload,
+    metadata: {
+      ...payload.metadata,
+      recommended_reasoning: executionProfile.reasoningEffort || payload.metadata.recommended_reasoning,
+      sandbox: executionProfile.sandbox,
+    },
+  };
   const boundOptions = options.resumeSession && existingBinding?.brief_path && !options.briefPath
     ? { ...options, briefPath: existingBinding.brief_path, briefSha256: existingBinding.brief_sha256 }
     : options;
   const boundInput = loadBoundInput(root, boundOptions);
-  const dispatchContractSha256 = compileDispatchContract({ payload, to, executionProfile, brief: boundInput });
+  const dispatchContractSha256 = compileDispatchContract({ payload: dispatchPayload, to, executionProfile, brief: boundInput });
   if (!options.resumeSession && to === "codex" && role === "worker" && existingBinding) {
     return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest } });
   }
@@ -117,7 +139,7 @@ export async function dispatchTask(options) {
   }
 
   const prompt = [
-    formatPrompt(payload),
+    formatPrompt(dispatchPayload),
     "",
     "Dispatch notes:",
     `- Work only inside the admitted repository: ${root}`,
@@ -308,7 +330,18 @@ export function harnessCommand(to, prompt, { model = "", reasoningEffort = "", s
 }
 
 export function compileDispatchContract({ payload, to, executionProfile, brief = null }) {
-  return sha256(JSON.stringify({ version: 1, renderer_version: 1, task: payload.task, role: payload.task.type, to, model: executionProfile.model, sandbox: executionProfile.sandbox, brief }));
+  return sha256(JSON.stringify({
+    version: 1,
+    renderer_version: 1,
+    task: payload.task,
+    role: payload.task.type,
+    to,
+    model: executionProfile.model,
+    reasoning_effort: executionProfile.reasoningEffort,
+    service_tier: executionProfile.serviceTier,
+    sandbox: executionProfile.sandbox,
+    brief,
+  }));
 }
 
 function effectiveExecutionProfile({ options, to, role, existingBinding }) {
@@ -323,18 +356,18 @@ function effectiveExecutionProfile({ options, to, role, existingBinding }) {
   const requested = {
     model: options.model || "gpt-5.6-sol",
     reasoningEffort: "medium",
-    serviceTier: "fast",
+    serviceTier: options.serviceTier || "fast",
     sandbox: READ_ONLY_ROLES.has(role) ? "read-only" : "danger-full-access",
   };
   if (!options.resumeSession || !existingBinding) return requested;
   const bound = {
     model: existingBinding.model,
-    reasoningEffort: "medium",
-    serviceTier: "fast",
+    reasoningEffort: existingBinding.reasoning_effort,
+    serviceTier: existingBinding.service_tier,
     sandbox: existingBinding.sandbox,
   };
   for (const [key, value] of Object.entries(requested)) {
-    const explicitlyOverridden = key === "model" ? Boolean(options.model) : false;
+    const explicitlyOverridden = key === "model" ? Boolean(options.model) : key === "serviceTier" ? Boolean(options.serviceTier) : false;
     if (explicitlyOverridden && value !== bound[key]) {
       throw publicError("CODEX_SESSION_RESUME_FAILED", `Resume ${key} override differs from the bound Worker contract; no process was launched.`);
     }
@@ -364,6 +397,8 @@ function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, disp
     codex_home_sha256: sha256(codexHome),
     dispatch_contract_sha256: dispatchContractSha256,
     model: executionProfile.model,
+    reasoning_effort: executionProfile.reasoningEffort,
+    service_tier: executionProfile.serviceTier,
     sandbox: executionProfile.sandbox,
     brief_path: boundInput?.path ?? null,
     brief_sha256: boundInput?.sha256 ?? null,
@@ -374,8 +409,8 @@ function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, disp
 function validateResumeBinding({ options, existingBinding, task, board, root, boardRepositoryPath, dispatchContractSha256, boundInput }) {
   if ((options.to || "codex") !== "codex" || task.type !== "worker") throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact Codex resume is available only for a Codex Worker task.");
   if (!existingBinding || existingBinding.session_id !== options.resumeSession || existingBinding.task_id !== task.id) throw publicError("CODEX_SESSION_RESUME_FAILED", "The active task does not carry the requested exact Codex session binding.");
-  const expected = codexSessionEvidence({ sessionId: options.resumeSession, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: existingBinding.launch_state_digest, executionProfile: { model: existingBinding.model, reasoningEffort: "medium", serviceTier: "fast", sandbox: existingBinding.sandbox } });
-  for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "sandbox", "brief_path", "brief_sha256"]) {
+  const expected = codexSessionEvidence({ sessionId: options.resumeSession, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: existingBinding.launch_state_digest, executionProfile: { model: existingBinding.model, reasoningEffort: existingBinding.reasoning_effort, serviceTier: existingBinding.service_tier, sandbox: existingBinding.sandbox } });
+  for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "reasoning_effort", "service_tier", "sandbox", "brief_path", "brief_sha256"]) {
     if (existingBinding[key] !== expected[key]) throw publicError("CODEX_SESSION_RESUME_FAILED", `Codex session binding no longer matches ${key}; no process was launched.`);
   }
   if (board.stateDigest !== options.expectedStateDigest) throw publicError("STALE_STATE_DIGEST", "Board changed before exact resume.");

@@ -8,8 +8,11 @@ import { createHash } from "node:crypto";
 import { parseDispatchArgs } from "../../goalbuddy/scripts/dispatch-task.mjs";
 
 const dispatcher = resolve("goalbuddy/scripts/dispatch-task.mjs");
+const applyReceipt = resolve("goalbuddy/scripts/apply-receipt.mjs");
+const CODEX_SESSION_ID = "019f6dab-7b25-7620-9da6-4f79a0648146";
+const OTHER_CODEX_SESSION_ID = "019f6dac-0000-7000-8000-000000000000";
 
-function makeProject({ taskType = "worker" } = {}) {
+function makeProject({ taskType = "worker", successorType = "judge" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-"));
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "widget.mjs"), "export const widget = 1;\n");
@@ -43,10 +46,17 @@ tasks:
       - "Need files outside allowed_files."
     receipt: null
   - id: T002
-    type: judge
-    assignee: Judge
+    type: ${successorType}
+    assignee: ${successorType === "worker" ? "Worker" : "Judge"}
     status: queued
     objective: "Queued audit must never dispatch early."
+${successorType === "worker" ? `    allowed_files:
+      - src/widget.mjs
+    verify:
+      - "true"
+    stop_if:
+      - "Need files outside allowed_files."
+` : ""}
     receipt: null
 `);
   const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -60,7 +70,7 @@ function fakeHarnessBin(root, name, script) {
   const bin = join(root, "fake-bin");
   mkdirSync(bin, { recursive: true });
   const path = join(bin, name);
-  const session = name === "codex" ? `echo '{"type":"thread.started","thread_id":"11111111-1111-4111-8111-111111111111"}'\n` : "";
+  const session = name === "codex" ? `echo '{"type":"thread.started","thread_id":"${CODEX_SESSION_ID}"}'\n` : "";
   writeFileSync(path, `#!/bin/sh\n${session}${script}\n`);
   chmodSync(path, 0o755);
   return bin;
@@ -117,9 +127,30 @@ test("Codex dispatch closes stdin and pins the configured execution profile", ()
     assert.match(args, /model_reasoning_effort="medium"/);
     assert.match(args, /service_tier="fast"/);
     assert.match(args, /sandbox_mode="danger-full-access"/);
+    assert.match(args, /recommended_reasoning: medium/);
+    assert.match(args, /sandbox: danger-full-access/);
     const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
     assert.match(state, /model: gpt-5\.6-sol/);
+    assert.match(state, /reasoning_effort: medium/);
+    assert.match(state, /service_tier: fast/);
     assert.match(state, /sandbox: danger-full-access/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+});
+
+test("Codex dispatch can explicitly disable Fast and binds the selected tier", () => {
+  const root = makeProject();
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-tier-"));
+  try {
+    const argsPath = join(evidenceRoot, "codex-args.txt");
+    const bin = fakeHarnessBin(root, "codex", `printf '%s\\n' "$@" > '${argsPath}'\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin, ["--service-tier", "default"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(readFileSync(argsPath, "utf8"), /service_tier="default"/);
+    const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
+    assert.match(state, /service_tier: default/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(evidenceRoot, { recursive: true, force: true });
@@ -288,6 +319,9 @@ test("dispatch times out hung harness CLIs", () => {
 test("dispatch has no implicit deadline and accepts only explicit positive timeouts", () => {
   const baseArgs = ["docs/goals/one", "--to", "codex", "--expected-state-digest", "0".repeat(64)];
   assert.equal(parseDispatchArgs(baseArgs).timeoutSeconds, null);
+  assert.equal(parseDispatchArgs(baseArgs).serviceTier, "");
+  assert.equal(parseDispatchArgs([...baseArgs, "--service-tier", "default"]).serviceTier, "default");
+  assert.throws(() => parseDispatchArgs([...baseArgs, "--service-tier", "turbo"]), /must be fast, default, or flex/);
   assert.equal(parseDispatchArgs([...baseArgs, "--timeout", "1.5"]).timeoutSeconds, 1.5);
   assert.throws(() => parseDispatchArgs([...baseArgs, "--timeout", "0"]), /--timeout must be a positive number/);
   assert.throws(() => parseDispatchArgs([...baseArgs, "--timeout", "not-a-number"]), /--timeout must be a positive number/);
@@ -517,7 +551,7 @@ test("changed or out-of-repository bound context fails before launch", () => {
 
 test("an interrupted Codex Worker resumes only by its exact task-bound session id", () => {
   const root = makeProject();
-  const sessionId = "11111111-1111-4111-8111-111111111111";
+  const sessionId = CODEX_SESSION_ID;
   try {
     let bin = fakeHarnessBin(root, "codex", "exit 7");
     let result = runDispatch(root, bin);
@@ -542,14 +576,19 @@ test("an interrupted Codex Worker resumes only by its exact task-bound session i
 
 test("wrong-session and changed-contract resume attempts fail before process launch", () => {
   const root = makeProject();
-  const sessionId = "11111111-1111-4111-8111-111111111111";
+  const sessionId = CODEX_SESSION_ID;
   try {
     let bin = fakeHarnessBin(root, "codex", "exit 7");
     let result = runDispatch(root, bin);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     const marker = join(root, "harness-ran");
     bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
-    result = runDispatch(root, bin, ["--resume-session", "44444444-4444-4444-8444-444444444444", "--confirmed-not-live"]);
+    result = runDispatch(root, bin, ["--resume-session", OTHER_CODEX_SESSION_ID, "--confirmed-not-live"]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
+    assert.equal(existsSync(marker), false);
+
+    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live", "--service-tier", "default"]);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
     assert.equal(existsSync(marker), false);
@@ -571,7 +610,7 @@ test("an active task with a bound Codex session rejects fresh redispatch before 
     let bin = fakeHarnessBin(root, "codex", "exit 7");
     const first = runDispatch(root, bin);
     assert.equal(first.status, 1, first.stderr || first.stdout);
-    assert.equal(JSON.parse(first.stdout).session_binding.session_id, "11111111-1111-4111-8111-111111111111");
+    assert.equal(JSON.parse(first.stdout).session_binding.session_id, CODEX_SESSION_ID);
 
     const marker = join(root, "fresh-redispatch-ran");
     bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
@@ -579,6 +618,54 @@ test("an active task with a bound Codex session rejects fresh redispatch before 
     assert.equal(second.status, 1, second.stderr || second.stdout);
     assert.equal(JSON.parse(second.stdout).error_code, "DISPATCH_SESSION_BIND_FAILED");
     assert.equal(existsSync(marker), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a bound Worker can close blocked and activate a fresh successor without unbinding history", () => {
+  const root = makeProject({ successorType: "worker" });
+  try {
+    let bin = fakeHarnessBin(root, "codex", "exit 7");
+    const interrupted = runDispatch(root, bin);
+    assert.equal(interrupted.status, 1, interrupted.stderr || interrupted.stdout);
+    assert.equal(JSON.parse(interrupted.stdout).session_binding.session_id, CODEX_SESSION_ID);
+
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    const receiptPath = join(root, "blocked-receipt.json");
+    writeFileSync(receiptPath, JSON.stringify({
+      result: "blocked",
+      task_id: "T001",
+      board_path: "docs/goals/one/state.yaml",
+      changed_files: [],
+      commands: [{ cmd: "true", status: "pass" }],
+      summary: "Original Worker stopped without product changes.",
+      blocked_reason: "The current package needs a newly scoped successor.",
+      harness: "codex",
+    }));
+    const digest = createHash("sha256").update(readFileSync(statePath)).digest("hex");
+    const transition = spawnSync(process.execPath, [applyReceipt, "docs/goals/one", "--task", "T001", "--receipt", receiptPath, "--expected-state-digest", digest, "--activate", "T002", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(transition.status, 0, transition.stderr || transition.stdout);
+    const transitioned = readFileSync(statePath, "utf8");
+    assert.match(transitioned, /active_task: T002/);
+    assert.match(transitioned, new RegExp(CODEX_SESSION_ID));
+
+    const successorReceipt = JSON.stringify({ goalbuddy_receipt_v1: {
+      result: "done",
+      task_id: "T002",
+      board_path: "docs/goals/one/state.yaml",
+      changed_files: ["src/widget.mjs"],
+      commands: [{ cmd: "true", status: "pass" }],
+      summary: "successor adjusted widget",
+      harness: "codex",
+    } });
+    bin = fakeHarnessBin(root, "codex", `echo "export const widget = 3;" > src/widget.mjs\necho '${successorReceipt}'`);
+    const successor = runDispatch(root, bin);
+    assert.equal(successor.status, 0, successor.stderr || successor.stdout);
+    assert.equal(JSON.parse(successor.stdout).task_id, "T002");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

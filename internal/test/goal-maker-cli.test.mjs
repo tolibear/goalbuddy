@@ -1833,6 +1833,7 @@ test("legacy goal-maker invocation prints rebrand notice only for human output",
     assert.equal(human.status, 0, human.stderr || human.stdout);
     assert.match(human.stdout, /GoalBuddy for Claude Code and Codex/);
     assert.match(human.stdout, /goalbuddy install/);
+    assert.match(human.stdout, /--service-tier fast\|default\|flex/);
     assert.match(human.stderr, /goal-maker has been rebranded to goalbuddy/);
     assert.match(human.stderr, /Use: goalbuddy/);
 

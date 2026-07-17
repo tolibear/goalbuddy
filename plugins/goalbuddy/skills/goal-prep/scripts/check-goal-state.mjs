@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { isCodexServiceTier, isCodexThreadId } from "./codex-exec-contract.mjs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
@@ -670,14 +671,16 @@ function validateCodexWorkerSession(task, session) {
     errors.push(`${label} must be an object`);
     return;
   }
-  const keys = ["harness", "session_id", "task_id", "board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "sandbox", "brief_path", "brief_sha256", "launch_state_digest"];
+  const keys = ["harness", "session_id", "task_id", "board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "reasoning_effort", "service_tier", "sandbox", "brief_path", "brief_sha256", "launch_state_digest"];
   const missing = keys.filter((key) => !Object.hasOwn(session, key));
   const extra = Object.keys(session).filter((key) => !keys.includes(key));
   if (missing.length || extra.length) errors.push(`${label} keys must be exact; missing [${missing.join(", ")}], unexpected [${extra.join(", ")}]`);
   if (session.harness !== "codex") errors.push(`${label}.harness must be codex`);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(session.session_id || ""))) errors.push(`${label}.session_id must be a UUID`);
+  if (!isCodexThreadId(session.session_id)) errors.push(`${label}.session_id must be an RFC 9562 UUID`);
   if (session.task_id !== task.id) errors.push(`${label}.task_id must equal ${task.id}`);
   if (typeof session.model !== "string") errors.push(`${label}.model must be a string`);
+  if (session.reasoning_effort !== "medium") errors.push(`${label}.reasoning_effort must be medium`);
+  if (!isCodexServiceTier(session.service_tier)) errors.push(`${label}.service_tier is invalid`);
   if (!['workspace-write', 'read-only', 'danger-full-access'].includes(session.sandbox)) errors.push(`${label}.sandbox is invalid`);
   for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "launch_state_digest"]) {
     if (!/^[a-f0-9]{64}$/.test(String(session[key] || ""))) errors.push(`${label}.${key} must be 64 lowercase hex characters`);

@@ -1666,10 +1666,10 @@ test("validates the closed task-bound Codex Worker session evidence shape", () =
     .replace("type: scout", "type: worker")
     .replace("assignee: Scout", "assignee: Worker")
     .replace('    expected_output:\n      - "Repo map"\n      - "Candidate tasks"', '    allowed_files:\n      - src/**\n    verify:\n      - "true"\n    stop_if:\n      - "Need files outside allowed_files."')
-    .replace("    receipt: null\n  - id: T002", `    transition_evidence:\n      codex_worker_session:\n        harness: codex\n        session_id: "66666666-6666-4666-8666-666666666666"\n        task_id: T001\n        board_path_sha256: "${"1".repeat(64)}"\n        workspace_root_sha256: "${"2".repeat(64)}"\n        codex_home_sha256: "${"3".repeat(64)}"\n        dispatch_contract_sha256: "${"4".repeat(64)}"\n        model: gpt-5.6-sol\n        sandbox: danger-full-access\n        brief_path: null\n        brief_sha256: null\n        launch_state_digest: "${"5".repeat(64)}"\n    receipt: null\n  - id: T002`);
+    .replace("    receipt: null\n  - id: T002", `    transition_evidence:\n      codex_worker_session:\n        harness: codex\n        session_id: "019f6dab-7b25-7620-9da6-4f79a0648146"\n        task_id: T001\n        board_path_sha256: "${"1".repeat(64)}"\n        workspace_root_sha256: "${"2".repeat(64)}"\n        codex_home_sha256: "${"3".repeat(64)}"\n        dispatch_contract_sha256: "${"4".repeat(64)}"\n        model: gpt-5.6-sol\n        reasoning_effort: medium\n        service_tier: fast\n        sandbox: danger-full-access\n        brief_path: null\n        brief_sha256: null\n        launch_state_digest: "${"5".repeat(64)}"\n    receipt: null\n  - id: T002`);
   for (const [name, state, ok] of [
     ["valid", sessionBoard, true],
-    ["bad UUID", sessionBoard.replace("66666666-6666-4666-8666-666666666666", "not-a-session"), false],
+    ["bad UUID", sessionBoard.replace("019f6dab-7b25-7620-9da6-4f79a0648146", "not-a-session"), false],
     ["queued binding", sessionBoard.replace("assignee: Worker\n    status: active", "assignee: Worker\n    status: queued"), false],
   ]) {
     const root = makeRoot();
