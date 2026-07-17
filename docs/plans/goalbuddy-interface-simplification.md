@@ -24,6 +24,7 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 - [x] (2026-07-17) Ran an unknowns pass and identified role/result receipt semantics, mutation-truth reporting, state-versus-tree digest handling, activation liveness, projection size, and empty-`notes/` behavior as the remaining high-impact uncertainties.
 - [x] (2026-07-17) Confirmed that the earlier Fable-efficiency plan is an implementation/activation record and created a separate isolated worktree for this follow-on change.
 - [x] (2026-07-17) Authored this self-contained ExecPlan against current local `main` without changing installed runtime or any board.
+- [x] (2026-07-17) Amended the plan after Fable review to keep malformed-receipt repair inside one bounded exact-session dispatcher turn, disclose repair evidence, prohibit repair after scope violations, include optional harness provenance in examples, and separate ordinary planning from parallel-lane safety planning.
 - [ ] Complete Milestone 1: executable prototypes for receipt validation, projection shape, mutation-truth reporting, and `notes/` behavior.
 - [ ] Complete Milestone 2: one shared role/result-aware receipt contract at dispatch and apply boundaries.
 - [ ] Complete Milestone 3: one-call planning and opaque digest relay through relevant command output.
@@ -120,11 +121,23 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
   Rationale: A Worker launched under the old receipt prompt may return an old-form receipt. Tightening validation underneath it would create an avoidable cutover failure even though the product work is sound.
   Date/Author: 2026-07-17 / Codex.
 
+- Decision: Repair one schema-invalid receipt through one bounded automatic exact-session resume inside the original dispatcher process, and only after observed writes pass the admitted authority/control check.
+  Rationale: The dispatcher still holds the original pre-launch manifest in memory and can prove cumulative scope. Returning a PM-facing bare resume command would discard that proof and invite hand-authored receipt correction. Persisting a repair registry to survive dispatcher loss would add machinery for a rare double failure.
+  Date/Author: 2026-07-17 / Codex.
+
+- Decision: Keep receipt `harness` optional but include it in every role/result example and validate it when present. Never inject it into extracted proof.
+  Rationale: Examples encourage durable self-stamped cross-harness provenance without making deterministic runtime knowledge appear to be a Worker-authored claim.
+  Date/Author: 2026-07-17 / Codex.
+
+- Decision: Use `resume --planning` for ordinary successor selection and summaries of existing lanes; require `parallel-plan` only when creating, changing, or authorizing dispatch across concurrent child-board lanes.
+  Rationale: Ordinary planning should be one call. Pairwise lane/write-scope safety is a distinct, stronger question and should not bloat every projection or remain an undocumented probe choice.
+  Date/Author: 2026-07-17 / Codex.
+
 ## Outcomes & Retrospective
 
 No runtime behavior has changed yet. The planning outcome is a bounded seven-milestone implementation that deepens existing modules rather than adding orchestration machinery. Update this section after each milestone with what became observable, what was rejected, and whether the Fable-context and tool-call targets were actually met.
 
-At final completion, summarize at minimum: contract bytes before and after; healthy-start and post-compaction lead-tool-call counts; malformed-receipt repair behavior; projection bytes for the representative board; focused and full test totals; disposable install hashes; fresh Claude and Codex journey outcomes; remaining limitations; and activation status.
+At final completion, summarize at minimum: contract bytes before and after; healthy-start and post-compaction lead-tool-call counts; malformed-receipt first-attempt and repair-attempt counts; projection bytes for the representative board; focused and full test totals; disposable install hashes; fresh Claude and Codex journey outcomes; remaining limitations; and activation status. A high repair rate after exact examples ship is evidence that prevention failed even when automatic correction succeeds.
 
 ## Context and Orientation
 
@@ -138,7 +151,7 @@ Immutable historical receipts are already stored inside completed task blocks. T
 
 The current public-error module already supplies stable `error_code`, bounded `error`, and `next_action`. Extend it rather than inventing another envelope. The current transition reports already supply `before_digest`, `after_digest`, and in some cases `no_change`. Preserve those successful primitives and add explicit digest-kind and relevant command information.
 
-The existing exact Codex-session binding remains authoritative on its task. A malformed receipt for an otherwise unchanged task is repaired by resuming that exact bound session and asking it to return a valid receipt. If the structured authority changes, the PM records a truthful blocked receipt and activates a new successor task. Do not add an unbind operation or repurpose the old task.
+The existing exact Codex-session binding remains authoritative on its task. A malformed receipt for an otherwise unchanged task may receive one bounded automatic repair inside the still-running dispatcher: after the original process is terminal and its observed writes pass authority/control checks, the dispatcher resumes that exact bound session, forbids repair-turn writes, and asks only for a valid receipt. If the structured authority changes, the PM records a truthful blocked receipt and activates a new successor task. Do not add an unbind operation or repurpose the old task.
 
 ## User-Visible Behavior and Acceptance Criteria
 
@@ -146,9 +159,9 @@ A healthy prepared-board Claude session should begin with the compact execution 
 
 When the PM asks for planning inventory, one JSON response should contain the active task, ready queued candidates, blocked candidates with bounded blocker/receipt context, the exact state digest, the composite tree digest, and the immediately relevant digest-bound command templates. The PM should not probe JSON keys, re-run `jq` to reconstruct a truncated hash, or perform a second board read merely to assemble the next command.
 
-When a Worker returns `commands` as bare strings, dispatch should return `RECEIPT_SCHEMA_INVALID` before claiming success. It should identify the exact path such as `commands[0]`, show a bounded offending value, preserve the session binding and observed product-write truth, and provide the exact resume command for the same task/session when safe. The PM should not convert prose into `{cmd, status: "pass"}`.
+When a Worker returns `commands` as bare strings, the dispatcher should never claim the first receipt is authoritative. If observed writes are within authority, no control path changed, the original run is terminal, the exact session is resumable, and the task/brief/execution contract remains unchanged, GoalBuddy performs one automatic receipt-only repair turn. A valid second receipt yields an honest success report disclosing the repair. A second malformed receipt, any original scope violation, any repair-turn write, an unsupported harness, or changed authority returns `RECEIPT_SCHEMA_INVALID` or the more specific scope/session error, preserves mutation truth, and performs no further retry. The PM should never convert prose into `{cmd, status: "pass"}`.
 
-When the same resumed Worker returns a valid receipt with `{cmd, status}`, dispatch should pass the shared validator and scope comparison. Applying that receipt should invoke the same validator again, install atomically, return the new state digest, and return only the relevant next commands. The stored receipt must equal the Worker's receipt object; GoalBuddy must not add `harness`, infer status, or otherwise rewrite it.
+When a Worker—or the same Worker after an eligible repair—returns a valid receipt with `{cmd, status}`, dispatch should pass the shared validator and scope comparison. Applying that receipt should invoke the same validator again, install atomically, return the new state digest, and return only the relevant next commands. The stored receipt must equal the Worker's receipt object; GoalBuddy must not add `harness`, infer status, or otherwise rewrite it.
 
 When a board has no notes, a fresh Git checkout should still pass the checker. When `tasks[].receipt.note` contains a valid relative `notes/` pointer, the checker should require that exact in-board path to exist and remain within the owning board's `notes/` directory. No other prose field becomes a note pointer by textual resemblance.
 
@@ -164,7 +177,7 @@ First, add a provisional pure module at `goalbuddy/scripts/receipt-contract.mjs`
 
 Second, extend or construct a representative in-test board with one active task, several ready queued candidates, blocked candidates, one child board, bounded receipt summaries, and enough history to expose projection bloat. Prototype the new `planning_inventory` and relevant command object in `resume-board.mjs` behind test-local functions or a short-lived branch-local shape. Measure serialized bytes and confirm one call contains every fact needed to select and construct the next legal transition without raw-board reads.
 
-Third, write a failure-truth matrix for dispatch and apply. Cover failure before launch, failure after Codex session binding but before product writes, malformed receipt after product writes, scope violation, harness failure, stale digest, and candidate-checker rejection. For every row specify the only truthful values for board state, product state, session binding, receipt application, before digest, and after digest. Use the matrix to define the public object rather than choosing fields opportunistically in each catch block.
+Third, write a failure-truth matrix for dispatch and apply. Cover failure before launch, failure after Codex session binding but before product writes, malformed receipt after product writes, clean-scope automatic receipt repair, malformed receipt plus original out-of-scope write, repair-turn write, second malformed receipt, non-resumable harness, changed dispatch contract, harness failure, stale digest, and candidate-checker rejection. For every row specify the only truthful values for board state, product state, session binding, receipt application, repair attempt, before digest, and after digest. Use the matrix to define the public object rather than choosing fields opportunistically in each catch block.
 
 Fourth, prove the `notes/` decision through a closed path contract. The current first-class long-note pointer is the scalar `tasks[].receipt.note`. It counts as a note reference only when its value is a relative forward-slash path rooted at `notes/`; it resolves relative to the owning root or child board and must remain inside that board's `notes/` tree. `note_needed` is a boolean, `commands[].note` is explanatory text, and strings in `inputs`, `evidence`, `summary`, `rationale`, or other arbitrary fields are not note pointers and must never be reclassified because they happen to contain `notes/`. If source inspection finds another existing field explicitly documented as a long-note path, enumerate it in this plan and tests before integration; do not scan arbitrary strings. Create a board without `notes/` and no first-class pointer, a board with a valid scalar receipt note, a board with a missing referenced note, a child board without notes, a board with a note path escaping the board, and an unrelated evidence string containing `notes/`. Confirm no runtime operation requires an empty directory. If contrary evidence appears, amend this plan before integration rather than adding a placeholder reflexively.
 
@@ -178,11 +191,11 @@ Promote `goalbuddy/scripts/receipt-contract.mjs` into the canonical live receipt
     validateTaskReceipt(receipt, { role, taskId, boardPath, verify, boundary })
     assertTaskReceipt(receipt, context)
 
-`receiptExample()` returns one result-specific JSON-safe example used by prompt rendering and structural help. Prompt rendering may display the separate `done` and `blocked` examples together, but it must not collapse them into a hybrid shape. For a completed Worker, the example displays at least one passing command object with `cmd` and `status`; for a blocked Worker, it displays actual attempted status and blocker fields. Every role/result example includes `task_id` and `board_path`, which the current developer receipt spec declares mandatory but omits from role examples. Tests cover every role × result pair so result semantics cannot drift back into prose.
+`receiptExample()` returns one result-specific JSON-safe example used by prompt rendering and structural help. Prompt rendering may display the separate `done` and `blocked` examples together, but it must not collapse them into a hybrid shape. For a completed Worker, the example displays at least one passing command object with `cmd` and `status`; for a blocked Worker, it displays actual attempted status and blocker fields. Every role/result example includes `task_id`, `board_path`, and an illustrative `harness` so agents self-stamp cross-harness provenance. The validator treats `harness` as optional but validates it when present. The current developer receipt spec declares identity mandatory but omits it from role examples; correct those examples. Tests cover every role × result pair so result semantics cannot drift back into prose.
 
 `validateTaskReceipt()` must be pure and return stable findings with a code, JSON path, bounded offending value, and message. It validates exact common identity, closed role/result vocabularies, required role fields, list/object types, command-entry shape, result-sensitive status semantics, declared verification coverage, and reserved wrong-role fields. It permits additional JSON-safe inert evidence fields. It must not normalize, infer, sort, deduplicate, append, or delete receipt fields.
 
-`assertTaskReceipt()` converts findings into the existing public-error envelope with code `RECEIPT_SCHEMA_INVALID`. Dispatch calls it immediately after extraction and exact task identity resolution, before a receipt can be treated as authoritative. Apply calls it under the board lock after exact source-task admission and before constructing candidate bytes. Both boundaries import this same module.
+`assertTaskReceipt()` converts findings into the existing public-error envelope with code `RECEIPT_SCHEMA_INVALID`. Dispatch invokes the shared validator immediately after extraction and exact task identity resolution, and never treats an invalid receipt as authoritative. If validation fails, dispatch may continue only far enough to evaluate the already captured original before/after manifests for authority and control-path safety, then follow Milestone 4's bounded repair eligibility. Apply calls the validator under the board lock after exact source-task admission and before constructing candidate bytes. Both boundaries import this same module.
 
 Do not make `check-goal-state.mjs` run all historical receipts through this strict object validator. Instead, derive shared valid/invalid fixtures and prove three-way parity: a canonical new receipt is accepted by dispatch validation, apply validation, and the candidate checker; a malformed new receipt is rejected at both live boundaries; and existing immutable historical boards retain their exact compatibility result.
 
@@ -190,7 +203,7 @@ Stop mutating `receipt.harness` inside `dispatch-task.mjs`. Keep runtime harness
 
 Update `goalbuddy/scripts/render-task-prompt.mjs`, `docs/spec/receipt-v1.md`, the public CLI usage, and focused policy tests from the shared structural source. Help prose may explain flags and point to the normative kernel, but it must not independently restate role semantics. Do not build a documentation generator; export only small structural examples and pin all remaining prose against required field names in tests.
 
-Milestone acceptance: the T105-style bare-string receipt fails at dispatch with `RECEIPT_SCHEMA_INVALID`; the same object fails identically at apply; no PM can turn prose into pass proof; valid `done` and `blocked` receipts for all four task roles survive unchanged; the candidate checker accepts every canonical fixture; historical receipt bytes and compatibility reports are unchanged.
+Milestone acceptance: the shared validator identifies the T105-style bare-string receipt as `RECEIPT_SCHEMA_INVALID` at both dispatch and apply boundaries; before Milestone 4 promotion no boundary may treat it as authoritative. The final integrated dispatch behavior follows the one-repair matrix rather than immediately surfacing every first schema error. No PM can turn prose into pass proof; valid `done` and `blocked` receipts for all four task roles survive unchanged; optional self-authored `harness` survives unchanged; the candidate checker accepts every canonical fixture; historical receipt bytes and compatibility reports are unchanged.
 
 ### Milestone 3: Make planning one call and digests opaque
 
@@ -205,6 +218,8 @@ Return only immediately relevant commands. A healthy resume returns resume, curr
 The PM contract must say: consume the exact returned digest and command; never truncate, retype, reconstruct, or reuse a pre-mutation digest. Tests must assert that every state mutation invalidates prior generated commands and that stale commands fail before mutation.
 
 Measure the representative projection. It must eliminate the observed multi-call shape-probing sequence and remain materially smaller than the raw board. If per-candidate commands make output grow without reducing calls, replace them with one typed command-template object plus candidate ids; record the choice in the Decision Log.
+
+Scope the one-call promise precisely. `resume --planning` answers ordinary next-task selection within the already validated root/child board tree and summarizes existing active lanes. It does not prove that proposed concurrent writes are disjoint. Use `parallel-plan` when the PM is considering creation, restructuring, or concurrent dispatch of child-board lanes, or when an existing multi-lane recovery needs pairwise dispatch-safety evidence. The kernel and command output must make this trigger explicit so the PM does not probe both tools merely to learn which one applies.
 
 Milestone acceptance: planning requires one command; no field named or documented as a state digest contains the tree digest; every mutation result supplies its resulting state digest; stale templates fail closed; a representative lead can choose a successor without reading raw `state.yaml`; and projection size is recorded before and after.
 
@@ -226,9 +241,15 @@ Do not synthesize `unchanged` merely because an operation returned an error. The
 
 Specific checker or validation details must outrank generic recovery guidance. Include a stable JSON path and bounded offending value for receipt failures. Reserve Ledger/full-board escalation for genuine board ambiguity, strict parse/checker failure, immutable-history mismatch, or recovery incongruence. A malformed new receipt is not a recovery audit.
 
-When a malformed receipt belongs to a bound Codex Worker and the structured task, brief, execution profile, and dispatch contract remain unchanged, return the exact session id and a digest-bound exact resume command telling that Worker to restate a valid receipt. Do not launch automatically. If task authority changed, return the existing blocked-receipt-plus-successor recovery direction; never clear the binding or reuse the task under changed authority.
+When a malformed receipt belongs to a Worker on a harness with exact bound-session resume—Codex is the currently supported case—and the structured task, brief, execution profile, and dispatch contract remain unchanged, the original dispatcher may attempt exactly one automatic repair. The original harness process must already be terminal. Before any resume, evaluate the original before/after manifest for control or out-of-scope writes independently of receipt equality. Any violation forbids repair and returns the scope failure immediately. This ordering is load-bearing: a scope violation can never purchase a second model turn.
 
-Milestone acceptance: prelaunch error reports unchanged board/no product observation; post-binding malformed receipt reports changed board, preserved binding, and observed or unknown product truth; candidate rejection reports no receipt application and unchanged board; the exact same Codex session can be resumed to correct only the receipt; and a changed contract cannot use that repair path.
+For an eligible repair, retain the original pre-launch manifest in dispatcher memory, capture a new pre-repair manifest, and resume the exact bound session with a receipt-only prompt. The repair turn may not modify any product or GoalBuddy control byte, even inside `allowed_files`. Capture the post-repair manifest and fail closed on any change. Validate the second receipt with the shared validator, then require its `changed_files` to equal the cumulative product changes observed from the original pre-launch manifest through the unchanged post-repair state. Do not run a second repair.
+
+The dispatch report must disclose repair history without changing board truth. Return a stable `repair` object containing `attempted`, `succeeded`, the original malformed receipt preserved as inert evidence, its validation findings, the exact resumed session id, and any repair failure reason. This report-level evidence measures whether the new prompt example prevents malformed receipts; it is not stored automatically in `state.yaml` and does not authorize product changes.
+
+A harness without exact bound-session resume, a changed task/brief/execution contract, a dispatcher process lost before repair, a second malformed receipt, or any repair-turn write goes directly to a fail-closed report. Ordinary PM recovery may inspect preserved work, but no bare `codex exec resume`, durable repair registry, automatic fresh Worker, binding clear, or hand-authored receipt is allowed.
+
+Milestone acceptance: prelaunch error reports unchanged board/no product observation; candidate rejection reports no receipt application and unchanged board; malformed receipt plus clean observed scope on a bound Codex session receives one automatic write-forbidden repair and can succeed; the success report discloses the original malformed receipt and repair attempt; a second malformed receipt fails with no third turn; an original out-of-scope write plus malformed receipt launches no repair; a repair-turn in-scope or out-of-scope write fails closed; a non-resumable harness and changed contract cannot use the repair path; and dispatcher loss never creates persisted repair machinery.
 
 ### Milestone 5: Replace instruction volume with one kernel and one exceptional reference
 
@@ -266,7 +287,7 @@ Install only into disposable Codex and Claude homes using the candidate checkout
 
 Replay a fresh Claude/Fable journey against a disposable representative board. Record actual files read, lead tool calls, tool output bytes, and decisions. Healthy cold start to first useful product action should require no more than six lead tool calls. Post-compaction congruent recovery should require no more than three. Planning inventory should require one. These are acceptance measurements, not runtime quotas; legitimate product investigation remains unrestricted.
 
-The Claude journey must prove: no compiler or full prep bundle on prepared execution; no exceptional reference on the healthy path; one-call planning; exact digest relay; direct dispatch for a decision-complete Worker; a malformed command receipt rejected without PM meaning-injection; exact same-session receipt repair; scope and `stop_if` unchanged; Fable reviews the product diff and independent review rather than performing ledger mechanics.
+The Claude journey must prove: no compiler or full prep bundle on prepared execution; no exceptional reference on the healthy path; one-call ordinary planning; an explicit `parallel-plan` trigger only for concurrent-lane safety; exact digest relay; direct dispatch for a decision-complete Worker; a malformed command receipt with clean observed scope repaired once inside the dispatcher without PM meaning-injection; repair disclosure in the report; an original out-of-scope write plus malformed receipt causes no resume; a repair-turn write fails closed; scope and `stop_if` remain unchanged; and Fable reviews the product diff and independent review rather than performing ledger mechanics.
 
 Replay the same board shape in a fresh Codex session. Prove the same receipt, projection, digest, transition, and recovery interfaces work without Claude-specific names in board truth. Codex may use native GoalBuddy agents and Omega capabilities according to the existing harness contract.
 
@@ -333,6 +354,7 @@ Automated validation must cover observable public behavior rather than internal 
 - planning inventory complete in one response;
 - prelaunch, post-binding, post-write, scope, harness, and candidate-rejection mutation truth;
 - exact-session malformed-receipt correction and changed-contract rejection;
+- repair disclosure, one-attempt limit, no-repair-on-original-scope-violation, and zero-write repair enforcement;
 - kernel byte ceiling and canonical/plugin equality;
 - healthy prepared `/goal` read set;
 - absent unused `notes/` accepted and missing referenced note rejected;
@@ -351,7 +373,7 @@ The candidate is a no-go if any answer is no, if the projection hides blocker ev
 
 All source work occurs on an isolated branch and worktree. Prototypes and tests may be rerun. `npm run sync:plugin` writes only repo-local mirrors and is safe to repeat. Disposable installs use dedicated homes and may be deleted after receipts are captured.
 
-Receipt validation failure does not auto-clean product work or clear a session binding. The PM inspects observed changes and resumes the exact bound session when the task contract is unchanged. If product authority changes, use the existing truthful blocked-receipt and successor transition. Never fabricate a corrected receipt, infer a command result, or silently redispatch a fresh Worker.
+Receipt validation failure does not auto-clean product work or clear a session binding. Only the original dispatcher may perform the one eligible exact-session receipt repair while it still retains the original manifest. After dispatcher loss or a failed or ineligible repair, the PM may inspect preserved work but must not resume merely to rewrite the receipt. If product authority changes, use the existing truthful blocked-receipt and successor transition. Never fabricate a corrected receipt, infer a command result, or silently redispatch a fresh Worker.
 
 If a milestone reveals that the shared validator cannot represent an existing legitimate receipt without historical rewriting, stop integration, record the fixture and reason in `Surprises & Discoveries`, and amend the live-boundary policy. Do not add a compatibility parser without explicit review.
 
@@ -370,6 +392,7 @@ Maintain compact evidence here or in a branch-local ignored review directory:
 - receipt role/result fixture matrix and parity results;
 - representative planning projection bytes and lead-call comparison;
 - mutation-truth matrix and public failure examples;
+- first-attempt receipt validity, repair-attempt count/rate, and repair outcomes;
 - `notes/` checker proof;
 - focused and full test totals;
 - canonical/plugin/package/disposable-install hashes;
@@ -385,7 +408,7 @@ The final implementation should expose only these narrow interfaces:
 
 - `goalbuddy/scripts/receipt-contract.mjs` owns examples and pure validation for new task receipts.
 - `render-task-prompt.mjs` consumes the shared example; it does not maintain a second schema.
-- `dispatch-task.mjs` performs tolerant JSON extraction, exact shared validation, identity/scope comparison, and truthful dispatch reporting without mutating the receipt.
+- `dispatch-task.mjs` performs tolerant JSON extraction, exact shared validation, identity/scope comparison, and truthful reporting without mutating the receipt; it may perform one in-process exact-session, zero-write repair while retaining the original manifest, but persists no repair registry and never repairs after an authority/control violation.
 - `apply-receipt.mjs` performs the same shared validation under the existing lock before candidate construction, then uses the existing checker and atomic installer.
 - `check-goal-state.mjs` remains durable board and immutable-history authority; shared parity fixtures prevent drift for newly accepted receipts.
 - `resume-board.mjs` remains the sole compact continuation/planning projection and command source.
@@ -413,3 +436,5 @@ Use only Node built-ins and existing GoalBuddy modules. Do not add a runtime dep
 ## Revision Note
 
 2026-07-17: Initial plan created after transcript/tool-call analysis, two rounds of Fable field adjudication, a blind-spot pass, and live source inspection. It incorporates the final corrections: one shared role/result-aware receipt validator used twice; separate exact examples for each role/result shape; no proof normalization; explicit state-versus-tree digest handling without a gratuitous rename; truthful mutation reporting rather than universal unchanged claims; compact relevant command output; one normative kernel plus one exceptional reference; a closed `tasks[].receipt.note` path rule with optional empty `notes/`; historical receipts preserved; and a manual fail-closed quiescence audit before any activation.
+
+2026-07-17: Amended after Fable identified a scope-proof bypass in a PM-facing receipt-repair command. Replaced it with one bounded in-dispatcher exact-session repair that retains the original manifest, verifies authority before repair, forbids all repair-turn writes, discloses the original malformed receipt and repair outcome, and never persists recovery machinery. Added optional self-authored harness provenance and an explicit `resume --planning` versus `parallel-plan` boundary.
