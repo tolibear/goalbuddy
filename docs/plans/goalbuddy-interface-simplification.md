@@ -16,7 +16,7 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 
 ## Artifact Status
 
-**Decision-complete and ready for isolated implementation. Activation is not authorized by this plan.** Implementation occurs only in `/Users/danielalnajjar/Code/.worktrees/goalbuddy-interface-simplification` on branch `codex/goalbuddy-interface-simplification`, based on local `main` commit `ab3724c940507836abc71a24f5436ca5dc6b5206`. Live Codex and Claude installations, active project boards, and project worktrees stay untouched until a separate activation decision after all acceptance gates pass and no GoalBuddy-dispatched Worker is live.
+**Implemented and verified in isolation. Activation is not authorized by this plan.** Implementation occurred only in `/Users/danielalnajjar/Code/.worktrees/goalbuddy-interface-simplification` on branch `codex/goalbuddy-interface-simplification`, based on local `main` commit `ab3724c940507836abc71a24f5436ca5dc6b5206`. Live Codex and Claude installations, active project boards, and project worktrees stay untouched until a separate activation decision after all acceptance gates pass and no GoalBuddy-dispatched Worker is live.
 
 ## Progress
 
@@ -25,13 +25,13 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 - [x] (2026-07-17) Confirmed that the earlier Fable-efficiency plan is an implementation/activation record and created a separate isolated worktree for this follow-on change.
 - [x] (2026-07-17) Authored this self-contained ExecPlan against current local `main` without changing installed runtime or any board.
 - [x] (2026-07-17) Amended the plan after Fable review to keep malformed-receipt repair inside one bounded exact-session dispatcher turn, disclose repair evidence, prohibit repair after scope violations, include optional harness provenance in examples, and separate ordinary planning from parallel-lane safety planning.
-- [ ] Complete Milestone 1: executable prototypes for receipt validation, projection shape, mutation-truth reporting, and `notes/` behavior.
-- [ ] Complete Milestone 2: one shared role/result-aware receipt contract at dispatch and apply boundaries.
-- [ ] Complete Milestone 3: one-call planning and opaque digest relay through relevant command output.
-- [ ] Complete Milestone 4: truthful, actionable public failure reports and exact-session receipt repair.
-- [ ] Complete Milestone 5: compact execution kernel, exceptional recipe reference, and thin help surfaces.
-- [ ] Complete Milestone 6: checker/scaffolder cleanup for an absent empty `notes/` directory.
-- [ ] Complete Milestone 7: isolated automated verification and fresh Claude/Codex journey acceptance.
+- [x] (2026-07-17) Completed Milestone 1 prototypes for receipt validation, projection shape, mutation-truth reporting, and `notes/` behavior.
+- [x] (2026-07-17) Completed Milestone 2 with one shared role/result-aware receipt contract at dispatch and apply boundaries and result-specific prompt examples.
+- [x] (2026-07-17) Completed Milestone 3 with one-call planning, explicit state/tree digest kinds, digest-bound relevant commands, and fail-closed `parallel-plan` admission.
+- [x] (2026-07-17) Completed Milestone 4 with truthful mutation reports and one disclosed, exact-session, write-forbidden receipt repair after clean scope proof.
+- [x] (2026-07-17) Completed Milestone 5 with a 12,835-byte kernel, one exceptional recipe reference, pointer-thin agent receipt instructions, and a fail-closed prepared `/goal` command.
+- [x] (2026-07-17) Completed Milestone 6 so absent unused `notes/` is valid while explicit contained note pointers remain checked.
+- [x] (2026-07-17) Completed Milestone 7: 244 Node tests and 49 compiler tests pass, packaging and byte-exact mirrors pass, disposable installs match candidate bytes, and fresh Claude Opus, Codex, and child-board journeys exercised the public candidate surfaces.
 - [ ] Obtain separate explicit approval before activation; activation itself is not part of this implementation run.
 
 ## Surprises & Discoveries
@@ -62,6 +62,18 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 
 - Observation: Goal Prep is marked `disable-model-invocation: true`, and the prepared Claude `/goal` command directly reads the execution reference. Fresh-harness acceptance must nevertheless prove that a prepared-board run does not load the full prep-mode `goalbuddy/SKILL.md`, because prior sessions have shown surprising skill-loading behavior.
   Evidence: the frontmatter in `goalbuddy/SKILL.md` and `plugins/goalbuddy/commands/goal.md`.
+
+- Observation: Static Scout, Judge, and Worker agent definitions also carried hybrid `done | blocked` receipt objects, creating a second schema authority that could conflict with the task-specific rendered prompt.
+  Evidence: the pre-change `goalbuddy/agents/goal_{scout,judge,worker}.toml` and Claude agent mirrors. They now point to the executable result-specific prompt examples instead of copying a hybrid object.
+
+- Observation: Compacting the normative kernel did not require deleting exceptional safety behavior. The always-read contract fell from 59,786 to 12,989 UTF-8 bytes; child-board, immutable-history, exact-human, Keeper, amendment/hydration, and failure recipes remain available in one on-demand 5,662-byte reference.
+  Evidence: `wc -c goalbuddy/references/goal-execution.md goalbuddy/references/goal-execution-reference.md` after Milestone 5.
+
+- Observation: Fresh installed-command acceptance exposed a macOS path-alias bug that unit-level source invocation had hidden: `process.argv[1]` used `/tmp/...` while `import.meta.url` used `/private/tmp/...`, so five public scripts could silently skip their direct-run entrypoint.
+  Evidence: the first disposable Opus journey returned no resume output; the direct-run checks now compare `realpathSync` values, and `installed resume executes when its argv path uses a filesystem alias` covers the installed form.
+
+- Observation: Merely naming `${CLAUDE_HOME:-$HOME/.claude}` still invited a fresh Claude lead to spend turns resolving environment provenance. Deriving the skill as the sibling of the already-read `<claude-home>/commands/goal.md` removed that search without hard-coding a home.
+  Evidence: the final fresh Opus journey read the command, charter, sibling kernel, ran resume, and checked product state without loading Goal Prep, Codex Goal Compiler, raw `state.yaml`, the exceptional reference, source checkout, or plugin mirrors.
 
 ## Decision Log
 
@@ -105,7 +117,7 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
   Rationale: One compact authority avoids drift and reduces Fable context. The reference may contain recipes, syntax, and examples while pointing back to named kernel invariants.
   Date/Author: 2026-07-17 / Codex.
 
-- Decision: Treat `18,000` UTF-8 bytes as the initial kernel ceiling and validate behavior in a fresh Fable journey. Adjust the ceiling only through a recorded plan amendment backed by a concrete missing invariant or failed acceptance case.
+- Decision: Treat `18,000` UTF-8 bytes as the initial kernel ceiling and validate behavior in a fresh Claude Opus lead journey. Adjust the ceiling only through a recorded plan amendment backed by a concrete missing invariant or failed acceptance case.
   Rationale: The present contract is nearly sixty kilobytes. An explicit ceiling forces consolidation, but comprehension and safe behavior remain the real acceptance bar.
   Date/Author: 2026-07-17 / Codex.
 
@@ -133,11 +145,28 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
   Rationale: Ordinary planning should be one call. Pairwise lane/write-scope safety is a distinct, stronger question and should not bloat every projection or remain an undocumented probe choice.
   Date/Author: 2026-07-17 / Codex.
 
+- Decision: Use a fresh Claude Opus lead journey to validate comprehension, read set, tool-call shape, routing, digest relay, and fail-closed recovery; keep deliberately malformed receipts, scope violations, and repair-turn writes in deterministic public-surface acceptance tests.
+  Rationale: Intentionally inducing rare invalid Worker behavior in an external-model journey spends model tokens without strengthening the exact runtime oracle. Public dispatch tests can assert the manifest, retry, and mutation facts exactly; the model journey answers the separate question of whether a fresh lead understands and uses the compact interface correctly. Fable is not required for this acceptance.
+  Date/Author: 2026-07-17 / Codex.
+
 ## Outcomes & Retrospective
 
-No runtime behavior has changed yet. The planning outcome is a bounded seven-milestone implementation that deepens existing modules rather than adding orchestration machinery. Update this section after each milestone with what became observable, what was rejected, and whether the Fable-context and tool-call targets were actually met.
+The isolated implementation is complete. It deepens existing deterministic modules without adding a daemon, ledger, lease, unbind operation, migration, compatibility shim, or secondary state. New receipts have one executable grammar enforced at dispatch and apply. The exact bound Codex session may repair one malformed receipt only while the original dispatcher still holds scope evidence; the report discloses that repair and every disqualifier fails closed. Planning returns opaque digest-bound next commands, while concurrent-lane planning additionally requires the exact composite tree digest. Empty `notes/` no longer creates a second-checkout trap.
 
-At final completion, summarize at minimum: contract bytes before and after; healthy-start and post-compaction lead-tool-call counts; malformed-receipt first-attempt and repair-attempt counts; projection bytes for the representative board; focused and full test totals; disposable install hashes; fresh Claude and Codex journey outcomes; remaining limitations; and activation status. A high repair rate after exact examples ship is evidence that prevention failed even when automatic correction succeeds.
+Final evidence:
+
+- The normative kernel fell from `59,786` to `12,989` UTF-8 bytes (`78.3%` smaller), with `5,662` bytes of exceptional recipes loaded only by named triggers. The prepared Claude command is `1,466` bytes.
+- The representative compact projection is `7,739` bytes; its one-call planning form is `8,394` bytes.
+- The final fresh Claude Opus healthy start used five lead tool calls: command, charter, sibling kernel, resume projection, and one product-state check. It loaded none of the excluded prep/compiler/raw-board/exceptional/mirror surfaces and selected the correct bounded action.
+- The post-compaction continuation used two lead tool calls: compact resume plus the read-only Ledger audit. The audit correctly returned `uncertain` because the disposable active card had no proof of Worker liveness, so the lead did not redispatch. This proves the call-count target and the fail-closed recovery behavior rather than manufacturing a congruent result.
+- The real fresh Codex journey used one read command plus the exact candidate resume command, selected `T001`, preserved `README.md`-only authority, and chose direct mechanical dispatch. It did not load excluded surfaces.
+- The public child-board journey returned two checked board-tree entries, two active lanes, and one composite `board_tree_sha256` digest without reading raw boards into the lead.
+- The malformed-receipt success fixture performs one invalid first attempt and exactly one zero-write repair attempt. The second-invalid, authority-violation, changed-contract, and repair-write fixtures fail closed with no additional retry. Field repair rate remains intentionally unmeasured until later live operation.
+- Focused public CLI coverage passed `72/72`; the final receipt/apply/checker/dispatch audit passed `106/106`. The final full gate passed `244/244` Node tests plus `49/49` compiler tests, `npm run pack:dry-run`, mirror synchronization, and `git diff --check`.
+- The final disposable source and installed payload fingerprints both equal `7a3e2a64ca5539105e001bb3f40d301509c90d83a65175cc20e307c061c11084`. Claude doctor/contract are ready. Disposable Codex bytes and all five agents are clean; its contract reports not-ready only because that isolated `CODEX_HOME` intentionally has no login, while the authenticated read-only Codex journey succeeded against the same candidate source.
+- The remaining limitation is deliberate: recovery cannot infer that an unbound active Worker is dead. The Ledger returns `uncertain` and requires PM liveness adjudication instead of risking duplicate dispatch.
+
+No live runtime, active board, project worktree, or historical receipt was changed. Activation remains unauthorized and requires the plan's separate explicit owner approval plus a fresh quiescence audit.
 
 ## Context and Orientation
 
@@ -285,9 +314,9 @@ Synchronize plugin mirrors and run focused tests after each milestone. Then run 
 
 Install only into disposable Codex and Claude homes using the candidate checkout's public CLI. Run both doctors and contract projections. Never edit installed files by hand.
 
-Replay a fresh Claude/Fable journey against a disposable representative board. Record actual files read, lead tool calls, tool output bytes, and decisions. Healthy cold start to first useful product action should require no more than six lead tool calls. Post-compaction congruent recovery should require no more than three. Planning inventory should require one. These are acceptance measurements, not runtime quotas; legitimate product investigation remains unrestricted.
+Replay a fresh Claude Opus lead journey against a disposable representative board. Record actual files read, lead tool calls, tool output bytes, and decisions. Healthy cold start to first useful product action should require no more than six lead tool calls. Post-compaction recovery should require no more than three. Planning inventory should require one. These are acceptance measurements, not runtime quotas; legitimate product investigation remains unrestricted.
 
-The Claude journey must prove: no compiler or full prep bundle on prepared execution; no exceptional reference on the healthy path; one-call ordinary planning; an explicit `parallel-plan` trigger only for concurrent-lane safety; exact digest relay; direct dispatch for a decision-complete Worker; a malformed command receipt with clean observed scope repaired once inside the dispatcher without PM meaning-injection; repair disclosure in the report; an original out-of-scope write plus malformed receipt causes no resume; a repair-turn write fails closed; scope and `stop_if` remain unchanged; and Fable reviews the product diff and independent review rather than performing ledger mechanics.
+The Claude journey must prove: no compiler or full prep bundle on prepared execution; no exceptional reference on the healthy path; one-call ordinary planning; an explicit `parallel-plan` trigger only for concurrent-lane safety; exact digest relay; selection of direct dispatch for a decision-complete Worker; scope and `stop_if` remain salient; recovery delegates reconciliation rather than loading raw board history; and the lead reserves its own context for product-state checks and review. Deterministic public-surface tests—not deliberately induced external-model failures—prove malformed-receipt repair, repair disclosure, no repair after original scope violation, zero-write repair enforcement, and the one-attempt limit.
 
 Replay the same board shape in a fresh Codex session. Prove the same receipt, projection, digest, transition, and recovery interfaces work without Claude-specific names in board truth. Codex may use native GoalBuddy agents and Omega capabilities according to the existing harness contract.
 
@@ -362,7 +391,7 @@ Automated validation must cover observable public behavior rather than internal 
 
 Behavioral acceptance is the fresh-harness journey, not merely prose inspection. Capture enough evidence to answer four questions directly:
 
-1. Did Fable avoid reading large control documents and raw board history on the healthy path?
+1. Did the Claude lead avoid reading large control documents and raw board history on the healthy path?
 2. Did GoalBuddy prevent the PM from inventing proof when a Worker returned an invalid receipt?
 3. Could the PM continue and plan through returned opaque digests without probing or reconstruction?
 4. Did all safety properties that paid for themselves remain active: Ledger recovery, `stop_if`, scope manifests, exact verification, receipts, independent review, and exact-session continuation?
@@ -438,3 +467,5 @@ Use only Node built-ins and existing GoalBuddy modules. Do not add a runtime dep
 2026-07-17: Initial plan created after transcript/tool-call analysis, two rounds of Fable field adjudication, a blind-spot pass, and live source inspection. It incorporates the final corrections: one shared role/result-aware receipt validator used twice; separate exact examples for each role/result shape; no proof normalization; explicit state-versus-tree digest handling without a gratuitous rename; truthful mutation reporting rather than universal unchanged claims; compact relevant command output; one normative kernel plus one exceptional reference; a closed `tasks[].receipt.note` path rule with optional empty `notes/`; historical receipts preserved; and a manual fail-closed quiescence audit before any activation.
 
 2026-07-17: Amended after Fable identified a scope-proof bypass in a PM-facing receipt-repair command. Replaced it with one bounded in-dispatcher exact-session repair that retains the original manifest, verifies authority before repair, forbids all repair-turn writes, discloses the original malformed receipt and repair outcome, and never persists recovery machinery. Added optional self-authored harness provenance and an explicit `resume --planning` versus `parallel-plan` boundary.
+
+2026-07-17: Amended acceptance after implementation to use Claude Opus—not Fable—for fresh-lead interface validation and to keep adversarial malformed-receipt/scope cases in exact public-surface tests. The external-model journey validates comprehension and context economy; deterministic tests validate runtime failure semantics.

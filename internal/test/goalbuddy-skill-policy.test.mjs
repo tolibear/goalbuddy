@@ -11,6 +11,8 @@ const canonicalOpenAI = readFileSync("goalbuddy/agents/openai.yaml", "utf8");
 const pluginOpenAI = readFileSync("plugins/goalbuddy/skills/goal-prep/agents/openai.yaml", "utf8");
 const canonicalExecution = readFileSync("goalbuddy/references/goal-execution.md", "utf8");
 const pluginExecution = readFileSync("plugins/goalbuddy/skills/goal-prep/references/goal-execution.md", "utf8");
+const canonicalExecutionReference = readFileSync("goalbuddy/references/goal-execution-reference.md", "utf8");
+const pluginExecutionReference = readFileSync("plugins/goalbuddy/skills/goal-prep/references/goal-execution-reference.md", "utf8");
 const claudeGoalCommand = readFileSync("plugins/goalbuddy/commands/goal.md", "utf8");
 const canonicalAgentsTemplate = readFileSync("goalbuddy/templates/agents.md", "utf8");
 const pluginAgentsTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/agents.md", "utf8");
@@ -24,7 +26,7 @@ const adaptiveSpec = readFileSync("docs/spec/adaptive-execution-strategy.md", "u
 const compilerReference = readFileSync("codex-goal-compiler/references/goalbuddy-compiler.md", "utf8");
 
 const PREPARED_GOAL_COMMAND_MAX_BYTES = 2418;
-const EXECUTION_CONTRACT_MAX_BYTES = 59816;
+const EXECUTION_CONTRACT_MAX_BYTES = 18000;
 
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
@@ -97,93 +99,59 @@ test("Goal Prep is explicit or compiler-internal across Codex and Claude", () =>
   }
 });
 
-test("the execution contract carries the /goal runtime rules", () => {
+test("the compact execution kernel carries every healthy-run invariant", () => {
+  const requiredHeadings = [
+    "Start and board truth",
+    "Authority roles",
+    "One write frontier and child boards",
+    "Worker authority and stop conditions",
+    "Adaptive execution strategy",
+    "Dispatch and exact-session continuation",
+    "Exact receipts and proof",
+    "Typed transitions and exceptional Keeper work",
+    "Quiet control plane",
+    "Recovery triggers",
+    "Final completion",
+  ];
   for (const text of [canonicalExecution, pluginExecution]) {
-    assert.match(text, /governs `\/goal` runs/);
-    assert.match(text, /node <skill-path>\/scripts\/render-task-prompt\.mjs docs\/goals\/<slug>/);
-    assert.match(text, /node <skill-path>\/scripts\/resume-board\.mjs docs\/goals\/<slug> --json/);
-    assert.match(text, /node <skill-path>\/scripts\/parallel-plan\.mjs docs\/goals\/<slug>/);
-    assert.match(text, /board\.tree\.digest/);
-    assert.match(text, /every root\/child board in `board\.tree\.boards`/);
-    assert.match(text, /Each board may have at most one active task/);
+    for (const heading of requiredHeadings) assert.match(text, new RegExp(`## ${heading}`));
+    assert.match(text, /state_digest.*state_yaml_sha256/);
+    assert.match(text, /board\.tree\.digest.*board_tree_sha256/);
+    assert.match(text, /at most one active task and one write-capable Worker/);
     assert.match(text, /depth-one child board/);
-    assert.match(text, /Separate branches or worktrees preserve bytes but do not prove semantic independence/);
-    assert.match(text, /same checker-validated root\/child snapshots as resume/);
-    assert.match(text, /Operator Escalation/);
-    assert.match(text, /ask the operator one concise question before creating the external artifact/);
-    assert.match(text, /This section applies after the user starts `\/goal Follow docs\/goals\/<slug>\/goal\.md\.`/);
-    assert.match(text, /exact human reply is the only remaining blocker/);
-    assert.match(text, /waiting_for_user_approval: true/);
-    assert.match(text, /exact_human_approval_can_terminal_wait: true/);
-    assert.match(text, /Queued dependents remain inert/);
-    assert.match(text, /No receipt may claim `decision: complete`/);
-    assert.match(text, /required_reply: "<exact string>"/);
-    assert.match(text, /sole `exact_human_reply` shape/);
-    assert.match(text, /do not invent or interpret approval classes/);
-    assert.match(text, /Board Health Stewardship/);
-    assert.match(text, /Keeper is on demand or warm within one uninterrupted session, not an always-on poller/);
-    assert.match(text, /node <skill-path>\/scripts\/check-goal-state\.mjs docs\/goals\/<slug>/);
-    assert.match(text, /Repair only GoalBuddy control files/);
-    assert.match(text, /Never edit product implementation files during board-health work/);
+    assert.match(text, /allowed_files/);
+    assert.match(text, /stop_if/);
+    assert.match(text, /A completion claim alone is not proof/);
+    assert.match(text, /Never use `codex exec resume --last`/);
+    assert.match(text, /exactly one receipt-only repair/);
     assert.match(text, /goalbuddy_receipt_v1/);
     assert.match(text, /full_outcome_complete: true/);
-    assert.match(text, /A `done` Worker receipt must list only passing commands/);
-    assert.match(text, /result: blocked/);
-    assert.match(text, /blocked_reason/);
-    assert.match(text, /do not widen its `allowed_files` mid-flight/);
-    assert.match(text, /Boards Move Between Harnesses/);
-    assert.match(text, /never reconstruct progress from chat history/);
-    assert.match(text, /optional `harness` field/);
-    assert.match(text, /### Mixed Fleets/);
-    assert.match(text, /receipt may still be in flight/);
-    assert.match(text, /run the full goal oracle suite/);
-    assert.match(text, /node <skill-path>\/scripts\/apply-receipt\.mjs docs\/goals\/<slug>/);
-    assert.match(text, /goalbuddy complete docs\/goals\/<slug>/);
-    assert.match(text, /node <skill-path>\/scripts\/dispatch-task\.mjs docs\/goals\/<slug> --to codex/);
-    assert.match(text, /implementation Workers default directly to Codex Exec/);
-    assert.match(text, /under Codex, implementation defaults to native Codex Workers/);
-    assert.match(text, /Do not wrap Codex in Opus/);
-    assert.match(text, /send a small decision-complete card directly/);
-    assert.match(text, /bind a current accepted plan by path and digest/);
-    assert.match(text, /compact just-in-time delta brief/);
-    assert.match(text, /Neither plan nor brief expands `allowed_files`/);
-    assert.match(text, /bind its exact JSONL session id to the active task/);
-    assert.match(text, /Never use `codex exec resume --last`/);
-    assert.match(text, /### Board Keeper/);
-    assert.match(text, /goalbuddy_keeper_request_v1/);
-    assert.match(text, /goalbuddy_keeper_receipt_v1/);
-    assert.match(text, /apply_amendment/);
-    assert.match(text, /--add-tasks task-cards\.json/);
-    assert.match(text, /apply_hydration/);
-    assert.match(text, /--hydrate-task T042/);
-    assert.match(text, /Product-specific approval phrases and boundary classifications are not task-card fields/);
-    assert.match(text, /Do not embed a long task payload in prose/);
-    assert.match(text, /For `rebind_goalbuddy`, set `transition: null` exactly/);
-    assert.match(text, /Do not send an all-null transition object/);
-    assert.match(text, /may directly apply one narrow, one-location mutation only when the exact file, location, old value, and new value are already known/);
-    assert.match(text, /if the PM needs or expects to need any board read, use Keeper from the outset/);
-    assert.match(text, /does not participate in an atomic receipt, status-plus-successor, scope, authority, approval, or completion transition/);
-    assert.match(text, /run the bundled checker immediately/);
-    assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
-    assert.match(text, /Ledger remains independently read-only/);
-    assert.match(text, /`wait_agent` polling timeout while the target agent still reports `running` is only a polling interval expiry/);
-    assert.match(text, /Continue polling the same live agent/);
-    assert.match(text, /do not interrupt, replace, redispatch, declare a timeout, or trigger PM fallback solely because a poll expired/);
-    assert.match(text, /absence is not evidence of inactivity during reading, analysis, planning, or verification/);
-    assert.match(text, /Read-only Judge and Ledger work, plus inspection-only Keeper work, may never create allowed-file diffs/);
-    assert.match(text, /configured job\/runtime deadline is actually exceeded/);
-    assert.match(text, /Preserve the one-agent\/no-duplicate-dispatch rule/);
-    assert.doesNotMatch(text, /After one `wait_agent` timeout/);
   }
+  assert.equal(pluginExecution, canonicalExecution);
+  assert.ok(Buffer.byteLength(canonicalExecution) <= EXECUTION_CONTRACT_MAX_BYTES);
+});
+
+test("exceptional syntax stays in one non-normative reference", () => {
+  assert.equal(pluginExecutionReference, canonicalExecutionReference);
+  for (const heading of ["Child-board recipe", "Worktree board-home recipe", "Immutable-history recovery", "Exact-human wait and reply", "Role receipt examples", "Amendment and hydration", "Keeper request and runtime rebind", "Dispatch failure recovery", "Failure-specific recovery"]) {
+    assert.match(canonicalExecutionReference, new RegExp(`## ${heading}`));
+  }
+  assert.match(canonicalExecutionReference, /The executable source is `scripts\/receipt-contract\.mjs`/);
+  assert.doesNotMatch(canonicalExecutionReference, /"changed_files"\s*:/);
+  assert.doesNotMatch(canonicalExecutionReference, /## Adaptive execution strategy/);
 });
 
 test("prepared /goal stays a compact execution entrypoint", () => {
   assert.ok(Buffer.byteLength(claudeGoalCommand) <= PREPARED_GOAL_COMMAND_MAX_BYTES);
-  assert.ok(Buffer.byteLength(canonicalExecution) <= EXECUTION_CONTRACT_MAX_BYTES);
   assert.match(claudeGoalCommand, /references\/goal-execution\.md/);
+  assert.match(claudeGoalCommand, /read only that charter and the installed Goal Prep kernel/);
+  assert.match(claudeGoalCommand, /do not search source repos, locate alternate copies, or compare mirrors/);
   assert.match(claudeGoalCommand, /compact explicit-board resume projection/);
+  assert.match(claudeGoalCommand, /Do not load Goal Prep, Codex Goal Compiler, raw `state\.yaml`, or `references\/goal-execution-reference\.md` on a healthy start/);
+  assert.match(claudeGoalCommand, /Load only the exceptional-reference recipe named by a kernel trigger/);
+  assert.match(claudeGoalCommand, /If the kernel cannot be read, fail closed/);
   assert.doesNotMatch(claudeGoalCommand, /codex-goal-compiler|handoff-prompts|goalbuddy-compiler/);
-  assert.doesNotMatch(claudeGoalCommand, /Read the complete `state\.yaml`|Read every reference/);
+  assert.doesNotMatch(claudeGoalCommand, /Read the complete `state\.yaml`|Read every reference|Each board has at most one active task/);
 });
 
 test("one-location board edits stay direct only when no board read is needed", () => {
@@ -197,12 +165,11 @@ test("one-location board edits stay direct only when no board read is needed", (
     assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
   }
 
-  assert.match(canonicalExecution, /complete canonical typed transition/);
-  assert.match(canonicalExecution, /receipt closeout and successor activation/);
-  assert.match(canonicalExecution, /deterministic GoalBuddy CLI/);
-  assert.match(canonicalExecution, /if the PM needs or expects to need any board read, use Keeper from the outset/);
-  assert.match(canonicalExecution, /If the edit misses its expected context or the checker fails, restore only that edit and route the operation to Keeper/);
-  assert.match(canonicalExecution, /do not reclassify it as a canonical typed transition or narrow direct edit/);
+  assert.match(canonicalExecution, /Complete canonical decisions use the deterministic digest-bound CLI directly/);
+  assert.match(canonicalExecution, /receipt closeout plus successor activation/);
+  assert.match(canonicalExecution, /deterministic digest-bound CLI/);
+  assert.match(canonicalExecution, /only when no board read is needed/);
+  assert.match(canonicalExecution, /otherwise use Keeper/);
 });
 
 test("current public contracts agree on typed transition ownership and exact dispatch admission", () => {
@@ -217,7 +184,7 @@ test("current public contracts agree on typed transition ownership and exact dis
 
   assert.match(canonicalExecution, /--expected-state-digest <sha256>/);
   assert.doesNotMatch(canonicalExecution, /--status done/);
-  assert.match(canonicalExecution, /content-aware before\/after manifest/);
+  assert.match(canonicalExecution, /observes the before\/after write frontier/);
   assert.match(readme, /match receipt `changed_files` exactly/);
   assert.match(releaseNotes, /one exact checker-admitted current task/);
   assert.match(receiptSpec, /The receipt's `result` is the sole source of terminal status/);
@@ -228,35 +195,16 @@ test("current public contracts agree on typed transition ownership and exact dis
 
 test("the quiet control plane keeps mechanics internal without hiding real blockers", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
-    assert.match(text, /## Quiet Control Plane/);
+    assert.match(text, /## Quiet control plane/);
     assert.match(text, /GoalBuddy is internal operating state, not the subject of routine user conversation/);
-    assert.match(text, /Keep every safety mechanism in this contract, but keep successful mechanics backstage/);
-    assert.match(text, /Do not narrate routine successful control-plane events/);
-    assert.match(text, /a malformed control-plane request that was rejected before mutation and can be corrected safely/);
-    assert.match(text, /Do not use `GoalBuddy`, `board`, `Keeper`, `Ledger`, `digest`, `receipt`, `checker`, or a `T###` identifier in a routine user update/);
-    assert.match(text, /The authentication slice is verified; I’m moving to session revocation/);
-    assert.match(text, /the user asks about GoalBuddy or its mechanics/);
+    assert.match(text, /Keep successful resume, prompt rendering, digest relay, receipt application, Keeper\/Ledger work, polling, checker runs, and next-task activation backstage/);
+    assert.match(text, /A malformed request rejected before mutation should be corrected silently when safe/);
+    assert.match(text, /the user asks/);
     assert.match(text, /recovery is discrepant or uncertain/);
-    assert.match(text, /is the actual blocker after bounded retry/);
-    assert.match(text, /Never hide a real discrepancy, approval gate, failed verification, possible duplicate Worker, or unsafe state/);
-    assert.match(text, /communication boundary, not a reduction in durable proof/);
-    assert.match(text, /product-facing progress updates under the Quiet Control Plane/);
-    assert.match(text, /## Scarce Orchestrator Budget/);
-    assert.match(text, /not the complete board or session transcript/);
-    assert.match(text, /Do not paste full reports, repeated command output, or subagent transcripts into the lead context/);
-    assert.match(text, /Reuse one warm Keeper only for related Keeper-required operations inside one uninterrupted digest-bound sequence/);
-    assert.match(text, /a genuine recovery still uses a fresh audit identity/);
-    assert.match(text, /do not create polling or status-churn turns/);
-    assert.match(text, /Do not delegate the work for which the lead orchestrator is selected/);
-    assert.match(text, /Claude Code may use ExecPlans, Workflow Plan, Workflow Review, Workflow Simplify/);
-    assert.match(text, /Codex may use ExecPlans, Omega Plan, Omega Review, Omega Simplify/);
+    assert.match(text, /runtime itself blocks product work after bounded repair/);
   }
 
-  for (const text of [canonicalSkill, pluginSkill, claudeGoalCommand]) {
-    assert.match(text, /Routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics stay out of user-facing updates|Keep routine successful board, Keeper, Ledger, digest, receipt, checker, prompt-rendering, and polling mechanics out of user-facing updates/);
-  }
-  assert.doesNotMatch(claudeGoalCommand, /load it and its sibling `state\.yaml` board/);
-  assert.match(claudeGoalCommand, /do not load its sibling `state\.yaml` into the main context by default/);
+  assert.doesNotMatch(claudeGoalCommand, /raw `state\.yaml`.*healthy start.*read/i);
 
   for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
     assert.match(text, /Keep routine successful GoalBuddy control-plane mechanics backstage/);
@@ -267,11 +215,11 @@ test("the quiet control plane keeps mechanics internal without hiding real block
 test("every shipped execution fallback uses child boards as parallel recovery identity", () => {
   assert.equal(pluginAgentsTemplate, canonicalAgentsTemplate);
 
-  for (const text of [claudeGoalCommand, canonicalAgentsTemplate, pluginAgentsTemplate]) {
+  for (const text of [canonicalExecution, canonicalAgentsTemplate, pluginAgentsTemplate]) {
     assert.match(text, /at most one active task/);
     assert.match(text, /depth-one child board/);
     assert.match(text, /parallel-plan/);
-    assert.match(text, /Worktrees isolate bytes but never replace board recovery identity/);
+    assert.match(text, /Worktrees isolate bytes but never replace board recovery identity|worktrees isolate bytes but do not prove semantic independence/);
     assert.doesNotMatch(text, /unless disjoint write scopes are proven/);
     assert.doesNotMatch(text, /unless disjoint write scopes are explicit/);
   }
@@ -305,7 +253,9 @@ test("slice policy is simple and mirrored across templates and agent payloads", 
   assert.match(canonicalWorker, /model_reasoning_effort = "high"/);
   assert.match(canonicalWorker, /complete the whole assigned slice/i);
   assert.match(canonicalWorker, /Never stop with uncommitted changes and no receipt/);
-  assert.match(canonicalWorker, /"deviations": \[\]/);
+  assert.match(canonicalWorker, /deviations list/);
+  assert.match(canonicalWorker, /result-specific done or blocked shape supplied in the current rendered task prompt/);
+  assert.doesNotMatch(canonicalWorker, /"result": "done \| blocked"/);
   assert.match(canonicalJudge, /largest safe useful slice/i);
   assert.match(canonicalJudge, /written plan's file list as evidence, not automatically the authority envelope/);
   assert.match(canonicalJudge, /narrowest truthful scope/);
@@ -422,7 +372,7 @@ test("receipt spec stays consistent with the shipped contracts", () => {
   assert.match(spec, /`T` followed by exactly three digits/);
   assert.match(spec, /harness: codex \| claude-code/);
   const execution = readFileSync("goalbuddy/references/goal-execution.md", "utf8");
-  for (const field of ["worker_package", "blocked_reason", "changed_files", "full_outcome_complete"]) {
+  for (const field of ["blocked_reason", "changed_files", "full_outcome_complete"]) {
     assert.match(execution, new RegExp(field), `${field} missing from execution contract`);
   }
 });
@@ -431,27 +381,18 @@ test("adaptive execution strategy governs quality routing in contract and charte
   const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
   const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");
   for (const text of [canonicalExecution, pluginExecution]) {
-    assert.match(text, /## Adaptive Execution Strategy/);
-    assert.match(text, /Decision risk: ambiguity, architectural choices, competing approaches/);
-    assert.match(text, /Execution risk: blast radius, integration breadth, long autonomous duration/);
-    assert.match(text, /auth, money, permissions, migrations, data integrity, public contracts, irreversible actions/);
-    assert.match(text, /When unsure, treat the slice as material/);
-    assert.match(text, /PM confidence alone is never a sufficient reason to skip independent review/);
-    assert.match(text, /record that downward deviation in PM-owned evidence/);
-    assert.match(text, /Never append it to a Worker's receipt/);
-    assert.match(text, /a clean review does not close a phase gate, and a Judge decision does not replace review evidence/);
-    assert.match(text, /Model identity for either tier is a runtime routing choice, never board data/);
-    assert.match(text, /\| Plan hardening \| Workflow Plan \| Omega Plan \|/);
+    assert.match(text, /## Adaptive execution strategy/);
+    assert.match(text, /Decision risk/);
+    assert.match(text, /Execution risk/);
+    assert.match(text, /If unsure whether a seam is material, treat it as material/);
+    assert.match(text, /dispatch it directly with an outcome-oriented operator prompt/);
+    assert.match(text, /Claude resolves semantic capabilities to its native workflow planning, review, simplify, browser-QA, and Codex Exec routes/);
+    assert.match(text, /Codex resolves them to its native Omega planning\/review, browser-QA, and Worker routes/);
     assert.match(text, /A completion claim alone is not proof/);
-    assert.match(text, /tightened at runtime and never silently loosened/);
-    assert.match(text, /Decisive verification must prove the exact current bytes/);
-    assert.match(text, /preserve the checkpoint, repair and retry only the failed gate/);
-    assert.match(text, /never enter board truth/);
-    assert.match(text, /Independent implementation review is not a Judge task/);
-    assert.match(text, /### Adaptive write scope/);
-    assert.match(text, /execution authority envelope, not a prediction contest/);
-    assert.match(text, /bounded component or directory globs/);
-    assert.match(text, /never widen authority retroactively after work exists/);
+    assert.match(text, /exact current bytes/);
+    assert.match(text, /not a prediction contest/);
+    assert.match(text, /bounded file, directory, or analyzable glob scope/);
+    assert.match(text, /Do not widen an already-active task after writes exist/);
     assert.doesNotMatch(text, /review only at risk or phase boundaries/);
   }
   for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
@@ -465,14 +406,11 @@ test("adaptive execution strategy governs quality routing in contract and charte
   }
 });
 
-test("native harness goal loops are documented without becoming board truth", () => {
+test("harness capabilities stay semantic rather than becoming board truth", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
-    assert.match(text, /## Native Harness Goal Loops/);
-    assert.match(text, /judges the goal condition\s+against the conversation transcript only/);
-    assert.match(text, /surface decisive proof in turn text/);
-    assert.match(text, /A prose-only turn does not itself suppress continuation/);
-    assert.match(text, /do\s+not make meaningless tool calls merely to keep the loop alive/);
-    assert.match(text, /`budget_limited`\s+with wrap-up\s+steering/);
-    assert.match(text, /Do not let a harness evaluator's "achieved" verdict or a wrap-up steering\s+message substitute for that receipt/);
+    assert.match(text, /Board truth names capabilities and proof, not vendor skill names/);
+    assert.match(text, /Claude resolves semantic capabilities/);
+    assert.match(text, /Codex resolves them/);
+    assert.doesNotMatch(text, /workflow-plan|workflow-review|omega-plan|omega-review/);
   }
 });

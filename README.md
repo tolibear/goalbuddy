@@ -113,7 +113,7 @@ Native `codex plugin remove goalbuddy@goalbuddy` only removes the native plugin 
 docs/goals/<your-goal>/
   goal.md
   state.yaml
-  notes/
+  notes/        # optional; created when a receipt first points to long evidence
   .goalbuddy-board/ # generated local board files
   subgoals/        # optional depth-1 child boards
 ```
@@ -122,7 +122,7 @@ docs/goals/<your-goal>/
 
 `state.yaml` tracks the board.
 
-`notes/` keeps longer findings out of the main thread.
+Optional `notes/` files keep longer findings out of the main thread. An empty directory is not required or committed; create it on first use.
 
 `subgoals/` holds optional child boards when one parent task needs a bounded branch of work.
 

@@ -109,6 +109,13 @@ test("dispatch runs an external worker and reports a clean scope", () => {
     assert.equal(report.harness, "codex");
     assert.equal(report.receipt.result, "done");
     assert.equal(report.scope_check.status, "clean");
+    assert.equal(report.mutation.board, "changed");
+    assert.equal(report.mutation.product, "observed");
+    assert.equal(report.mutation.receipt_applied, false);
+    assert.equal(report.mutation.digest_kind, "state_yaml_sha256");
+    assert.notEqual(report.mutation.before_digest, report.mutation.after_digest);
+    assert.equal(report.commands.apply_receipt.operation, "apply_receipt");
+    assert.equal(report.commands.apply_receipt.expected_state_digest, report.mutation.after_digest);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -174,6 +181,9 @@ test("dispatch flags out-of-scope writes from an external worker", () => {
     assert.deepEqual(report.scope_check.out_of_scope, ["README.md"]);
     assert.deepEqual(report.scope_check.missing_receipt_changes, ["README.md"]);
     assert.deepEqual(report.scope_check.extra_receipt_claims, ["src/widget.mjs"]);
+    assert.equal(report.mutation.board, "changed");
+    assert.equal(report.mutation.product, "observed");
+    assert.equal(report.mutation.receipt_applied, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -368,7 +378,16 @@ test("goalbuddy dispatch wrapper forwards one compact JSON failure without wrapp
     assert.equal(result.stderr, "");
     assert.equal(result.stdout.trim().split("\n").length, 1);
     const report = JSON.parse(result.stdout);
-    assert.deepEqual(Object.keys(report).sort(), ["error", "error_code", "next_action", "ok"]);
+    assert.deepEqual(Object.keys(report).sort(), ["error", "error_code", "mutation", "next_action", "ok"]);
+    assert.deepEqual(report.mutation, {
+      board: "unknown",
+      product: "none_observed",
+      receipt_applied: false,
+      session_binding_preserved: null,
+      before_digest: null,
+      after_digest: null,
+      digest_kind: "state_yaml_sha256",
+    });
     assert.equal(report.error_code, "STALE_STATE_DIGEST");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -396,8 +415,9 @@ test("dispatch extracts bare receipts returned without the envelope", () => {
       task_id: "T001",
       board_path: "docs/goals/one/state.yaml",
       changed_files: ["src/widget.mjs"],
-      decision: "approved",
+      commands: [{ cmd: "true", status: "pass" }],
       summary: "bare receipt",
+      harness: "codex",
     });
     const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\nprintf 'Some prose first.\\n\`\`\`json\\n%s\\n\`\`\`\\n' '${bare}'`);
     const result = runDispatch(root, bin);
@@ -405,6 +425,144 @@ test("dispatch extracts bare receipts returned without the envelope", () => {
     const report = JSON.parse(result.stdout);
     assert.equal(report.receipt.summary, "bare receipt");
     assert.equal(report.receipt.harness, "codex");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch repairs one schema-invalid receipt through the exact bound session without another write", () => {
+  const root = makeProject();
+  try {
+    const count = join(root, ".git", "repair-count");
+    const malformed = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["src/widget.mjs"],
+        commands: ["true"],
+        summary: "widget adjusted",
+        harness: "codex",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `if [ -f '${count}' ]; then echo '${RECEIPT}'; else touch '${count}'; echo "export const widget = 2;" > src/widget.mjs; echo '${malformed}'; fi`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.repair.attempted, true);
+    assert.equal(report.repair.succeeded, true);
+    assert.deepEqual(report.repair.original_malformed_receipt.commands, ["true"]);
+    assert.deepEqual(report.receipt.commands, [{ cmd: "true", status: "pass" }]);
+    assert.equal(readFileSync(join(root, "src", "widget.mjs"), "utf8"), "export const widget = 2;\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("schema failure never repairs after an original authority violation", () => {
+  const root = makeProject();
+  try {
+    const count = join(root, ".git", "repair-count");
+    const malformed = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["src/widget.mjs"],
+        commands: ["true"],
+        summary: "bad scope",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `if [ -f '${count}' ]; then echo second > '${count}'; else touch '${count}'; echo tampered >> README.md; echo '${malformed}'; fi`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "DISPATCH_SCOPE_FAILED");
+    assert.equal(report.repair.attempted, false);
+    assert.equal(readFileSync(count, "utf8"), "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt repair fails closed when its resumed turn writes any file", () => {
+  const root = makeProject();
+  try {
+    const count = join(root, ".git", "repair-count");
+    const malformed = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["src/widget.mjs"],
+        commands: ["true"],
+        summary: "widget adjusted",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `if [ -f '${count}' ]; then echo "export const widget = 3;" > src/widget.mjs; echo '${RECEIPT}'; else touch '${count}'; echo "export const widget = 2;" > src/widget.mjs; echo '${malformed}'; fi`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "DISPATCH_SCOPE_FAILED");
+    assert.equal(report.repair.attempted, true);
+    assert.equal(report.repair.failure, "repair_turn_write");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt repair attempts at most once", () => {
+  const root = makeProject();
+  try {
+    const count = join(root, ".git", "repair-count");
+    const malformed = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "done",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["src/widget.mjs"],
+        commands: ["true"],
+        summary: "still malformed",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `if [ -f '${count}' ]; then printf x >> '${count}'; echo '${malformed}'; else touch '${count}'; echo "export const widget = 2;" > src/widget.mjs; echo '${malformed}'; fi`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "RECEIPT_SCHEMA_INVALID");
+    assert.equal(report.repair.attempted, true);
+    assert.equal(report.repair.failure, "second_receipt_invalid");
+    assert.equal(readFileSync(count, "utf8"), "x");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("receipt repair never invents an invalid terminal result", () => {
+  const root = makeProject();
+  try {
+    const count = join(root, ".git", "repair-count");
+    const malformed = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        result: "complete",
+        task_id: "T001",
+        board_path: "docs/goals/one/state.yaml",
+        changed_files: ["src/widget.mjs"],
+        commands: [{ cmd: "true", status: "pass" }],
+        summary: "terminal meaning is invalid",
+      },
+    });
+    const bin = fakeHarnessBin(root, "codex", `if [ -f '${count}' ]; then printf x >> '${count}'; else touch '${count}'; echo "export const widget = 2;" > src/widget.mjs; fi; echo '${malformed}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "RECEIPT_SCHEMA_INVALID");
+    assert.equal(report.repair.attempted, false);
+    assert.equal(report.repair.failure, "terminal_result_unknown");
+    assert.equal(report.mutation.board, "changed");
+    assert.equal(report.mutation.product, "observed");
+    assert.equal(report.mutation.receipt_applied, false);
+    assert.equal(readFileSync(count, "utf8"), "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -422,7 +580,10 @@ test("dispatch never launches a harness for stale state or a queued explicit tas
       const result = runDispatch(root, bin, testCase.args);
       assert.equal(result.status, 1, `${testCase.name}: ${result.stderr || result.stdout}`);
       assert.equal(existsSync(marker), false, testCase.name);
-      assert.match(JSON.parse(result.stdout).error_code, /STALE_STATE_DIGEST|TASK_NOT_CURRENT_ACTIVE/);
+      const report = JSON.parse(result.stdout);
+      assert.match(report.error_code, /STALE_STATE_DIGEST|TASK_NOT_CURRENT_ACTIVE/);
+      assert.equal(report.mutation.product, "none_observed");
+      assert.equal(report.mutation.receipt_applied, false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

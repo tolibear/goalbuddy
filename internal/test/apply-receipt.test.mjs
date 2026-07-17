@@ -10,7 +10,7 @@ import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/sc
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
 
-function makeBoard({ placeholder = false, populatedWorker = false, omitReceipts = false } = {}) {
+function makeBoard({ placeholder = false, populatedWorker = false, omitReceipts = false, sourceType = "worker" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-apply-receipt-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
@@ -31,11 +31,11 @@ agents:
 active_task: T001
 tasks:
   - id: T001
-    type: worker
-    assignee: Worker
+    type: ${sourceType}
+    assignee: ${sourceType === "worker" ? "Worker" : "Judge"}
     status: active
     objective: "Adjust the widget."
-    allowed_files:
+${sourceType === "worker" ? `    allowed_files:
       - src/widget.mjs
     verify:
       - npm test
@@ -43,6 +43,7 @@ tasks:
       - git diff --check
     stop_if:
       - "Need files outside allowed_files."
+` : ""}
 ${omitReceipts ? "" : "    receipt: null\n"}
   - id: T999
     type: judge
@@ -631,7 +632,7 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
 });
 
 test("apply-receipt hydrates a placeholder from the exact Judge worker_package", () => {
-  const { root, goalDir } = makeBoard({ placeholder: true });
+  const { root, goalDir } = makeBoard({ placeholder: true, sourceType: "judge" });
   try {
     const workerPackage = {
       objective: "Run the receipt-selected Worker package.",
@@ -639,14 +640,25 @@ test("apply-receipt hydrates a placeholder from the exact Judge worker_package",
       verify: ["npm test", "npm run lint", "git diff --check"],
       stop_if: ["Need files outside allowed_files."],
     };
-    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], { ...DONE_RECEIPT, worker_package: workerPackage });
+    const judgeReceipt = {
+      result: "done",
+      task_id: "T001",
+      board_path: "docs/goals/one/state.yaml",
+      decision: "approved",
+      full_outcome_complete: false,
+      rationale: "The package is bounded and ready.",
+      evidence: ["Reviewed the exact package."],
+      worker_package: workerPackage,
+      harness: "codex",
+    };
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], judgeReceipt);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.hydration_source, "receipt_worker_package");
     assert.match(report.hydration_sha256, /^[a-f0-9]{64}$/);
     const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
     assert.match(state, /objective: "Run the receipt-selected Worker package\."/);
-    assert.match(state, /verify:\n      - npm test\n      - npm run lint\n      - git diff --check/);
+    assert.match(state, /verify:\n      - "npm test"\n      - "npm run lint"\n      - "git diff --check"/);
     assert.match(state, /constraints:\n      - "Keep the operation local\."/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -697,7 +709,7 @@ test("apply-receipt restores the original board when hydrated content fails the 
     const invalidReceipt = { ...DONE_RECEIPT, commands: [{ cmd: "npm test", status: "fail" }] };
     const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], invalidReceipt, null, HYDRATED_T042);
     assert.equal(result.status, 1, result.stdout);
-    assert.equal(JSON.parse(result.stdout).error_code, "CHECKER_FAILED");
+    assert.equal(JSON.parse(result.stdout).error_code, "RECEIPT_SCHEMA_INVALID");
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -740,7 +752,11 @@ test("apply-receipt reverts the board when the transition is invalid", () => {
     assert.equal(result.status, 1, result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, false);
-    assert.equal(report.error_code, "CHECKER_FAILED");
+    assert.equal(report.error_code, "RECEIPT_SCHEMA_INVALID");
+    assert.equal(report.mutation.board, "unchanged");
+    assert.equal(report.mutation.product, "none_observed");
+    assert.equal(report.mutation.receipt_applied, false);
+    assert.equal(report.mutation.before_digest, report.mutation.after_digest);
     assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -818,8 +834,8 @@ test("apply-receipt rejects done receipts that do not cover every declared verif
       assert.equal(result.status, 1, `${testCase.name}: ${result.stdout}`);
       const report = JSON.parse(result.stdout);
       assert.equal(report.ok, false, testCase.name);
-      assert.equal(report.error_code, "CHECKER_FAILED", testCase.name);
-      assert.match(report.error, /missing passing verification command/i, testCase.name);
+      assert.equal(report.error_code, "RECEIPT_SCHEMA_INVALID", testCase.name);
+      assert.match(report.error, /missing passing (?:declared )?verification command/i, testCase.name);
       assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before, testCase.name);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -893,15 +909,15 @@ test("exact-human wait and reply are atomic, strict, durable, and final-receipt 
     for (const reply of ["approve  T001 exactly", "Approve T001 exactly", `${requiredReply} `]) {
       const mismatch = runReply(root, ["--task", "T001", "--expected-state-digest", waitingDigest], { reply });
       assert.equal(mismatch.status, 0, mismatch.stderr || mismatch.stdout);
-      assert.deepEqual(JSON.parse(mismatch.stdout), {
-        ok: true,
-        mode: "reply",
-        task_id: "T001",
-        exact_match: false,
-        no_change: true,
-        before_digest: waitingDigest,
-        after_digest: waitingDigest,
-      });
+      const mismatchReport = JSON.parse(mismatch.stdout);
+      assert.equal(mismatchReport.ok, true);
+      assert.equal(mismatchReport.mode, "reply");
+      assert.equal(mismatchReport.task_id, "T001");
+      assert.equal(mismatchReport.exact_match, false);
+      assert.equal(mismatchReport.no_change, true);
+      assert.equal(mismatchReport.before_digest, waitingDigest);
+      assert.equal(mismatchReport.after_digest, waitingDigest);
+      assert.equal(mismatchReport.mutation.board, "unchanged");
       assert.equal(readFileSync(boardPath, "utf8"), waitingState);
     }
 
@@ -991,6 +1007,8 @@ test("complete closes the active audit and goal atomically while preserving tran
       board_path: boardPath,
       decision: "complete",
       full_outcome_complete: true,
+      rationale: "Current receipts and verification satisfy the original oracle.",
+      evidence: ["Current verification and transition evidence."],
       summary: "The complete goal outcome is proven.",
     };
     const result = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
@@ -1036,6 +1054,8 @@ test("completion preserves byte-identical done history while admitting only its 
       board_path: boardPath,
       decision: "complete",
       full_outcome_complete: true,
+      rationale: "Current receipts and verification satisfy the original oracle.",
+      evidence: ["Current verification and transition evidence."],
       summary: "The live outcome is complete without rewriting old history.",
     };
     const implicit = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
@@ -1073,6 +1093,8 @@ test("immutable-history compatibility rejects checker errors that touch the live
       board_path: boardPath,
       decision: "complete",
       full_outcome_complete: true,
+      rationale: "The live task would be invalid even with complete audit proof.",
+      evidence: ["Current verification and transition evidence."],
       summary: "This must be rejected because the live task is invalid.",
     });
     assert.equal(result.status, 1, result.stderr || result.stdout);
@@ -1097,6 +1119,8 @@ test("receipt transition works on a checker-tolerated legacy dialect without str
       task_id: "T999",
       board_path: boardPath,
       decision: "approved",
+      rationale: "The current audit supports the declared successor.",
+      evidence: ["Current audit evidence."],
       summary: "The current audit closed and selected the already-declared successor.",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -1164,6 +1188,8 @@ test("concurrent same-digest completion writers serialize and cannot overwrite e
       board_path: boardPath,
       decision: "complete",
       full_outcome_complete: true,
+      rationale: "Current receipts and verification satisfy the original oracle.",
+      evidence: ["Current verification and transition evidence."],
       summary: "The first serialized writer completed the goal.",
     };
     const secondReceipt = {

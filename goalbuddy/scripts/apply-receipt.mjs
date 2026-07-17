@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { assertTaskReceipt } from "./receipt-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then have the PM run GoalBuddy's direct digest-bound apply_amendment transition to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
@@ -21,7 +22,13 @@ if (isDirectRun()) {
         ? null
         : report.immutable_history_rejection;
       const detail = report.recovery_guidance?.[0] || compatibilityDetail || report.checker_errors?.[0] || report.immutable_history_rejection || "Transition candidate failed GoalBuddy validation.";
-      throw publicError("CHECKER_FAILED", `${detail} state.yaml remained unchanged.`);
+      throw publicError("CHECKER_FAILED", `${detail} state.yaml remained unchanged.`, {
+        mutation: report.mutation,
+        before_digest: report.before_digest,
+        after_digest: report.after_digest,
+        digest_kind: report.digest_kind,
+        commands: report.commands,
+      });
     }
     if (options.json) {
       console.log(JSON.stringify(report, null, 2));
@@ -52,7 +59,7 @@ if (isDirectRun()) {
 
 function isDirectRun() {
   if (!process.argv[1]) return false;
-  return resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 }
 
 export function parseApplyArgs(args) {
@@ -178,6 +185,20 @@ function applyReceiptUnderLock(options, statePath) {
 
   const context = loadReceiptAdmissionContext(options, statePath);
   authorizeReceiptSource(context.document, options.taskId);
+  const sourceTask = selectedTask(context.document, options.taskId);
+  try {
+    assertTaskReceipt(receipt, {
+      role: String(sourceTask.type || "").toLowerCase(),
+      taskId: options.taskId,
+      verify: Array.isArray(sourceTask.verify) ? sourceTask.verify : [],
+      boundary: "apply receipt",
+    });
+  } catch (error) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", error.message, {
+      receipt_findings: error.findings || [],
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+    });
+  }
   let lines = context.original.replace(/\r\n/g, "\n").split("\n");
 
   if (taskCards.length) lines = appendTaskCards(lines, taskCards);
@@ -270,6 +291,9 @@ function resumeExactHumanReplyUnderLock(options, statePath) {
       no_change: true,
       before_digest: context.originalDigest,
       after_digest: context.originalDigest,
+      digest_kind: "state_yaml_sha256",
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest, sessionBindingPreserved: true }),
+      commands: transitionCommands(context.statePath, context.originalDigest, null),
     };
   }
 
@@ -325,6 +349,18 @@ function completeGoalUnderLock(options, statePath) {
   if (task.status !== "active") throw new Error(`complete requires task ${options.taskId} to be active.`);
   if (!["judge", "pm"].includes(task.type)) throw new Error("complete requires a Judge or PM audit task.");
   if (!isReceiptFree(task)) throw new Error(`complete requires task ${options.taskId} to be receipt-free.`);
+  try {
+    assertTaskReceipt(receipt, {
+      role: task.type,
+      taskId: options.taskId,
+      boundary: "complete receipt",
+    });
+  } catch (error) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", error.message, {
+      receipt_findings: error.findings || [],
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+    });
+  }
   if (receipt.result !== "done" || receipt.decision !== "complete" || receipt.full_outcome_complete !== true) {
     throw new Error("complete requires result done, decision complete, and full_outcome_complete true.");
   }
@@ -630,6 +666,9 @@ function installValidatedCandidate(context, candidate, report) {
       reverted: true,
       before_digest: context.originalDigest,
       after_digest: context.originalDigest,
+      digest_kind: "state_yaml_sha256",
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+      commands: transitionCommands(context.statePath, context.originalDigest, report.active_task || null),
       checker_errors: checkerErrors,
       baseline_checker_ok: baselineReport?.ok === true,
       recovery_guidance: checkerRecoveryGuidance(checkerErrors),
@@ -643,15 +682,49 @@ function installValidatedCandidate(context, candidate, report) {
   writeAtomic(candidatePath, candidate);
   renameSync(candidatePath, context.statePath);
   fsyncDirectory(dirname(context.statePath));
+  const afterDigest = sha256(candidate);
   return {
     ...report,
     ok: true,
     reverted: false,
     before_digest: context.originalDigest,
-    after_digest: sha256(candidate),
+    after_digest: afterDigest,
+    digest_kind: "state_yaml_sha256",
+    mutation: mutationTruth({
+      board: candidate === context.original ? "unchanged" : "changed",
+      product: "none_observed",
+      receiptApplied: ["receipt", "complete", "wait"].includes(report.mode || "receipt"),
+      beforeDigest: context.originalDigest,
+      afterDigest,
+      sessionBindingPreserved: true,
+    }),
+    commands: transitionCommands(context.statePath, afterDigest, report.active_task || null),
     checker_status: checkerReport.ok ? "pass" : "immutable_history_compatible",
     checker_warnings: checkerReport.warnings || [],
     immutable_history: compatibility.used ? compatibility.proof : null,
+  };
+}
+
+function mutationTruth({ board, product, receiptApplied, beforeDigest, afterDigest, sessionBindingPreserved = null }) {
+  return {
+    board,
+    product,
+    receipt_applied: receiptApplied,
+    before_digest: beforeDigest || null,
+    after_digest: afterDigest || null,
+    digest_kind: "state_yaml_sha256",
+    session_binding_preserved: sessionBindingPreserved,
+  };
+}
+
+function transitionCommands(statePath, stateDigest, activeTask) {
+  const goalRoot = dirname(statePath);
+  return {
+    prompt: activeTask
+      ? `node ${JSON.stringify(join(scriptDir, "render-task-prompt.mjs"))} --board ${JSON.stringify(statePath)} --task ${activeTask} --expected-state-digest ${stateDigest} --json`
+      : null,
+    planning: `node ${JSON.stringify(join(scriptDir, "resume-board.mjs"))} ${JSON.stringify(goalRoot)} --planning --json`,
+    recovery: `node ${JSON.stringify(join(scriptDir, "resume-board.mjs"))} ${JSON.stringify(goalRoot)} --json`,
   };
 }
 

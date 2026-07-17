@@ -108,6 +108,76 @@ test("accepts a valid v2 board with one active Scout task", () => {
   }
 });
 
+test("does not require an empty notes directory", () => {
+  const root = makeRoot();
+  try {
+    rmSync(join(root, "notes"), { recursive: true, force: true });
+    writeState(root, validScoutBoard);
+    const result = runChecker(root);
+    assert.equal(result.status, 0, JSON.stringify(result.stdout));
+    assert.equal(result.stdout.ok, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("requires only explicit receipt.note paths and keeps prose inert", () => {
+  const completedScout = validScoutBoard
+    .replace("active_task: T001", "active_task: T002")
+    .replace('    status: active\n    objective: "Map the repo and identify improvement candidates."', '    status: done\n    objective: "Map the repo and identify improvement candidates."')
+    .replace('    receipt: null\n  - id: T002', `    receipt:
+      result: done
+      summary: "Evidence lives in notes/T001.md; this prose is not another pointer."
+      note: notes/T001.md
+  - id: T002`)
+    .replace('    status: queued\n    objective: "Choose the first safe tranche."', '    status: active\n    objective: "Choose the first safe tranche."');
+  const root = makeRoot();
+  try {
+    writeState(root, completedScout);
+    let result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /points to missing file: notes\/T001\.md/);
+
+    writeFileSync(join(root, "notes", "T001.md"), "# evidence\n");
+    result = runChecker(root);
+    assert.equal(result.status, 0, JSON.stringify(result.stdout));
+
+    for (const invalid of ["../escape.md", "notes/../escape.md", "notes\\T001.md", "/tmp/T001.md", "notes/"]) {
+      writeState(root, completedScout.replace("note: notes/T001.md", `note: ${JSON.stringify(invalid)}`));
+      result = runChecker(root);
+      assert.equal(result.status, 1, invalid);
+      assert.match(result.stdout.errors.join("\n"), /receipt note/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a receipt note symlink that escapes the owning board", () => {
+  const completedScout = validScoutBoard
+    .replace("active_task: T001", "active_task: T002")
+    .replace('    status: active\n    objective: "Map the repo and identify improvement candidates."', '    status: done\n    objective: "Map the repo and identify improvement candidates."')
+    .replace('    receipt: null\n  - id: T002', `    receipt:
+      result: done
+      summary: "External evidence must not escape the board."
+      note: notes/T001.md
+  - id: T002`)
+    .replace('    status: queued\n    objective: "Choose the first safe tranche."', '    status: active\n    objective: "Choose the first safe tranche."');
+  const root = makeRoot();
+  const outside = mkdtempSync(join(tmpdir(), "goal-maker-note-outside-"));
+  try {
+    writeState(root, completedScout);
+    writeFileSync(join(outside, "T001.md"), "# external evidence\n");
+    symlinkSync(join(outside, "T001.md"), join(root, "notes", "T001.md"));
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /resolves outside the owning board notes/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("accepts only the closed Judge decision vocabulary", () => {
   const completedJudgeBoard = (decision) => validScoutBoard
     .replace('    status: queued\n    objective: "Choose the first safe tranche."', '    status: done\n    objective: "Choose the first safe tranche."')

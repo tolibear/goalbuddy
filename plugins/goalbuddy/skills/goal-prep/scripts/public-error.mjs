@@ -8,6 +8,7 @@ const ERROR_CATALOG = Object.freeze({
   DISPATCH_SESSION_BIND_FAILED: "Stop the captured Codex process, inspect preserved work, and recover from a fresh board projection without advertising the unbound session.",
   CODEX_SESSION_RESUME_FAILED: "Inspect preserved work and the exact task binding; do not launch a fresh replacement session automatically.",
   RECEIPT_MISSING: "Recover the harness result without fabricating a receipt.",
+  RECEIPT_SCHEMA_INVALID: "Keep the original proof unchanged and follow the reported receipt-repair action; never infer or normalize proof fields.",
   RECEIPT_IDENTITY_MISMATCH: "Reject the receipt and recover against the admitted task.",
   TRANSITION_LOCK_BUSY: "Wait for the current transition to finish, then resume with a fresh state digest; remove a stale lock only after verifying no writer is live.",
   INVALID_ARGUMENT: "Correct the command arguments and retry the same operation.",

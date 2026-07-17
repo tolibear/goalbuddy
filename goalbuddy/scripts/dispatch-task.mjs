@@ -5,12 +5,13 @@ import { spawn } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
+import { compareDispatchAuthority, compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
 import { sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requiredOptionValue } from "./public-error.mjs";
 import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
 import { bindCodexWorkerSession } from "./apply-receipt.mjs";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
+import { validateTaskReceipt } from "./receipt-contract.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -33,7 +34,7 @@ if (isDirectRun()) {
 
 function isDirectRun() {
   if (!process.argv[1]) return false;
-  return resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 }
 
 export function parseDispatchArgs(args) {
@@ -112,18 +113,26 @@ function parseTimeoutSeconds(value) {
 }
 
 export async function dispatchTask(options) {
-  const admitted = admitCurrentTask(options);
+  let admitted;
+  try {
+    admitted = admitCurrentTask(options);
+  } catch (error) {
+    throw publicError(error.code || "INVALID_ARGUMENT", error.message, {
+      ...(error.details || {}),
+      mutation: dispatchMutation({ board: "unknown", product: "none_observed", beforeDigest: null, afterDigest: null, sessionBindingPreserved: null }),
+    });
+  }
   const { board, task, role, payload } = admitted;
   const existingBinding = task.transition_evidence?.codex_worker_session || null;
   const to = options.to || cleanScalar(admitted.harness) || "";
   if (!HARNESSES.has(to)) {
-    return failure("INVALID_ARGUMENT", `Unknown or missing dispatch target "${to}". Use --to codex or --to claude-code (or set harness: on the task card).`, { task_id: task.id });
+    return failure("INVALID_ARGUMENT", `Unknown or missing dispatch target "${to}". Use --to codex or --to claude-code (or set harness: on the task card).`, { task_id: task.id, mutation: prelaunchMutation(board.stateDigest) });
   }
   if (options.serviceTier && to !== "codex") {
-    return failure("INVALID_ARGUMENT", "--service-tier applies only to Codex dispatch.", { task_id: task.id });
+    return failure("INVALID_ARGUMENT", "--service-tier applies only to Codex dispatch.", { task_id: task.id, mutation: prelaunchMutation(board.stateDigest) });
   }
   if (options.reasoningEffort && to !== "codex") {
-    return failure("INVALID_ARGUMENT", "--reasoning-effort applies only to Codex dispatch.", { task_id: task.id });
+    return failure("INVALID_ARGUMENT", "--reasoning-effort applies only to Codex dispatch.", { task_id: task.id, mutation: prelaunchMutation(board.stateDigest) });
   }
   const root = repositoryRoot(dirname(board.path));
   normalizeRepositoryPath(root, board.path);
@@ -142,13 +151,13 @@ export async function dispatchTask(options) {
   const boundInput = loadBoundInput(root, boundOptions);
   const dispatchContractSha256 = compileDispatchContract({ payload: dispatchPayload, to, executionProfile, brief: boundInput });
   if (!options.resumeSession && to === "codex" && role === "worker" && existingBinding) {
-    return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest } });
+    return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest }, mutation: prelaunchMutation(board.stateDigest, true) });
   }
   let dispatchScope;
   try {
     dispatchScope = compileDispatchScope(root, payload.task.allowed_files);
   } catch (error) {
-    return failure("DISPATCH_SCOPE_UNSAFE", `${error.message} Narrow or hydrate allowed_files, then retry the same digest-bound dispatch.`, { task_id: task.id, role });
+    return failure("DISPATCH_SCOPE_UNSAFE", `${error.message} Narrow or hydrate allowed_files, then retry the same digest-bound dispatch.`, { task_id: task.id, role, mutation: prelaunchMutation(board.stateDigest) });
   }
 
   const prompt = [
@@ -190,8 +199,26 @@ export async function dispatchTask(options) {
     expectedThreadId: options.resumeSession || "",
   });
   const after = captureDispatchManifest(root, { scope: dispatchScope });
-  const receipt = extractReceipt(`${codexAgentText(run.stdout)}\n${run.stdout}\n${run.stderr}`);
-  if (receipt && !receipt.harness) receipt.harness = to;
+  let receipt = extractReceipt(`${codexAgentText(run.stdout)}\n${run.stdout}\n${run.stderr}`);
+  let receiptFindings = receipt ? validateTaskReceipt(receipt, {
+    role,
+    taskId: task.id,
+    verify: payload.task.verify,
+    boundary: "dispatch receipt",
+  }) : [];
+  let authority;
+  try {
+    authority = compareDispatchAuthority({
+      before,
+      after,
+      scope: dispatchScope,
+      role,
+      allowedFiles: payload.task.allowed_files,
+      authorizedControlSha256,
+    });
+  } catch (error) {
+    authority = scopeFailure(error);
+  }
   let scope;
   try {
     scope = compareDispatchScope({
@@ -213,30 +240,155 @@ export async function dispatchTask(options) {
     dispatch_contract_sha256: dispatchContractSha256,
     brief: boundInput,
   };
+  const currentStateDigest = bindingReport?.after_digest || board.stateDigest;
+  const postRunMutation = dispatchMutation({
+    board: bindingReport ? "changed" : "unchanged",
+    product: authority.observation_unknown ? "unknown" : (authority.changed_files.length > 0 ? "observed" : "none_observed"),
+    beforeDigest: board.stateDigest,
+    afterDigest: currentStateDigest,
+    sessionBindingPreserved: bindingReport || existingBinding ? true : null,
+  });
   if (run.error || run.status !== 0) {
-    if (scope.status !== "clean") {
+    if (authority.status !== "clean") {
       return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(scope, `${run.error || `The ${to} CLI exited with status ${run.status}`} and left a non-clean dispatch scope.`), {
-        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, harness_error: run.error || null, receipt: receipt || null, scope_check: scope,
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, harness_error: run.error || null, receipt: receipt || null, scope_check: scope, mutation: postRunMutation,
       });
     }
     const code = run.sessionError ? (options.resumeSession ? "CODEX_SESSION_RESUME_FAILED" : "DISPATCH_SESSION_BIND_FAILED") : "HARNESS_FAILED";
     return failure(code, run.error || `The ${to} CLI exited with status ${run.status}.`, {
-      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, receipt: receipt || null, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, receipt: receipt || null, scope_check: scope, mutation: postRunMutation,
     });
   }
   if (!receipt) {
     return failure("RECEIPT_MISSING", "No goalbuddy_receipt_v1 object found in the harness output.", {
-      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt: null, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt: null, scope_check: scope, mutation: postRunMutation,
     });
   }
   if (identityError) {
     return failure("RECEIPT_IDENTITY_MISMATCH", identityError, {
-      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope, mutation: postRunMutation,
     });
+  }
+  if (authority.status !== "clean") {
+    return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(authority, "Dispatch writes violated the admitted authority before receipt validation."), {
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, receipt_findings: receiptFindings, scope_check: scope, mutation: postRunMutation,
+      repair: repairReport({ attempted: false, failure: "authority_violation" }),
+    });
+  }
+  let repair = repairReport({ attempted: false });
+  if (receiptFindings.length > 0) {
+    const repairEligibility = exactReceiptRepairEligibility({
+      options,
+      to,
+      role,
+      run,
+      receipt,
+      bindingReport,
+      board,
+      boardPath: board.path,
+      boundOptions,
+      root,
+    });
+    if (!repairEligibility.ok) {
+      const first = receiptFindings[0];
+      return failure("RECEIPT_SCHEMA_INVALID", `${first.path}: ${first.message}`, {
+        ...dispatchEvidence,
+        harness: to,
+        task_id: task.id,
+        role,
+        exit_status: run.status,
+        receipt,
+        receipt_findings: receiptFindings,
+        scope_check: scope,
+        repair: repairReport({ attempted: false, failure: repairEligibility.reason }),
+        mutation: postRunMutation,
+      });
+    }
+
+    const originalMalformedReceipt = receipt;
+    const originalFindings = receiptFindings;
+    const repairBefore = captureDispatchManifest(root, { scope: dispatchScope });
+    const repairPrompt = receiptRepairPrompt({ task, board, receipt, receiptFindings, payload });
+    const repairRun = await runHarness("codex", repairPrompt, {
+      cwd: root,
+      ...executionProfile,
+      role,
+      timeoutSeconds: options.timeoutSeconds,
+      resumeSession: bindingReport.session_id,
+      expectedThreadId: bindingReport.session_id,
+    });
+    const repairAfter = captureDispatchManifest(root, { scope: dispatchScope });
+    let repairAuthority;
+    try {
+      repairAuthority = compareDispatchAuthority({
+        before: repairBefore,
+        after: repairAfter,
+        scope: dispatchScope,
+        role,
+        allowedFiles: payload.task.allowed_files,
+        authorizedControlSha256: {},
+      });
+    } catch (error) {
+      repairAuthority = scopeFailure(error);
+    }
+    const repairWrote = repairAuthority.changed_files.length > 0
+      || repairAuthority.control_changes.length > 0
+      || repairAuthority.authorized_control_changes.length > 0;
+    if (repairWrote || repairAuthority.status !== "clean") {
+      repair = repairReport({ attempted: true, originalMalformedReceipt, findings: originalFindings, sessionId: bindingReport.session_id, failure: "repair_turn_write" });
+      return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(repairAuthority, "Receipt-repair turn changed repository bytes; repair is non-authoritative."), {
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: repairRun.status ?? null, receipt: originalMalformedReceipt, receipt_findings: originalFindings, scope_check: repairAuthority, repair, mutation: postRunMutation,
+      });
+    }
+    if (repairRun.error || repairRun.status !== 0) {
+      repair = repairReport({ attempted: true, originalMalformedReceipt, findings: originalFindings, sessionId: bindingReport.session_id, failure: repairRun.error || `repair exited ${repairRun.status}` });
+      return failure(repairRun.sessionError ? "CODEX_SESSION_RESUME_FAILED" : "RECEIPT_SCHEMA_INVALID", repairRun.error || "Exact-session receipt repair failed.", {
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: repairRun.status ?? null, receipt: originalMalformedReceipt, receipt_findings: originalFindings, scope_check: scope, repair, mutation: postRunMutation,
+      });
+    }
+    const correctedReceipt = extractReceipt(`${codexAgentText(repairRun.stdout)}\n${repairRun.stdout}\n${repairRun.stderr}`);
+    const correctedIdentityError = correctedReceipt ? receiptIdentityError(correctedReceipt, { taskId: task.id, boardPath: board.path, root }) : "Receipt repair returned no goalbuddy_receipt_v1 object.";
+    const correctedFindings = correctedReceipt && !correctedIdentityError ? validateTaskReceipt(correctedReceipt, {
+      role,
+      taskId: task.id,
+      verify: payload.task.verify,
+      boundary: "repaired dispatch receipt",
+    }) : [];
+    if (!correctedReceipt || correctedIdentityError || correctedFindings.length > 0) {
+      const message = correctedIdentityError || `${correctedFindings[0].path}: ${correctedFindings[0].message}`;
+      repair = repairReport({ attempted: true, originalMalformedReceipt, findings: originalFindings, sessionId: bindingReport.session_id, failure: "second_receipt_invalid" });
+      return failure("RECEIPT_SCHEMA_INVALID", message, {
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: repairRun.status, receipt: correctedReceipt || originalMalformedReceipt, receipt_findings: correctedFindings.length ? correctedFindings : originalFindings, scope_check: scope, repair, mutation: postRunMutation,
+      });
+    }
+    let repairedScope;
+    try {
+      repairedScope = compareDispatchScope({
+        before,
+        after: repairAfter,
+        scope: dispatchScope,
+        role,
+        allowedFiles: payload.task.allowed_files,
+        receiptChangedFiles: correctedReceipt.changed_files,
+        authorizedControlSha256,
+      });
+    } catch (error) {
+      repairedScope = scopeFailure(error);
+    }
+    if (repairedScope.status !== "clean") {
+      repair = repairReport({ attempted: true, originalMalformedReceipt, findings: originalFindings, sessionId: bindingReport.session_id, failure: "repaired_receipt_scope_mismatch" });
+      return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(repairedScope, "Repaired receipt does not exactly match the original observed changes."), {
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: repairRun.status, receipt: correctedReceipt, receipt_findings: [], scope_check: repairedScope, repair, mutation: postRunMutation,
+      });
+    }
+    receipt = correctedReceipt;
+    receiptFindings = [];
+    scope = repairedScope;
+    repair = repairReport({ attempted: true, succeeded: true, originalMalformedReceipt, findings: originalFindings, sessionId: bindingReport.session_id });
   }
   if (scope.status !== "clean") {
     return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(scope, "Dispatch writes or receipt claims failed the admitted scope contract."), {
-      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope, mutation: postRunMutation,
     });
   }
 
@@ -248,7 +400,97 @@ export async function dispatchTask(options) {
     exit_status: run.status,
     receipt: receipt || null,
     scope_check: scope,
+    repair,
+    state_digest: currentStateDigest,
+    digest_kind: "state_yaml_sha256",
+    mutation: postRunMutation,
+    commands: dispatchCommands({ boardPath: board.path, taskId: task.id, stateDigest: currentStateDigest, sessionId: bindingReport?.session_id || existingBinding?.session_id || null }),
     ...dispatchEvidence,
+  };
+}
+
+function exactReceiptRepairEligibility({ options, to, role, run, receipt, bindingReport, boardPath, boundOptions, root }) {
+  if (options.resumeSession) return { ok: false, reason: "already_resumed_dispatch" };
+  if (receipt?.result !== "done" && receipt?.result !== "blocked") return { ok: false, reason: "terminal_result_unknown" };
+  if (to !== "codex" || role !== "worker" || !bindingReport?.session_id || run.threadId !== bindingReport.session_id) {
+    return { ok: false, reason: "harness_has_no_exact_bound_session" };
+  }
+  if (sha256(readFileSync(boardPath)) !== bindingReport.after_digest) return { ok: false, reason: "board_contract_changed" };
+  try { loadBoundInput(root, boundOptions); } catch { return { ok: false, reason: "bound_input_changed" }; }
+  return { ok: true };
+}
+
+function receiptRepairPrompt({ task, board, receipt, receiptFindings, payload }) {
+  const result = receipt?.result === "blocked" ? "blocked" : "done";
+  return [
+    `Receipt-only repair for GoalBuddy task ${task.id}.`,
+    "Do not inspect, create, edit, delete, rename, or chmod any file. Product work is finished for this turn.",
+    `Return exactly one corrected goalbuddy_receipt_v1 JSON object for board ${board.path}.`,
+    "Do not infer new command outcomes; restate only proof from your original turn.",
+    `Validation findings: ${JSON.stringify(receiptFindings)}`,
+    `Required ${result} shape: ${JSON.stringify(payload.receipt_schemas[result])}`,
+  ].join("\n");
+}
+
+function repairReport({ attempted, succeeded = false, originalMalformedReceipt = null, findings = [], sessionId = null, failure = null }) {
+  return {
+    attempted,
+    succeeded: attempted ? succeeded : false,
+    original_malformed_receipt: attempted ? originalMalformedReceipt : null,
+    validation_findings: attempted ? findings : [],
+    session_id: attempted ? sessionId : null,
+    failure,
+  };
+}
+
+function scopeFailure(error) {
+  return {
+    status: "violations",
+    observation_unknown: true,
+    changed_files: [],
+    receipt_changed_files: [],
+    control_changes: [],
+    authorized_control_changes: [],
+    out_of_scope: [],
+    missing_receipt_changes: [],
+    extra_receipt_claims: [],
+    violations: [error.message],
+  };
+}
+
+function prelaunchMutation(stateDigest, sessionBindingPreserved = null) {
+  return dispatchMutation({ board: "unchanged", product: "none_observed", beforeDigest: stateDigest, afterDigest: stateDigest, sessionBindingPreserved });
+}
+
+function dispatchMutation({ board, product, beforeDigest, afterDigest, sessionBindingPreserved }) {
+  return {
+    board,
+    product,
+    receipt_applied: false,
+    before_digest: beforeDigest,
+    after_digest: afterDigest,
+    digest_kind: "state_yaml_sha256",
+    session_binding_preserved: sessionBindingPreserved,
+  };
+}
+
+function dispatchCommands({ boardPath, taskId, stateDigest, sessionId }) {
+  const goalRoot = dirname(boardPath);
+  return {
+    apply_receipt: {
+      operation: "apply_receipt",
+      board_path: boardPath,
+      task_id: taskId,
+      expected_state_digest: stateDigest,
+      digest_kind: "state_yaml_sha256",
+      receipt_path: null,
+      activate_task_id: null,
+      unresolved: ["receipt_path", "activate_task_id"],
+    },
+    resume_worker: sessionId
+      ? `node ${JSON.stringify(fileURLToPath(import.meta.url))} ${JSON.stringify(goalRoot)} --to codex --resume-session ${sessionId} --confirmed-not-live --expected-state-digest ${stateDigest} --json`
+      : null,
+    recovery: `node ${JSON.stringify(resolve(dirname(fileURLToPath(import.meta.url)), "resume-board.mjs"))} ${JSON.stringify(goalRoot)} --json`,
   };
 }
 

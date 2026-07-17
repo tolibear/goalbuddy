@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { receiptExample, validateTaskReceipt } from "../../goalbuddy/scripts/receipt-contract.mjs";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
 const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
@@ -32,6 +33,21 @@ function runGoalMaker(args, options = {}) {
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+function runParallelPlan(goal, options = {}) {
+  const resume = runGoalMaker(["resume", goal, "--json"], options);
+  assert.equal(resume.status, 0, resume.stderr || resume.stdout);
+  const report = JSON.parse(resume.stdout);
+  return runGoalMaker([
+    "parallel-plan",
+    goal,
+    "--expected-state-digest",
+    report.board.state_digest,
+    "--expected-board-tree-digest",
+    report.board.tree.digest,
+    "--json",
+  ], options);
 }
 
 function testEnv(env) {
@@ -65,13 +81,6 @@ function snapshotPath(path) {
     };
   }
   return { type: "other" };
-}
-
-function receiptContractSchema(agentPath) {
-  const text = readFileSync(agentPath, "utf8");
-  const match = text.match(/\{\s*"goalbuddy_receipt_v1":\s*(\{[\s\S]*?\n\s*\})\s*\n\}/);
-  assert.ok(match, `missing goalbuddy_receipt_v1 contract in ${agentPath}`);
-  return JSON.parse(match[1]);
 }
 
 function ledgerAuditContractSchema(agentPath) {
@@ -635,7 +644,8 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(worker, /\[permissions\.workspace-network\.network\]\nenabled = true/);
   assert.match(worker, /Edit only files matching allowed_files/);
   assert.match(worker, /Complete the whole assigned slice/);
-  assert.match(worker, /verification_attempts/);
+  assert.match(worker, /result-specific done or blocked shape supplied in the current rendered task prompt/);
+  assert.match(worker, /exact `cmd` and truthful `status`/);
 
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_scout.toml", "utf8"), scout);
   assert.equal(readFileSync("plugins/goalbuddy/skills/goal-prep/agents/goal_judge.toml", "utf8"), judge);
@@ -824,9 +834,9 @@ checks:
     });
     assert.equal(report.task.id, "T002");
     assert.deepEqual(report.task.allowed_files, ["goalbuddy/scripts/**"]);
-    assert.equal(report.receipt_schema.task_id, "<T###>");
-    assert.equal(report.receipt_schema.board_path, "<path to state.yaml>");
-    assert.equal(report.receipt_schema.stopped_because, null);
+    assert.equal(report.receipt_schema.task_id, "T002");
+    assert.equal(report.receipt_schema.board_path, report.metadata.board_path);
+    assert.deepEqual(report.receipt_schema.commands, report.task.verify.map((cmd) => ({ cmd, status: "pass" })));
     assert.equal(Object.hasOwn(report.receipt_schema, "needs_judge"), false);
     assert.equal(Object.hasOwn(report.receipt_schema, "next_allowed_task"), false);
     assert.equal(result.stdout.includes("A previous finding that should not force a full state dump."), false);
@@ -1044,8 +1054,16 @@ checks:
       const result = runGoalMaker(["prompt", goal, "--expected-state-digest", stateDigest, "--json"]);
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const report = JSON.parse(result.stdout);
-      const expectedSchema = receiptContractSchema(`goalbuddy/agents/${item.agent}.toml`);
-      assert.deepEqual(report.receipt_schema, expectedSchema, item.agent);
+      for (const resultName of ["done", "blocked"]) {
+        const findings = validateTaskReceipt(report.receipt_schemas[resultName], {
+          role: item.type,
+          taskId: "T001",
+          boardPath: report.metadata.board_path,
+          verify: report.task.verify,
+        });
+        assert.deepEqual(findings, [], `${item.agent}:${resultName}`);
+      }
+      assert.deepEqual(report.receipt_schema, report.receipt_schemas.done, item.agent);
       assert.equal(report.metadata.recommended_reasoning, item.reasoning, item.agent);
     }
   } finally {
@@ -1226,7 +1244,7 @@ checks:
 `;
     writeFileSync(join(goal, "state.yaml"), parentState);
 
-    const result = runGoalMaker(["parallel-plan", "goal", "--json"], { cwd: root });
+    const result = runParallelPlan("goal", { cwd: root });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.mutated, false);
@@ -1319,7 +1337,7 @@ checks:
     commands: []
 `);
 
-    const result = runGoalMaker(["parallel-plan", goal, "--json"]);
+    const result = runParallelPlan(goal);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.candidates.length, 2);
@@ -1408,7 +1426,7 @@ checks:
     commands: []
 `);
 
-    const result = runGoalMaker(["parallel-plan", goal, "--json"]);
+    const result = runParallelPlan(goal);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.candidates.length, 2);
@@ -1959,11 +1977,15 @@ test("prompt, dispatch, and receipt preserve --json after a missing option value
   }
 });
 
-test("judge receipt contract includes worker_package in every surface", () => {
-  const tomlSchema = receiptContractSchema("goalbuddy/agents/goal_judge.toml");
-  const mdSchema = receiptContractSchema("plugins/goalbuddy/agents/goal-judge.md");
-  assert.deepEqual(Object.keys(tomlSchema.worker_package), ["objective", "allowed_files", "verify", "stop_if"]);
-  assert.deepEqual(mdSchema.worker_package, tomlSchema.worker_package);
+test("agent surfaces point to rendered result-specific receipts while executable examples own shape", () => {
+  for (const path of ["goalbuddy/agents/goal_judge.toml", "plugins/goalbuddy/agents/goal-judge.md", "goalbuddy/agents/goal_worker.toml", "plugins/goalbuddy/agents/goal-worker.md"]) {
+    const text = readFileSync(path, "utf8");
+    assert.match(text, /result-specific done or blocked shape supplied in the current rendered task prompt/);
+    assert.doesNotMatch(text, /"result": "done \| blocked"/);
+  }
+  const judge = receiptExample({ role: "judge", result: "done" });
+  assert.deepEqual(Object.keys(judge.worker_package || {}), []);
+  assert.equal(judge.worker_package, null);
 });
 
 test("ledger audit contract is parseable and aligned across both harnesses", () => {
@@ -2254,6 +2276,22 @@ test("resume --json returns structured boards", () => {
   }
 });
 
+test("installed resume executes when its argv path uses a filesystem alias", { skip: process.platform === "win32" }, () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-alias-"));
+  const aliasRoot = join(root, "scripts-alias");
+  try {
+    symlinkSync(dirname(bundledResume), aliasRoot, "dir");
+    const result = spawnSync(process.execPath, [join(aliasRoot, "resume-board.mjs"), "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout), { boards: [] });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("wait and reply expose the digest-bound exact-human lifecycle and compact resume evidence", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-exact-human-cli-"));
   try {
@@ -2321,6 +2359,8 @@ test("complete is exposed through the public CLI and closes an audit-only tail",
       board_path: statePath,
       decision: "complete",
       full_outcome_complete: true,
+      rationale: "The current receipts and verification prove the final outcome.",
+      evidence: ["src/widget.mjs", "npm test"],
       summary: "The public CLI proved the final outcome.",
     }));
 
@@ -2505,16 +2545,31 @@ test("resume and parallel-plan bind every active child lane to one composite boa
     assert.equal(firstReport.recovery.active_lane_count, 2);
     assert.match(firstReport.commands.parallel_plan, /goalbuddy parallel-plan/);
 
-    const plan = runGoalMaker(["parallel-plan", goalDir, "--json"], { cwd: root });
+    const plan = runParallelPlan(goalDir, { cwd: root });
     assert.equal(plan.status, 0, plan.stderr || plan.stdout);
     const planReport = JSON.parse(plan.stdout);
     assert.equal(planReport.board_tree_digest, firstReport.board.tree.digest);
+    assert.equal(planReport.board_tree_digest_kind, "board_tree_sha256");
+    assert.equal(planReport.root_state_digest, firstReport.board.state_digest);
+    assert.equal(planReport.root_state_digest_kind, "state_yaml_sha256");
     assert.equal(planReport.candidates.length, 2);
     assert.equal(planReport.candidates.every((candidate) => candidate.safe_to_parallelize), true);
     for (const candidate of planReport.candidates) {
       assert.match(candidate.state_digest, /^[a-f0-9]{64}$/);
       assert.match(candidate.render_prompt_command, new RegExp(`--expected-state-digest ${candidate.state_digest}$`));
     }
+
+    const stalePlan = runGoalMaker([
+      "parallel-plan",
+      goalDir,
+      "--expected-state-digest",
+      firstReport.board.state_digest,
+      "--expected-board-tree-digest",
+      "0".repeat(64),
+      "--json",
+    ], { cwd: root });
+    assert.equal(stalePlan.status, 1);
+    assert.match(stalePlan.stderr || stalePlan.stdout, /board-tree digest drift/);
 
     const childBefore = readFileSync(childStatePath, "utf8");
     writeFileSync(childStatePath, childBefore.replace("Implement the child lane.", "Implement the revised child lane."));

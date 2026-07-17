@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { dirname, relative, resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { assertBoardTreeSnapshotsCurrent, runResumeChecker } from "./resume-board.mjs";
 import { loadBoardSnapshot, parseArgs, resolveBoardPath, selectTask } from "./render-task-prompt.mjs";
@@ -21,10 +22,22 @@ if (isDirectRun()) {
 
 export function createParallelPlan(options) {
   const rootBoardPath = resolveBoardPath(options);
+  if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest || "")) {
+    throw new Error("GoalBuddy parallel plan requires --expected-state-digest for the root state.yaml.");
+  }
+  if (!/^[a-f0-9]{64}$/.test(options.expectedBoardTreeDigest || "")) {
+    throw new Error("GoalBuddy parallel plan requires --expected-board-tree-digest for the checked board tree.");
+  }
   const validation = runResumeChecker(dirname(rootBoardPath));
   if (!validation.checker.ok || validation.boardTreeError) {
     const detail = validation.boardTreeError || validation.checker.errors.join("; ") || "checker rejected the board tree";
     throw new Error(`GoalBuddy parallel plan requires a checker-valid board tree: ${detail}`);
+  }
+  if (validation.checker.state_digest !== options.expectedStateDigest) {
+    throw new Error(`GoalBuddy parallel plan root state digest drift: expected ${options.expectedStateDigest}, got ${validation.checker.state_digest}.`);
+  }
+  if (validation.checker.board_tree_digest !== options.expectedBoardTreeDigest) {
+    throw new Error(`GoalBuddy parallel plan board-tree digest drift: expected ${options.expectedBoardTreeDigest}, got ${validation.checker.board_tree_digest}.`);
   }
   const boards = validation.boardSnapshots
     .map((snapshot) => loadBoardSnapshot(snapshot.state_path, snapshot.text))
@@ -36,6 +49,9 @@ export function createParallelPlan(options) {
     root_board_path: rootBoardPath,
     board_tree_version: validation.checker.board_tree_version,
     board_tree_digest: validation.checker.board_tree_digest,
+    board_tree_digest_kind: "board_tree_sha256",
+    root_state_digest: validation.checker.state_digest,
+    root_state_digest_kind: "state_yaml_sha256",
     boards: validation.boardSnapshots.map(({ text: _text, ...snapshot }) => snapshot),
     mutated: false,
     spawned_agents: false,
@@ -194,5 +210,5 @@ function formatPlan(plan) {
 }
 
 function isDirectRun() {
-  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 }

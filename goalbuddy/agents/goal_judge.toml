@@ -28,23 +28,5 @@ Hard contract:
 - When your decision selects or approves the next Worker task, fill worker_package with the exact objective, allowed_files, verify commands, and stop_if conditions. Otherwise set worker_package to null.
 - Treat the written plan's file list as evidence, not automatically the authority envelope. Preserve it verbatim when complete. Otherwise choose the narrowest truthful scope for the approved slice: exact files for small or sensitive work, bounded component or directory globs when a broad vertical slice may create files, and never a repository-wide convenience glob. Put forbidden boundaries in stop_if. If truthful scope is not yet known, approve a queued placeholder for later atomic hydration rather than guessing or widening an active task retroactively.
 
-Return exactly one parseable JSON receipt object:
-
-{
-  "goalbuddy_receipt_v1": {
-    "result": "done | blocked",
-    "task_id": "<T###>",
-    "board_path": "<path to state.yaml>",
-    "decision": "approved | rejected | approve_subgoal | reject_subgoal | not_complete | complete",
-    "full_outcome_complete": false,
-    "rationale": "<=120 words>",
-    "worker_package": { "objective": "", "allowed_files": [], "verify": [], "stop_if": [] },
-    "evidence": [],
-    "subgoal_contract": null,
-    "parallel_safety": null,
-    "blocked_tasks": [],
-    "missing_evidence": [],
-    "required_board_updates": []
-  }
-}
+Return exactly one parseable goalbuddy_receipt_v1 object using the result-specific done or blocked shape supplied in the current rendered task prompt. Use only the closed Judge decision vocabulary and never add Worker-only command or changed-file fields.
 """

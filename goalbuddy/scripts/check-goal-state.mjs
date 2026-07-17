@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
@@ -432,9 +432,6 @@ for (const { agent, status } of agentStatuses) {
 }
 
 if (!existsSync(join(root, "goal.md"))) errors.push("missing goal.md");
-if (!existsSync(join(root, "notes")) || !statSync(join(root, "notes")).isDirectory()) {
-  errors.push("missing notes/ directory");
-}
 
 const unexpected = rootEntryErrors();
 if (unexpected.length > 0) {
@@ -511,6 +508,7 @@ for (const task of tasks) {
   }
 
   const hasReceipt = task.receipt.present && task.receipt.value !== null;
+  validateReceiptNote(task);
   const receiptResult = hasReceipt ? task.receipt.scalar("result") : null;
   if (hasReceipt && (task.receipt.has("waiting_for_user_approval") || task.receipt.has("required_reply"))) {
     const waitingForUserApproval = task.receipt.scalar("waiting_for_user_approval");
@@ -589,6 +587,40 @@ for (const task of tasks) {
     } else if (!judgeDecisions.has(decision)) {
       errors.push(`Judge receipt for ${task.id} has unsupported decision ${JSON.stringify(decision)}; expected one of ${[...judgeDecisions].join(", ")}`);
     }
+  }
+}
+
+function validateReceiptNote(task) {
+  if (!task.receipt.present || task.receipt.value === null || typeof task.receipt.has !== "function" || !task.receipt.has("note")) return;
+  const note = task.receipt.scalar("note");
+  if (typeof note !== "string" || note.trim() === "") {
+    errors.push(`receipt note for ${task.id} must be a nonempty relative notes/ path`);
+    return;
+  }
+  if (note.includes("\\") || !note.startsWith("notes/") || note.endsWith("/") || note.startsWith("/") || /^[A-Za-z]:/.test(note)) {
+    errors.push(`receipt note for ${task.id} must be a relative forward-slash path rooted at notes/: ${note}`);
+    return;
+  }
+  const segments = note.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    errors.push(`receipt note for ${task.id} must not contain empty, dot, or traversal segments: ${note}`);
+    return;
+  }
+  const notesRoot = resolve(root, "notes");
+  const notePath = resolve(root, note);
+  if (notePath === notesRoot || !notePath.startsWith(`${notesRoot}${sep}`)) {
+    errors.push(`receipt note for ${task.id} escapes notes/: ${note}`);
+    return;
+  }
+  if (!existsSync(notePath) || !statSync(notePath).isFile()) {
+    errors.push(`receipt note for ${task.id} points to missing file: ${note}`);
+    return;
+  }
+  const realRoot = realpathSync(root);
+  const realNotesRoot = realpathSync(notesRoot);
+  const realNotePath = realpathSync(notePath);
+  if (!realNotesRoot.startsWith(`${realRoot}${sep}`) || !realNotePath.startsWith(`${realNotesRoot}${sep}`)) {
+    errors.push(`receipt note for ${task.id} resolves outside the owning board notes/: ${note}`);
   }
 }
 

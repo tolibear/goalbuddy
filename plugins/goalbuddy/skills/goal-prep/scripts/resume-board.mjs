@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -401,14 +401,11 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     .map(projectApprovalGate);
   const blockedTasks = rawTasks
     .filter((task) => resumeText(task?.status) === "blocked")
-    .map(projectBlockedTask);
+    .map((task) => projectBlockedTask(task, rawTasks));
+  const stateDigest = sha256(stateText);
   const queuedTasks = rawTasks
     .filter((task) => resumeText(task?.status) === "queued")
-    .map((task) => ({
-      id: resumeText(task.id),
-      type: resumeText(task.type || "pm"),
-      objective: boundedResumeText(task.objective, 60).text,
-    }));
+    .map((task) => projectQueuedTask(task, rawTasks, stateDigest));
   const goal = document.goal && typeof document.goal === "object" ? document.goal : {};
   const oracle = goal.oracle && typeof goal.oracle === "object" ? goal.oracle : {};
   const intake = goal.intake && typeof goal.intake === "object" ? goal.intake : {};
@@ -428,11 +425,13 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     board: {
       path,
       state_path: statePath,
-      state_digest: sha256(stateText),
+      state_digest: stateDigest,
+      state_digest_kind: "state_yaml_sha256",
       state_digest_status: "checker_validated",
       tree: {
         version: checker.board_tree_version,
         digest: checker.board_tree_digest,
+        digest_kind: "board_tree_sha256",
         digest_status: "checker_validated",
         boards: boardSnapshots.map(({ text: _text, ...snapshot }) => snapshot),
       },
@@ -474,6 +473,8 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
       approval_gates: approvalGates,
       planning_inventory: {
         included: options.planning === true,
+        mode: options.planning === true ? "ordinary_successor_selection" : "omitted",
+        parallel_plan_trigger: "Use parallel-plan only to create, restructure, or authorize concurrent child-board lanes, or to re-prove their pairwise dispatch safety.",
         blocked_tasks: options.planning === true ? blockedTasks : [],
         queued_tasks: options.planning === true ? queuedTasks : [],
       },
@@ -497,12 +498,14 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     },
     commands: {
       resume: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --json`,
-      run: `/goal Follow ${path}/goal.md.`,
       prompt: activeTask
-        ? `node ${shellArgument(join(skillRoot, "scripts", "render-task-prompt.mjs"))} ${shellArgument(path)} --task ${activeTask.id} --expected-state-digest ${sha256(stateText)} --json`
+        ? `node ${shellArgument(join(skillRoot, "scripts", "render-task-prompt.mjs"))} ${shellArgument(path)} --task ${activeTask.id} --expected-state-digest ${stateDigest} --json`
         : null,
       planning: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --planning --json`,
-      parallel_plan: activeLanes.length > 1 ? `goalbuddy parallel-plan ${path}` : null,
+      recovery: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --json`,
+      parallel_plan: activeLanes.length > 1
+        ? `goalbuddy parallel-plan ${shellArgument(path)} --expected-state-digest ${stateDigest} --expected-board-tree-digest ${checker.board_tree_digest} --json`
+        : null,
     },
   };
 }
@@ -612,7 +615,7 @@ function projectApprovalGate(task) {
   };
 }
 
-function projectBlockedTask(task) {
+function projectBlockedTask(task, tasks) {
   const receipt = task.receipt && typeof task.receipt === "object" ? task.receipt : {};
   const reason = boundedResumeText(
     receipt.blocked_reason
@@ -632,6 +635,60 @@ function projectBlockedTask(task) {
     note: resumeText(receipt.note),
     waiting_for_user_approval: receipt.waiting_for_user_approval === true,
     required_reply: resumeText(receipt.required_reply),
+    blocker_ids: blockerIds(task, tasks),
+    recent_receipt: projectBoundedReceipt(receipt),
+  };
+}
+
+function projectQueuedTask(task, tasks, stateDigest) {
+  const dependencies = resumeList(task.depends_on);
+  const statusById = new Map(tasks.map((candidate) => [resumeText(candidate.id), resumeText(candidate.status)]));
+  const blockedBy = dependencies.filter((id) => statusById.get(id) !== "done");
+  return {
+    id: resumeText(task.id),
+    type: resumeText(task.type || "pm"),
+    objective: boundedResumeText(task.objective, 60).text,
+    depends_on: dependencies,
+    dependency_ready: blockedBy.length === 0,
+    blocked_by: blockedBy,
+    gate: projectGate(task),
+    next_transition: {
+      operation: "apply_receipt",
+      activate: resumeText(task.id),
+      expected_state_digest: stateDigest,
+      digest_kind: "state_yaml_sha256",
+      receipt_path: null,
+      unresolved: ["receipt_path"],
+    },
+  };
+}
+
+function blockerIds(task, tasks) {
+  const explicit = resumeList(task.blocked_on || task.depends_on);
+  if (explicit.length > 0) return explicit;
+  const receipt = task.receipt && typeof task.receipt === "object" ? task.receipt : {};
+  return resumeList(receipt.blocked_tasks).filter((id) => tasks.some((candidate) => resumeText(candidate.id) === id));
+}
+
+function projectGate(task) {
+  const gate = task.trigger_gate || task.gate || null;
+  if (gate === null || gate === undefined || gate === "") return null;
+  if (typeof gate !== "object" || Array.isArray(gate)) return boundedResumeText(gate, 30).text;
+  return {
+    status: resumeText(gate.status || "unknown"),
+    condition: boundedResumeText(gate.condition || gate.objective || gate.name, 30).text,
+  };
+}
+
+function projectBoundedReceipt(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return null;
+  const summary = boundedResumeText(receipt.summary || receipt.rationale || receipt.blocked_reason || receipt.result, 60);
+  return {
+    result: resumeText(receipt.result),
+    decision: resumeText(receipt.decision) || null,
+    summary: summary.text,
+    summary_truncated: summary.truncated,
+    note: resumeText(receipt.note) || null,
   };
 }
 
@@ -697,7 +754,7 @@ function printResumeProjection(projection) {
   if (commands.prompt) console.log(`Active task prompt: ${commands.prompt}`);
   if (commands.planning) console.log(`Planning inventory: ${commands.planning}`);
   if (commands.parallel_plan) console.log(`Parallel plan: ${commands.parallel_plan}`);
-  console.log(`Run command: ${commands.run}`);
+  if (commands.recovery) console.log(`Recovery projection: ${commands.recovery}`);
 }
 
 function listGoalDirs(root) {
@@ -746,5 +803,5 @@ function printJson(value) {
 }
 
 function isDirectRun() {
-  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 }

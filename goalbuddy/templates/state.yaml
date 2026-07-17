@@ -1,5 +1,5 @@
 # GoalBuddy v2 state.yaml
-# Board truth lives here. goal.md is the editable charter; notes/ holds long receipts only.
+# Board truth lives here. goal.md is the editable charter; optional notes/ files are created on first use.
 
 version: 2
 

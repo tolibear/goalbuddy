@@ -12,7 +12,7 @@ A goal lives in the target repository:
 docs/goals/<slug>/
   goal.md      # human-editable charter: outcome, oracle, constraints
   state.yaml   # machine truth: the board
-  notes/       # long-form receipts that do not fit on a task card
+  notes/       # optional long-form evidence, created on first use
 ```
 
 `state.yaml` is authoritative. When any other artifact disagrees with it, `state.yaml` wins for task status, active task, receipts, and completion truth.
@@ -67,11 +67,16 @@ Newly hydrated Worker task cards accept only generic GoalBuddy fields. Product-s
 
 ## Receipt shapes by role
 
+`goalbuddy/scripts/receipt-contract.mjs` is the executable source for these shapes. `render-task-prompt.mjs` prints the exact done and blocked examples for the admitted current task. The examples below show the role fields; every terminal receipt also includes `task_id` and `board_path`, and may include self-authored `harness` provenance.
+
 Scout (findings, read-only):
 
 ```yaml
 receipt:
   result: done
+  task_id: T001
+  board_path: docs/goals/example/state.yaml
+  harness: codex
   summary: "<=120 words>"
   evidence: [<file paths>]
   facts: []
@@ -85,6 +90,9 @@ Judge (decision, read-only). When the decision selects or approves the next Work
 ```yaml
 receipt:
   result: done
+  task_id: T001
+  board_path: docs/goals/example/state.yaml
+  harness: codex
   decision: "approved | rejected | approve_subgoal | reject_subgoal | not_complete | complete"
   full_outcome_complete: false
   rationale: "<=120 words>"
@@ -106,6 +114,9 @@ Worker, done:
 ```yaml
 receipt:
   result: done
+  task_id: T001
+  board_path: docs/goals/example/state.yaml
+  harness: codex
   changed_files: [<paths, all inside allowed_files>]
   commands:
     - cmd: npm test
@@ -121,14 +132,19 @@ Worker, blocked:
 ```yaml
 receipt:
   result: blocked
+  task_id: T001
+  board_path: docs/goals/example/state.yaml
+  harness: codex
   blocked_reason: "<why this task cannot finish, e.g. verify blocked by a cause outside allowed_files>"
   changed_files: []
   commands:
     - cmd: npm test
       status: fail
   summary: "<what landed, what is blocked, and where the failure lives>"
-  spawned_tasks: [<T### ids of scoped follow-ups>]
+  remaining_blockers: ["<what authority or evidence is still required>"]
 ```
+
+Judge, Scout, and PM blocked receipts likewise include `result: blocked`, identity, and a nonempty `blocked_reason`; the rendered prompt supplies each role's exact additional evidence fields. A completed PM receipt includes a nonempty `summary` and optional evidence. GoalBuddy validates these role/result distinctions at both dispatch extraction and receipt application using the same module; it never normalizes one role's output into another shape.
 
 ## Optional fields
 
@@ -139,6 +155,8 @@ harness: codex | claude-code | <other runtime name>
 ```
 
 identifying the runtime that performed the task. Boards are portable across harnesses (the format is plain repo files), and this field lets a board's history show which harness produced each receipt after a handoff. Optional and additive — validators must tolerate its absence and its presence.
+
+A receipt may point to long-form evidence through a relative forward-slash `note: notes/<task-id>-<slug>.md` path. The file must exist inside the owning board. An empty `notes/` directory is never required and need not be committed; create it when the first explicit note pointer is written.
 
 A terminal wait for an exact human reply uses one closed shape: `result: blocked`, `waiting_for_user_approval: true`, and a nonempty `required_reply`, on a board that explicitly enables `rules.exact_human_approval_can_terminal_wait: true`. No approval-class field is recognized or inferred.
 

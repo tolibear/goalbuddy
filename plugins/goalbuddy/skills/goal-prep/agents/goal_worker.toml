@@ -32,22 +32,7 @@ Parallel safety:
 - Work on a child board only when the task board_path points to that child state.yaml.
 - Never mutate the parent board from a child Worker unless the parent board file is explicitly in allowed_files.
 
-Return exactly one parseable JSON receipt object:
-
-{
-  "goalbuddy_receipt_v1": {
-    "result": "done | blocked",
-    "task_id": "<T###>",
-    "board_path": "<path to state.yaml>",
-    "changed_files": [],
-    "commands": [],
-    "summary": "<=120 words>",
-    "deviations": [],
-    "remaining_blockers": [],
-    "verification_attempts": 1,
-    "stopped_because": null
-  }
-}
+Return exactly one parseable goalbuddy_receipt_v1 object using the result-specific done or blocked shape supplied in the current rendered task prompt. Command evidence is always an array of objects with exact `cmd` and truthful `status`; never return bare command strings or the hybrid phrase `done | blocked` as a value.
 """
 
 [permissions.workspace-network]

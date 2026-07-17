@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
+import { receiptExample } from "./receipt-contract.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -95,7 +96,11 @@ export function admitCurrentTask(options) {
         reasoning_hint: task.reasoning_hint || null,
         expected_output: stringList(task.expected_output),
       },
-      receipt_schema: receiptSchema(role),
+      receipt_schema: taskReceiptExample(role, "done", task, board.path),
+      receipt_schemas: {
+        done: taskReceiptExample(role, "done", task, board.path),
+        blocked: taskReceiptExample(role, "blocked", task, board.path),
+      },
     };
   return {
     board,
@@ -112,6 +117,7 @@ export function parseArgs(args) {
     boardPath: "",
     taskId: "",
     expectedStateDigest: "",
+    expectedBoardTreeDigest: "",
     allowImmutableHistory: false,
     json: false,
   };
@@ -134,6 +140,11 @@ export function parseArgs(args) {
       index += 1;
     } else if (arg.startsWith("--expected-state-digest=")) {
       options.expectedStateDigest = joinedOptionValue(arg, "--expected-state-digest");
+    } else if (arg === "--expected-board-tree-digest") {
+      options.expectedBoardTreeDigest = requiredOptionValue(args, index, arg);
+      index += 1;
+    } else if (arg.startsWith("--expected-board-tree-digest=")) {
+      options.expectedBoardTreeDigest = joinedOptionValue(arg, "--expected-board-tree-digest");
     } else if (arg === "--allow-immutable-history") {
       options.allowImmutableHistory = true;
     } else if (arg === "--parallel-plan") {
@@ -154,6 +165,9 @@ export function parseArgs(args) {
   }
   if (options.expectedStateDigest && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
     throw new Error("--expected-state-digest must contain exactly 64 lowercase hex characters.");
+  }
+  if (options.expectedBoardTreeDigest && !/^[a-f0-9]{64}$/.test(options.expectedBoardTreeDigest)) {
+    throw new Error("--expected-board-tree-digest must contain exactly 64 lowercase hex characters.");
   }
   return options;
 }
@@ -420,50 +434,22 @@ function changedFilesPathStyle(allowedFiles) {
   return "mirror-each-allowed-file";
 }
 
-function receiptSchema(role) {
-  if (role === "worker") {
-    return {
-      result: "done | blocked",
-      task_id: "<T###>",
-      board_path: "<path to state.yaml>",
-      changed_files: [],
-      commands: [],
-      summary: "<=120 words>",
-      deviations: [],
-      remaining_blockers: [],
-      verification_attempts: 1,
-      stopped_because: null,
-    };
-  }
-  if (role === "judge") {
-    return {
-      result: "done | blocked",
-      task_id: "<T###>",
-      board_path: "<path to state.yaml>",
-      decision: "approved | rejected | approve_subgoal | reject_subgoal | not_complete | complete",
-      full_outcome_complete: false,
-      rationale: "<=120 words>",
-      worker_package: { objective: "", allowed_files: [], verify: [], stop_if: [] },
-      evidence: [],
-      subgoal_contract: null,
-      parallel_safety: null,
-      blocked_tasks: [],
-      missing_evidence: [],
-      required_board_updates: [],
-    };
-  }
-  return {
-    result: "done | blocked",
-    task_id: "<T###>",
-    board_path: "<path to state.yaml>",
-    summary: "<=120 words>",
-    evidence: [],
-    facts: [],
-    contradictions: [],
-    ambiguity_requiring_judge: [],
-    commands: [],
-    note_needed: false,
+function taskReceiptExample(role, result, task, boardPath) {
+  const example = {
+    ...receiptExample({ role, result }),
+    task_id: task.id,
+    board_path: boardPath,
   };
+  if (role !== "worker") return example;
+  const verify = stringList(task.verify);
+  example.commands = verify.map((cmd, index) => ({
+    cmd,
+    status: result === "done" ? "pass" : (index === 0 ? "fail" : "not_run"),
+  }));
+  example.changed_files = result === "done"
+    ? ["<every actually changed path inside allowed_files>"]
+    : [];
+  return example;
 }
 
 export function formatPrompt(payload) {
@@ -521,7 +507,11 @@ export function formatPrompt(payload) {
     lines.push(`- scope_change_recovery: ${payload.metadata.scope_change_recovery}`);
   }
   addList(lines, "expected_output", payload.task.expected_output);
-  lines.push("", "Expected receipt JSON shape:", JSON.stringify(payload.receipt_schema, null, 2));
+  lines.push(
+    "",
+    "Expected receipt JSON shapes (return exactly one, matching the actual result; replace illustrative values with truthful evidence):",
+    JSON.stringify(payload.receipt_schemas, null, 2),
+  );
   return lines.join("\n");
 }
 
@@ -532,5 +522,5 @@ function addList(lines, label, values) {
 }
 
 function isDirectRun() {
-  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  return process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
 }

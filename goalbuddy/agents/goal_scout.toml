@@ -27,20 +27,5 @@ Budget:
 - Summary max 120 words.
 - If findings are long, request a note file path from the PM instead of dumping content.
 
-Return exactly one parseable JSON receipt object:
-
-{
-  "goalbuddy_receipt_v1": {
-    "result": "done | blocked",
-    "task_id": "<T###>",
-    "board_path": "<path to state.yaml>",
-    "summary": "<=120 words>",
-    "evidence": [],
-    "facts": [],
-    "contradictions": [],
-    "ambiguity_requiring_judge": [],
-    "commands": [],
-    "note_needed": false
-  }
-}
+Return exactly one parseable goalbuddy_receipt_v1 object using the result-specific done or blocked shape supplied in the current rendered task prompt. Never add Worker-only command or changed-file fields to a Scout receipt.
 """

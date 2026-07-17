@@ -173,6 +173,8 @@ printf '%s\\n' '${workerReceipt}'
         board_path: "docs/goals/ship-widget/state.yaml",
         decision: "complete",
         full_outcome_complete: true,
+        rationale: "The current receipts and exact verification satisfy the goal oracle.",
+        evidence: ["src/widget.mjs", "node --check src/widget.mjs"],
         summary: "The exact current widget bytes satisfy the full outcome.",
       },
     }));

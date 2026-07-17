@@ -55,40 +55,58 @@ export function captureDispatchManifest(root, { scope = null } = {}) {
 }
 
 export function compareDispatchScope({ before, after, scope = null, role, allowedFiles, receiptChangedFiles, authorizedControlSha256 = {} }) {
+  const authority = compareDispatchAuthority({ before, after, scope, role, allowedFiles, authorizedControlSha256 });
+  const rawAllowed = stringArray(allowedFiles);
+  const rawReceiptPaths = stringArray(receiptChangedFiles);
+  const receiptPaths = normalizeReceiptPaths(before.root, rawReceiptPaths);
+  validateReceiptPathForms(before.root, rawAllowed, rawReceiptPaths);
+  const observedSet = new Set(authority.changed_files);
+  const receiptSet = new Set(receiptPaths);
+  const missingReceiptChanges = authority.changed_files.filter((path) => !receiptSet.has(path));
+  const extraReceiptClaims = receiptPaths.filter((path) => !observedSet.has(path));
+  const receiptViolations = [
+    ...missingReceiptChanges.map((path) => `Observed change missing from receipt: ${path}`),
+    ...extraReceiptClaims.map((path) => `Receipt claims unchanged file: ${path}`),
+  ];
+  if (["scout", "judge"].includes(String(role || "").toLowerCase()) && receiptPaths.length > 0) {
+    receiptViolations.push("Read-only task claimed file changes.");
+  }
+  return {
+    ...authority,
+    status: authority.status === "clean" && receiptViolations.length === 0 ? "clean" : "violations",
+    receipt_changed_files: receiptPaths,
+    missing_receipt_changes: missingReceiptChanges,
+    extra_receipt_claims: extraReceiptClaims,
+    violations: [...new Set([...authority.violations, ...receiptViolations])],
+  };
+}
+
+export function compareDispatchAuthority({ before, after, scope = null, role, allowedFiles, authorizedControlSha256 = {} }) {
   if (before.root !== after.root) throw new Error("Dispatch manifests must use one repository root.");
   const observed = changedPaths(before.entries, after.entries);
   const authorizedControlChanges = observed.filter((path) => isGoalBuddyControlPath(path) && after.entries[path]?.sha256 === authorizedControlSha256[path]);
   const controlChanges = observed.filter((path) => isGoalBuddyControlPath(path) && !authorizedControlChanges.includes(path));
   const productChanges = observed.filter((path) => !isGoalBuddyControlPath(path));
   const rawAllowed = stringArray(allowedFiles);
-  const rawReceiptPaths = stringArray(receiptChangedFiles);
   const normalizedAllowed = scope?.patterns || normalizePatterns(before.root, rawAllowed);
   if (scope && scope.root !== before.root) throw new Error("Dispatch scope and manifests must use one repository root.");
-  const receiptPaths = normalizeReceiptPaths(before.root, rawReceiptPaths);
-  validateReceiptPathForms(before.root, rawAllowed, rawReceiptPaths);
   const outOfScope = productChanges.filter((path) => !normalizedAllowed.some((pattern) => matchesPattern(path, pattern)));
-  const observedSet = new Set(productChanges);
-  const receiptSet = new Set(receiptPaths);
-  const missingReceiptChanges = productChanges.filter((path) => !receiptSet.has(path));
-  const extraReceiptClaims = receiptPaths.filter((path) => !observedSet.has(path));
   const readOnlyViolation = ["scout", "judge"].includes(String(role || "").toLowerCase())
-    && (productChanges.length > 0 || receiptPaths.length > 0);
+    && productChanges.length > 0;
   const violations = [
     ...controlChanges.map((path) => `GoalBuddy control file changed: ${path}`),
     ...outOfScope.map((path) => `Changed file outside allowed_files: ${path}`),
-    ...missingReceiptChanges.map((path) => `Observed change missing from receipt: ${path}`),
-    ...extraReceiptClaims.map((path) => `Receipt claims unchanged file: ${path}`),
   ];
-  if (readOnlyViolation) violations.push("Read-only task observed or claimed file changes.");
+  if (readOnlyViolation) violations.push("Read-only task observed file changes.");
   return {
     status: violations.length > 0 ? "violations" : "clean",
     changed_files: productChanges,
-    receipt_changed_files: receiptPaths,
+    receipt_changed_files: [],
     control_changes: controlChanges,
     authorized_control_changes: authorizedControlChanges,
     out_of_scope: outOfScope,
-    missing_receipt_changes: missingReceiptChanges,
-    extra_receipt_claims: extraReceiptClaims,
+    missing_receipt_changes: [],
+    extra_receipt_claims: [],
     violations: [...new Set(violations)],
   };
 }
