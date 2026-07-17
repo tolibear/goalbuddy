@@ -369,7 +369,7 @@ function effectiveExecutionProfile({ options, to, role, existingBinding }) {
   const requested = {
     model: options.model || "gpt-5.6-sol",
     reasoningEffort: options.reasoningEffort || "medium",
-    serviceTier: options.serviceTier || "fast",
+    serviceTier: options.serviceTier || "default",
     sandbox: READ_ONLY_ROLES.has(role) ? "read-only" : "danger-full-access",
   };
   if (!options.resumeSession || !existingBinding) return requested;

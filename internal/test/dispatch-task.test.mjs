@@ -114,7 +114,7 @@ test("dispatch runs an external worker and reports a clean scope", () => {
   }
 });
 
-test("Codex dispatch closes stdin and pins the configured execution profile", () => {
+test("Codex dispatch closes stdin and pins the default execution profile", () => {
   const root = makeProject();
   const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-profile-"));
   try {
@@ -125,14 +125,14 @@ test("Codex dispatch closes stdin and pins the configured execution profile", ()
     const args = readFileSync(argsPath, "utf8");
     assert.match(args, /model="gpt-5\.6-sol"/);
     assert.match(args, /model_reasoning_effort="medium"/);
-    assert.match(args, /service_tier="fast"/);
+    assert.match(args, /service_tier="default"/);
     assert.match(args, /sandbox_mode="danger-full-access"/);
     assert.match(args, /recommended_reasoning: medium/);
     assert.match(args, /sandbox: danger-full-access/);
     const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
     assert.match(state, /model: gpt-5\.6-sol/);
     assert.match(state, /reasoning_effort: medium/);
-    assert.match(state, /service_tier: fast/);
+    assert.match(state, /service_tier: default/);
     assert.match(state, /sandbox: danger-full-access/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -140,21 +140,21 @@ test("Codex dispatch closes stdin and pins the configured execution profile", ()
   }
 });
 
-test("Codex dispatch can select reasoning effort and disable Fast", () => {
+test("Codex dispatch can select reasoning effort and enable Fast", () => {
   const root = makeProject();
   const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-tier-"));
   try {
     const argsPath = join(evidenceRoot, "codex-args.txt");
     const bin = fakeHarnessBin(root, "codex", `printf '%s\\n' "$@" > '${argsPath}'\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
-    const result = runDispatch(root, bin, ["--reasoning-effort", "high", "--service-tier", "default"]);
+    const result = runDispatch(root, bin, ["--reasoning-effort", "high", "--service-tier", "fast"]);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const args = readFileSync(argsPath, "utf8");
     assert.match(args, /model_reasoning_effort="high"/);
-    assert.match(args, /service_tier="default"/);
+    assert.match(args, /service_tier="fast"/);
     assert.match(args, /recommended_reasoning: high/);
     const state = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
     assert.match(state, /reasoning_effort: high/);
-    assert.match(state, /service_tier: default/);
+    assert.match(state, /service_tier: fast/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(evidenceRoot, { recursive: true, force: true });
@@ -597,7 +597,7 @@ test("wrong-session and changed-contract resume attempts fail before process lau
     assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
     assert.equal(existsSync(marker), false);
 
-    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live", "--service-tier", "default"]);
+    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live", "--service-tier", "fast"]);
     assert.equal(result.status, 1, result.stderr || result.stdout);
     assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
     assert.equal(existsSync(marker), false);
