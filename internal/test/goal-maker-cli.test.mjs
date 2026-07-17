@@ -18,6 +18,7 @@ const runtimeCapabilities = {
   closed_judge_decision_vocabulary: true,
   atomic_exact_human_wait_resume: true,
   atomic_goal_completion: true,
+  task_bound_codex_exec_resume: true,
 };
 
 function runGoalMaker(args, options = {}) {

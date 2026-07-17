@@ -592,6 +592,7 @@ for (const task of tasks) {
 }
 
 warnings.push(...microSliceWarnings(tasks, activeTask, goalStatus));
+warnings.push(...queuedWorkerPackageWarnings(tasks));
 
 function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
   if (goalStatus !== "blocked") return false;
@@ -627,6 +628,7 @@ function validateTransitionEvidence(task, evidence) {
     errors.push(`task ${task.id} transition_evidence must be an object`);
     return;
   }
+  if (Object.hasOwn(evidence, "codex_worker_session")) validateCodexWorkerSession(task, evidence.codex_worker_session);
   if (!Object.hasOwn(evidence, "exact_human_replies")) return;
   if (!Array.isArray(evidence.exact_human_replies) || evidence.exact_human_replies.length === 0) {
     errors.push(`task ${task.id} transition_evidence.exact_human_replies must be a non-empty array`);
@@ -660,6 +662,33 @@ function validateTransitionEvidence(task, evidence) {
       errors.push(`${label}.wait_receipt must not claim completion`);
     }
   }
+}
+
+function validateCodexWorkerSession(task, session) {
+  const label = `task ${task.id} transition_evidence.codex_worker_session`;
+  if (!session || typeof session !== "object" || Array.isArray(session)) {
+    errors.push(`${label} must be an object`);
+    return;
+  }
+  const keys = ["harness", "session_id", "task_id", "board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "sandbox", "brief_path", "brief_sha256", "launch_state_digest"];
+  const missing = keys.filter((key) => !Object.hasOwn(session, key));
+  const extra = Object.keys(session).filter((key) => !keys.includes(key));
+  if (missing.length || extra.length) errors.push(`${label} keys must be exact; missing [${missing.join(", ")}], unexpected [${extra.join(", ")}]`);
+  if (session.harness !== "codex") errors.push(`${label}.harness must be codex`);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(session.session_id || ""))) errors.push(`${label}.session_id must be a UUID`);
+  if (session.task_id !== task.id) errors.push(`${label}.task_id must equal ${task.id}`);
+  if (typeof session.model !== "string") errors.push(`${label}.model must be a string`);
+  if (!['workspace-write', 'read-only', 'danger-full-access'].includes(session.sandbox)) errors.push(`${label}.sandbox is invalid`);
+  for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "launch_state_digest"]) {
+    if (!/^[a-f0-9]{64}$/.test(String(session[key] || ""))) errors.push(`${label}.${key} must be 64 lowercase hex characters`);
+  }
+  const briefAbsent = session.brief_path === null && session.brief_sha256 === null;
+  const briefPresent = typeof session.brief_path === "string" && session.brief_path.length > 0 && /^[a-f0-9]{64}$/.test(String(session.brief_sha256 || ""));
+  if (!briefAbsent && !briefPresent) errors.push(`${label}.brief_path and brief_sha256 must both be null or a nonempty path plus digest`);
+  if (task.type !== "worker") errors.push(`${label} is allowed only on a Worker task`);
+  const receiptFree = !task.receipt?.present || task.receipt?.value === null;
+  if (task.status === "active" && !receiptFree) errors.push(`${label} active task must remain receipt-free`);
+  if (task.status === "queued") errors.push(`${label} is not allowed on a queued task`);
 }
 
 function validateSubgoal(task) {
@@ -756,6 +785,27 @@ function microSliceWarnings(tasks, activeTaskId, goalStatus) {
   }
   if (pairs >= 2) {
     found.push(`${guidance} Micro Worker/Judge loop detected ending at ${active.id}.`);
+  }
+  return [...new Set(found)];
+}
+
+function queuedWorkerPackageWarnings(tasks) {
+  const found = [];
+  for (const task of tasks) {
+    if (task.type !== "worker" || task.status !== "queued") continue;
+    const hasAllowedFiles = task.allowedFiles.length > 0;
+    const hasVerify = task.verify.length > 0;
+    if (hasAllowedFiles !== hasVerify) {
+      found.push(`GBW_QUEUED_WORKER_PARTIAL_PACKAGE: queued Worker ${task.id} must be a complete package or an honest empty JIT placeholder`);
+    }
+    if (hasAllowedFiles === hasVerify && task.stopIf.length === 0) {
+      found.push(`GBW_QUEUED_WORKER_MISSING_STOP_IF: queued executable Worker ${task.id} is missing stop_if`);
+    }
+    for (const pattern of task.allowedFiles) {
+      if (String(pattern).trim().endsWith("/")) {
+        found.push(`GBW_SCOPE_DIRECTORY_WITHOUT_DESCENDANTS: queued Worker ${task.id} scope ${pattern} ends with /; use an exact file or an explicit descendant glob such as ${pattern}**`);
+      }
+    }
   }
   return [...new Set(found)];
 }

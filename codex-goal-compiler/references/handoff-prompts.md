@@ -79,7 +79,7 @@ Define the fastest per-slice check, broad pre-audit check, fallback evidence, an
 
 Identify independent read-only work, disjoint Worker candidates, dependencies, per-lane verification, and an integration audit. State why serial execution is safer when scopes overlap.
 
-Mixed-vendor GoalBuddy CLI dispatch is clean-worktree-only. If `git status --porcelain` is nonempty, do not propose cross-vendor dispatch: preserve the dirty work and use the current harness's normal GoalBuddy roles. Cross-harness continuation through the explicit board path remains available.
+Mixed-vendor GoalBuddy CLI dispatch supports a preserved dirty baseline when the admitted task scope can be fingerprinted safely. Prefer a clean checkpoint for inspection, but do not invent cleanliness as an authorization requirement. If the scope cannot be bounded or fingerprinted, keep the current harness and report the exact blocker.
 
 Do not select `goal_worker_ultra` for a new board during its legacy-only quarantine. Use canonical roles and official `reasoning_hint`.
 
@@ -92,7 +92,16 @@ Preparation is accepted only when:
 - checker warnings do not identify weak or placeholder-like `goal.oracle.signal`, `goal.oracle.final_proof`, or `goal.intake.completion_proof`;
 - agent statuses are installed;
 - all five proof expectations map to official tasks, verification, QA, or receipts;
+- every load-bearing local source has an exact path, existence proof, revision or SHA-256, and dependent task ids;
+- every source milestone or vertical slice maps to one or more task ids; a Worker spanning independently provable slices has an explicit coherence rationale or is split;
+- Worker `verify` contains only commands that Worker may run; live deployment, production observation, owner approval, and lead-only proof remain PM/review work;
+- implementation review is owned by the lead/native review workflow, while Judge tasks name an actual ambiguity, authority, rejected-proof, phase, or completion decision;
+- every queued Worker is either a complete package (`allowed_files`, `verify`, and `stop_if`) or an honest just-in-time placeholder with all three lists empty and a protective constraint against activation before atomic hydration;
+- descendant directory authority uses an explicit descendant glob such as `dir/**` rather than a bare `dir/`;
+- the prompt horizon is justified as direct card, bound current plan, or just-in-time hardened brief; material work is not mechanically serialized merely to save a lead turn, and trivial work gets no ceremonial brief;
 - any other warning is explicitly allowlisted with a reason.
+
+Record this as one compact acceptance matrix in the compiler's existing preparation evidence. Do not create another board field, ledger, or eagerly loaded reference. Missing rows, source-digest mismatches, or contradictions with the generated board reject the checkpoint.
 
 ## Conditional dimensions
 
@@ -140,7 +149,7 @@ Compiled brief:
 <not_done_when>                  [MUST]
 <verification_loop>              [MUST]
 <official_five_proof_mapping>    [MUST]
-<concurrency_assessment>         [MUST — include clean-only mixed-dispatch policy]
+<concurrency_assessment>         [MUST — include dirty-baseline and bounded-scope mixed-dispatch policy]
 <start_gate_and_preflight>       [MUST — target, Git baseline, AGENTS.md, first phase]
 <stop_or_ask_conditions>         [MUST]
 <cleanup_and_completion_audit>   [MUST]

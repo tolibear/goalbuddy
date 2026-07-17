@@ -75,7 +75,7 @@ Boards can also mix vendors within a single run — a Claude judge and a Codex w
 goalbuddy dispatch docs/goals/<slug> --to codex --expected-state-digest <sha256>
 ```
 
-`dispatch` admits the checker-validated active task at the expected digest, rereads that board immediately before launch, runs the target CLI headless (`codex` or `claude-code`), and extracts the returned receipt. A content-aware manifest detects new changes and second edits to pre-dirty paths; worker changes must stay inside `allowed_files` and match receipt `changed_files` exactly, while read-only roles and GoalBuddy control files must remain unchanged. The dispatcher never edits the board. The PM records a clean stamped receipt and an explicit successor through the direct digest-bound typed transition.
+`dispatch` admits the checker-validated active task at the expected digest, rereads that board immediately before launch, runs the target CLI headless (`codex` or `claude-code`), and extracts the returned receipt. A content-aware manifest detects new changes, second edits to pre-dirty paths, and declared ignored exact paths or bounded `dir/**` trees; worker changes must stay inside `allowed_files` and match receipt `changed_files` exactly. For an external Codex Worker, the dispatcher makes one typed atomic board mutation after `thread.started`: it binds the exact session ID so an interrupted run can resume without guessing. The PM still owns receipt closeout and successor activation.
 
 ## Codex Install Model
 

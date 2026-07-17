@@ -10,21 +10,7 @@ The run command is:
 
 ## Direct `/goal` Entry
 
-When `/goal` is invoked with raw user intent instead of an existing `docs/goals/<slug>/goal.md` path, run the Intake Compiler (see `SKILL.md`) before doing implementation work. The PM should not treat raw `/goal` text as an execution plan until it has:
-
-- classified the input shape;
-- preserved any existing plan facts;
-- identified the likely misfire and at least one blind spot;
-- recorded authority and proof;
-- answered or explicitly defaulted the diagnostic ladder for vague/strategic input;
-- selected the safest first active task;
-- either asked the required guided intake question or written `goal.md` and `state.yaml` from a sufficiently clear intake.
-
-When running the Intake Compiler inside a `/goal` run, apply its extraction and diagnostic logic, but skip the prep-turn terminal steps: do not print the `/goal` command and stop. Once the board is written, continue directly into execution.
-
-If the raw input is detailed and already contains a plan, the first board task should validate and operationalize that plan rather than rediscovering from scratch. If the raw input is vague, run the diagnostic intake before creating the board unless the user explicitly says to use defaults. If the raw input is blocked by authority, policy, destructive action, credentials, or ambiguous completion proof, ask one guided question with options or create the smallest safe read-only task only after the user chooses to proceed.
-
-The target is not literal certainty. It is the highest practical likelihood of a successful goal run: preserve the user's intent, avoid the likely misfire, pick the earliest responsible phase, require proof, and keep advancing safe work until a final audit proves the full outcome.
+For raw intent rather than a prepared `docs/goals/<slug>/goal.md`, run the `SKILL.md` Intake Compiler first: preserve plan facts, identify the likely misfire and a blind spot, record authority and proof, resolve its diagnostic ladder, and select the safest first task. Detailed plans begin with validation and operationalization; vague input gets guided intake; authority, destructive-action, credential, or completion-proof ambiguity gets one guided question or an owner-approved read-only task. Skip prep's terminal handoff: once the board is sound, continue execution. The target is the highest practical likelihood of the full proven outcome, not literal certainty.
 
 ## Native Harness Goal Loops
 
@@ -192,11 +178,11 @@ node <skill-path>/scripts/dispatch-task.mjs docs/goals/<slug> --to codex --expec
 
 Rules for external dispatch:
 
-- Dispatch to an external harness only when the user asked for a specific harness or model, or the task card carries an optional `harness:` field naming one. Never dispatch externally by default — it spends the user's quota on another vendor.
-- The dispatcher admits exactly the checker-validated active task at the expected digest, rereads the board immediately before launch, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and compares it with a content-aware before/after manifest. Worker net changes must match `allowed_files` and the receipt's `changed_files` exactly; GoalBuddy control-file writes, out-of-root claims, duplicate or unchanged claims, and any read-only-role write fail closed. Existing dirty files are fingerprinted, so a second edit during dispatch is visible.
-- The dispatcher never edits `state.yaml`. The PM persists the reported receipt — including its `harness` stamp — and applies it once through the direct digest-bound typed transition, just as with any native-agent receipt.
+- Route by explicit user choice, task `harness:`, then loaded harness policy. Under Daniel's Claude policy, Fable plans and reviews while implementation Workers default directly to Codex Exec; under Codex, implementation defaults to native Codex Workers. Do not wrap Codex in Opus or put vendor routes in board strategy.
+- The dispatcher admits exactly the checker-validated active task at the expected digest, rereads the board immediately before launch, runs the target CLI headless with role-appropriate sandboxing, extracts the returned `goalbuddy_receipt_v1`, and compares it with a content-aware before/after manifest. Worker net changes must match `allowed_files` and the receipt's `changed_files` exactly; unauthorized GoalBuddy control changes, out-of-root claims, duplicate or unchanged claims, and any read-only-role write fail closed. Existing dirty files are fingerprinted, so a second edit during dispatch is visible.
+- Codex dispatch may atomically bind its exact JSONL session id to the active task. Never use `codex exec resume --last`; exact resume also requires proof the prior process is no longer live.
 - Do not mark a dispatched task `done` unless the dispatch report's scope check is clean and the receipt's verify commands pass. A scope violation means inspect the working tree, decide what to keep, and record a blocked receipt with the facts.
-- If the target CLI is missing, unauthenticated, or times out, fall back to the normal path: PM fallback or the required GoalBuddy agent, per the dispatch rules above.
+- If a fresh target CLI is missing or unauthenticated, use the bounded PM/native fallback. If a bound session cannot resume, fail closed and inspect preserved work; never replace it with a fresh Worker automatically.
 
 ## `/goal` Default Bias: Users Want Work Done
 
@@ -226,6 +212,7 @@ The compiler and charter establish durable structure: outcome, constraints, vert
 - Should planning for it be upfront, just in time, or hybrid?
 - Does the plan warrant independent hardening before implementation?
 - Which implementation lane fits, and what review depth does the resulting diff deserve?
+- Is the deterministic card sufficient, is an accepted bound plan sufficient, or does this material seam need a compact current-state delta brief?
 - Is a dedicated simplification pass worthwhile?
 - Does this seam need the lead PM's judgment or a routine delegated Judge?
 
@@ -257,6 +244,8 @@ Small, mechanical, decision-complete changes may skip rungs. PM confidence alone
 - Put forbidden boundaries and escalation conditions in `stop_if`. If execution needs to cross the active envelope, stop and create a structured successor or amendment before those writes; never widen authority retroactively after work exists.
 
 The plan's file inventory is evidence, not automatically the authority envelope. Preserve exact plan paths when they are complete; otherwise derive a bounded envelope that covers the whole approved slice and explain any broader directory scope in the task objective or constraints.
+
+Choose context by materiality: send a small decision-complete card directly; bind a current accepted plan by path and digest; or write a compact just-in-time delta brief when current state changes execution. Load prompting guidance only for that brief. Neither plan nor brief expands `allowed_files`, replaces `verify`, weakens `stop_if`, or activates unhydrated work.
 
 ### Independent review is not Judge
 

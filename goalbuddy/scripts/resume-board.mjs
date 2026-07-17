@@ -551,16 +551,26 @@ function projectTransitionEvidence(evidence) {
   const replies = evidence && typeof evidence === "object" && !Array.isArray(evidence) && Array.isArray(evidence.exact_human_replies)
     ? evidence.exact_human_replies
     : [];
-  if (replies.length === 0) return null;
+  const session = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence.codex_worker_session : null;
+  if (replies.length === 0 && !session) return null;
   const latest = replies[replies.length - 1] || {};
   return {
-    exact_human_reply_count: replies.length,
-    latest_exact_human_reply: {
+    exact_human_reply_count: replies.length || undefined,
+    latest_exact_human_reply: replies.length > 0 ? {
       wait_board_digest: resumeText(latest.wait_board_digest),
       required_reply_sha256: resumeText(latest.required_reply_sha256),
       reply_sha256: resumeText(latest.reply_sha256),
       exact_match: latest.exact_match === true,
-    },
+    } : undefined,
+    codex_worker_session: session ? {
+      session_id: resumeText(session.session_id),
+      dispatch_contract_sha256: resumeText(session.dispatch_contract_sha256),
+      model: resumeText(session.model),
+      sandbox: resumeText(session.sandbox),
+      brief_path: session.brief_path === null ? null : resumeText(session.brief_path),
+      brief_sha256: session.brief_sha256 === null ? null : resumeText(session.brief_sha256),
+      recovery_warning: "Session identity is durable, but liveness is not. Confirm the original Worker is terminal or lost before exact-ID resume.",
+    } : undefined,
   };
 }
 

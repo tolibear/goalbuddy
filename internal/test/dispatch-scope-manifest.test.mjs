@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureDispatchManifest, compareDispatchScope } from "../../goalbuddy/scripts/dispatch-scope-manifest.mjs";
+import { captureDispatchManifest, compareDispatchScope, compileDispatchScope } from "../../goalbuddy/scripts/dispatch-scope-manifest.mjs";
 
 function makeRepo() {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-scope-manifest-"));
@@ -137,6 +137,52 @@ test("receipt reconciliation rejects duplicate, extra, and out-of-root path clai
     assert.throws(() => compareDispatchScope({
       before, after, role: "worker", allowedFiles: ["src/**"], receiptChangedFiles: [resolve(root, "..", "outside.mjs")],
     }), /outside the dispatch repository/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("declared ignored trees reconcile created, modified, deleted, mode, and symlink changes", () => {
+  const root = makeRepo();
+  try {
+    writeFileSync(join(root, ".gitignore"), "docs/\nignored/\n.context/\n");
+    mkdirSync(join(root, ".context", "infra", "lane-a"), { recursive: true });
+    writeFileSync(join(root, ".context", "infra", "lane-a", "modify.md"), "before\n");
+    writeFileSync(join(root, ".context", "infra", "lane-a", "delete.md"), "delete\n");
+    writeFileSync(join(root, ".context", "infra", "lane-a", "mode.sh"), "#!/bin/sh\n", { mode: 0o644 });
+    symlinkSync("modify.md", join(root, ".context", "infra", "lane-a", "link.md"));
+    const scope = compileDispatchScope(root, [".context/infra/**"]);
+    const before = captureDispatchManifest(root, { scope });
+
+    writeFileSync(join(root, ".context", "infra", "lane-a", "modify.md"), "after\n");
+    rmSync(join(root, ".context", "infra", "lane-a", "delete.md"));
+    chmodSync(join(root, ".context", "infra", "lane-a", "mode.sh"), 0o755);
+    rmSync(join(root, ".context", "infra", "lane-a", "link.md"));
+    symlinkSync("mode.sh", join(root, ".context", "infra", "lane-a", "link.md"));
+    writeFileSync(join(root, ".context", "infra", "lane-a", "created.md"), "created\n");
+
+    const after = captureDispatchManifest(root, { scope });
+    const changed = [
+      ".context/infra/lane-a/created.md",
+      ".context/infra/lane-a/delete.md",
+      ".context/infra/lane-a/link.md",
+      ".context/infra/lane-a/mode.sh",
+      ".context/infra/lane-a/modify.md",
+    ];
+    const report = compareDispatchScope({ before, after, scope, role: "worker", allowedFiles: [".context/infra/**"], receiptChangedFiles: changed });
+    assert.equal(report.status, "clean");
+    assert.deepEqual(report.changed_files, changed);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scope compilation rejects repository-wide and unbounded wildcard inventory", () => {
+  const root = makeRepo();
+  try {
+    assert.throws(() => compileDispatchScope(root, ["**"]), /Unsafe dispatch scope/);
+    assert.throws(() => compileDispatchScope(root, [".context\/*\/receipt.json"]), /Unsafe dispatch scope/);
+    assert.throws(() => compileDispatchScope(root, [resolve(root, "..", "outside/**")]), /outside the dispatch repository/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

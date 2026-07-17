@@ -23,6 +23,9 @@ const receiptSpec = readFileSync("docs/spec/receipt-v1.md", "utf8");
 const adaptiveSpec = readFileSync("docs/spec/adaptive-execution-strategy.md", "utf8");
 const compilerReference = readFileSync("codex-goal-compiler/references/goalbuddy-compiler.md", "utf8");
 
+const PREPARED_GOAL_COMMAND_MAX_BYTES = 2418;
+const EXECUTION_CONTRACT_MAX_BYTES = 59816;
+
 function fakeCodexBin(root) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -137,8 +140,15 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /node <skill-path>\/scripts\/apply-receipt\.mjs docs\/goals\/<slug>/);
     assert.match(text, /goalbuddy complete docs\/goals\/<slug>/);
     assert.match(text, /node <skill-path>\/scripts\/dispatch-task\.mjs docs\/goals\/<slug> --to codex/);
-    assert.match(text, /Never dispatch externally by default/);
-    assert.match(text, /The dispatcher never edits `state\.yaml`/);
+    assert.match(text, /implementation Workers default directly to Codex Exec/);
+    assert.match(text, /under Codex, implementation defaults to native Codex Workers/);
+    assert.match(text, /Do not wrap Codex in Opus/);
+    assert.match(text, /send a small decision-complete card directly/);
+    assert.match(text, /bind a current accepted plan by path and digest/);
+    assert.match(text, /compact just-in-time delta brief/);
+    assert.match(text, /Neither plan nor brief expands `allowed_files`/);
+    assert.match(text, /bind its exact JSONL session id to the active task/);
+    assert.match(text, /Never use `codex exec resume --last`/);
     assert.match(text, /### Board Keeper/);
     assert.match(text, /goalbuddy_keeper_request_v1/);
     assert.match(text, /goalbuddy_keeper_receipt_v1/);
@@ -165,6 +175,15 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Preserve the one-agent\/no-duplicate-dispatch rule/);
     assert.doesNotMatch(text, /After one `wait_agent` timeout/);
   }
+});
+
+test("prepared /goal stays a compact execution entrypoint", () => {
+  assert.ok(Buffer.byteLength(claudeGoalCommand) <= PREPARED_GOAL_COMMAND_MAX_BYTES);
+  assert.ok(Buffer.byteLength(canonicalExecution) <= EXECUTION_CONTRACT_MAX_BYTES);
+  assert.match(claudeGoalCommand, /references\/goal-execution\.md/);
+  assert.match(claudeGoalCommand, /compact explicit-board resume projection/);
+  assert.doesNotMatch(claudeGoalCommand, /codex-goal-compiler|handoff-prompts|goalbuddy-compiler/);
+  assert.doesNotMatch(claudeGoalCommand, /Read the complete `state\.yaml`|Read every reference/);
 });
 
 test("one-location board edits stay direct only when no board read is needed", () => {

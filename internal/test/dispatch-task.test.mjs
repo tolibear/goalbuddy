@@ -59,7 +59,8 @@ function fakeHarnessBin(root, name, script) {
   const bin = join(root, "fake-bin");
   mkdirSync(bin, { recursive: true });
   const path = join(bin, name);
-  writeFileSync(path, `#!/bin/sh\n${script}\n`);
+  const session = name === "codex" ? `echo '{"type":"thread.started","thread_id":"11111111-1111-4111-8111-111111111111"}'\n` : "";
+  writeFileSync(path, `#!/bin/sh\n${session}${script}\n`);
   chmodSync(path, 0o755);
   return bin;
 }
@@ -399,6 +400,154 @@ test("dispatch detects a second modification to a path that was already dirty", 
     const report = JSON.parse(result.stdout);
     assert.deepEqual(report.scope_check.changed_files, ["README.md"]);
     assert.deepEqual(report.scope_check.out_of_scope, ["README.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch reconciles a Wedding-style receipt for declared gitignored sidecars", () => {
+  const root = makeProject();
+  try {
+    writeFileSync(join(root, ".gitignore"), ".context/\n");
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    writeFileSync(statePath, readFileSync(statePath, "utf8").replace("      - src/widget.mjs", "      - src/widget.mjs\n      - .context/infra/**"));
+    const changed = ["src/widget.mjs", ...["a", "b", "c", "d"].map((name) => `.context/infra/lane-a/${name}.md`)];
+    const receipt = JSON.stringify({ goalbuddy_receipt_v1: {
+      result: "done", task_id: "T001", board_path: "docs/goals/one/state.yaml", changed_files: changed,
+      commands: [{ cmd: "true", status: "pass" }], summary: "widget and sidecars adjusted", harness: "codex",
+    } });
+    const bin = fakeHarnessBin(root, "codex", `mkdir -p .context/infra/lane-a\necho "export const widget = 2;" > src/widget.mjs\nfor name in a b c d; do echo "$name" > ".context/infra/lane-a/$name.md"; done\necho '${receipt}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.scope_check.status, "clean");
+    assert.deepEqual(report.scope_check.changed_files, changed.slice().sort());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("unsafe ignored-capable scope fails before harness launch", () => {
+  const root = makeProject();
+  try {
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    writeFileSync(statePath, readFileSync(statePath, "utf8").replace("      - src/widget.mjs", "      - '**'"));
+    const marker = join(root, "harness-ran");
+    const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "DISPATCH_SCOPE_UNSAFE");
+    assert.match(report.next_action, /Narrow the task scope/);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("dispatch binds an existing plan or JIT brief by repository path and digest", () => {
+  const root = makeProject();
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-args-"));
+  try {
+    const briefPath = join(root, "docs", "goals", "one", "notes", "T001-dispatch.md");
+    writeFileSync(briefPath, "Current integration order and hazards.\n");
+    const briefDigest = createHash("sha256").update(readFileSync(briefPath)).digest("hex");
+    const argsPath = join(evidenceRoot, "codex-args.txt");
+    const bin = fakeHarnessBin(root, "codex", `printf '%s\n' "$@" > '${argsPath}'\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin, ["--brief", "docs/goals/one/notes/T001-dispatch.md", "--brief-sha256", briefDigest]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.brief, { path: "docs/goals/one/notes/T001-dispatch.md", sha256: briefDigest });
+    assert.match(readFileSync(argsPath, "utf8"), /Read the bound implementation context/);
+    assert.match(readFileSync(argsPath, "utf8"), new RegExp(briefDigest));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+});
+
+test("changed or out-of-repository bound context fails before launch", () => {
+  for (const extraArgs of [
+    ["--brief", "docs/goals/one/notes/missing.md", "--brief-sha256", "0".repeat(64)],
+    ["--brief", "../outside.md", "--brief-sha256", "0".repeat(64)],
+  ]) {
+    const root = makeProject();
+    try {
+      const marker = join(root, "harness-ran");
+      const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+      const result = runDispatch(root, bin, extraArgs);
+      assert.equal(result.status, 1, result.stderr || result.stdout);
+      assert.equal(existsSync(marker), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("an interrupted Codex Worker resumes only by its exact task-bound session id", () => {
+  const root = makeProject();
+  const sessionId = "11111111-1111-4111-8111-111111111111";
+  try {
+    let bin = fakeHarnessBin(root, "codex", "exit 7");
+    let result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    let report = JSON.parse(result.stdout);
+    assert.equal(report.error_code, "HARNESS_FAILED");
+    assert.equal(report.session_binding.session_id, sessionId);
+    const boundState = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
+    assert.match(boundState, new RegExp(sessionId));
+
+    bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    report = JSON.parse(result.stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.session_binding.session_id, sessionId);
+    assert.equal(report.scope_check.status, "clean");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("wrong-session and changed-contract resume attempts fail before process launch", () => {
+  const root = makeProject();
+  const sessionId = "11111111-1111-4111-8111-111111111111";
+  try {
+    let bin = fakeHarnessBin(root, "codex", "exit 7");
+    let result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const marker = join(root, "harness-ran");
+    bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+    result = runDispatch(root, bin, ["--resume-session", "44444444-4444-4444-8444-444444444444", "--confirmed-not-live"]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
+    assert.equal(existsSync(marker), false);
+
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    writeFileSync(statePath, readFileSync(statePath, "utf8").replace("Adjust the widget.", "Adjust the widget with changed authority."));
+    result = runDispatch(root, bin, ["--resume-session", sessionId, "--confirmed-not-live"]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).error_code, "CODEX_SESSION_RESUME_FAILED");
+    assert.equal(existsSync(marker), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an active task with a bound Codex session rejects fresh redispatch before launch", () => {
+  const root = makeProject();
+  try {
+    let bin = fakeHarnessBin(root, "codex", "exit 7");
+    const first = runDispatch(root, bin);
+    assert.equal(first.status, 1, first.stderr || first.stdout);
+    assert.equal(JSON.parse(first.stdout).session_binding.session_id, "11111111-1111-4111-8111-111111111111");
+
+    const marker = join(root, "fresh-redispatch-ran");
+    bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+    const second = runDispatch(root, bin);
+    assert.equal(second.status, 1, second.stderr || second.stdout);
+    assert.equal(JSON.parse(second.stdout).error_code, "DISPATCH_SESSION_BIND_FAILED");
+    assert.equal(existsSync(marker), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

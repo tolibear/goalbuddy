@@ -11,22 +11,59 @@ export function repositoryRoot(cwd = process.cwd()) {
   return realpathSync(resolve(result.stdout.trim()));
 }
 
-export function captureDispatchManifest(root) {
-  const paths = new Set(gitInventory(root));
-  for (const path of controlInventory(root)) paths.add(path);
-  const entries = {};
-  for (const path of [...paths].sort()) entries[path] = pathEvidence(root, path);
-  return { root, entries };
+export function compileDispatchScope(root, allowedFiles) {
+  const patterns = normalizePatterns(root, allowedFiles);
+  const exactPaths = [];
+  const treePrefixes = [];
+  for (const pattern of patterns) {
+    if (!/[*?[\]]/.test(pattern)) {
+      exactPaths.push(pattern);
+      continue;
+    }
+    if (pattern.endsWith("/**")) {
+      const prefix = pattern.slice(0, -3);
+      if (prefix && prefix !== "." && !/[*?[\]]/.test(prefix)) {
+        assertSafeTreePrefix(root, prefix);
+        treePrefixes.push(prefix);
+        continue;
+      }
+    }
+    throw new Error(`Unsafe dispatch scope ${pattern}: ignored-file observation supports exact paths or a bounded terminal directory/** tree.`);
+  }
+  return Object.freeze({
+    root: canonicalAbsolutePath(root),
+    patterns: Object.freeze([...patterns]),
+    exactPaths: Object.freeze([...exactPaths]),
+    treePrefixes: Object.freeze([...treePrefixes]),
+  });
 }
 
-export function compareDispatchScope({ before, after, role, allowedFiles, receiptChangedFiles }) {
+export function captureDispatchManifest(root, { scope = null } = {}) {
+  const canonicalRoot = canonicalAbsolutePath(root);
+  if (scope && scope.root !== canonicalRoot) throw new Error("Dispatch scope and manifest must use one repository root.");
+  const paths = new Set(gitInventory(root));
+  for (const path of controlInventory(root)) paths.add(path);
+  for (const path of scope?.exactPaths || []) paths.add(path);
+  for (const prefix of scope?.treePrefixes || []) {
+    const scopedPaths = [];
+    walk(resolve(root, prefix), root, scopedPaths);
+    for (const path of scopedPaths) paths.add(path);
+  }
+  const entries = {};
+  for (const path of [...paths].sort()) entries[path] = pathEvidence(root, path);
+  return { root: canonicalRoot, entries };
+}
+
+export function compareDispatchScope({ before, after, scope = null, role, allowedFiles, receiptChangedFiles, authorizedControlSha256 = {} }) {
   if (before.root !== after.root) throw new Error("Dispatch manifests must use one repository root.");
   const observed = changedPaths(before.entries, after.entries);
-  const controlChanges = observed.filter(isGoalBuddyControlPath);
+  const authorizedControlChanges = observed.filter((path) => isGoalBuddyControlPath(path) && after.entries[path]?.sha256 === authorizedControlSha256[path]);
+  const controlChanges = observed.filter((path) => isGoalBuddyControlPath(path) && !authorizedControlChanges.includes(path));
   const productChanges = observed.filter((path) => !isGoalBuddyControlPath(path));
   const rawAllowed = stringArray(allowedFiles);
   const rawReceiptPaths = stringArray(receiptChangedFiles);
-  const normalizedAllowed = normalizePatterns(before.root, rawAllowed);
+  const normalizedAllowed = scope?.patterns || normalizePatterns(before.root, rawAllowed);
+  if (scope && scope.root !== before.root) throw new Error("Dispatch scope and manifests must use one repository root.");
   const receiptPaths = normalizeReceiptPaths(before.root, rawReceiptPaths);
   validateReceiptPathForms(before.root, rawAllowed, rawReceiptPaths);
   const outOfScope = productChanges.filter((path) => !normalizedAllowed.some((pattern) => matchesPattern(path, pattern)));
@@ -48,11 +85,32 @@ export function compareDispatchScope({ before, after, role, allowedFiles, receip
     changed_files: productChanges,
     receipt_changed_files: receiptPaths,
     control_changes: controlChanges,
+    authorized_control_changes: authorizedControlChanges,
     out_of_scope: outOfScope,
     missing_receipt_changes: missingReceiptChanges,
     extra_receipt_claims: extraReceiptClaims,
     violations: [...new Set(violations)],
   };
+}
+
+function assertSafeTreePrefix(root, prefix) {
+  const absolute = resolve(root, prefix);
+  let current = absolute;
+  while (current !== root && current.startsWith(`${root}${sep}`)) {
+    try {
+      const stat = lstatSync(current);
+      if (stat.isSymbolicLink()) {
+        const target = realpathSync(current);
+        const rel = relative(root, target);
+        if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+          throw new Error(`Unsafe dispatch scope ${prefix}/**: symlinked prefix escapes the repository.`);
+        }
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    current = dirname(current);
+  }
 }
 
 export function normalizeRepositoryPath(root, value, { allowGlob = false } = {}) {

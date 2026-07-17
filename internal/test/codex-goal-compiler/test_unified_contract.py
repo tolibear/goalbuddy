@@ -69,6 +69,7 @@ class UnifiedContractTests(unittest.TestCase):
             "closed_judge_decision_vocabulary",
             "atomic_exact_human_wait_resume",
             "atomic_goal_completion",
+            "task_bound_codex_exec_resume",
             "content-aware before/after manifest",
             "exact equality",
             "goal_worker_ultra",
@@ -109,6 +110,21 @@ class UnifiedContractTests(unittest.TestCase):
             self.assertIn(needle, normalized)
         self.assertIn("bounded component or directory globs", self.strategy)
         self.assertIn("atomic just-in-time hydration", self.strategy)
+
+    def test_goalbuddy_acceptance_is_evidence_bound_without_clean_worktree_gate(self):
+        for needle in (
+            "exact path, existence proof, revision or SHA-256",
+            "explicit coherence rationale or is split",
+            "Worker `verify` contains only commands that Worker may run",
+            "implementation review is owned by the lead/native review workflow",
+            "complete package (`allowed_files`, `verify`, and `stop_if`)",
+            "direct card, bound current plan, or just-in-time hardened brief",
+            "one compact acceptance matrix",
+        ):
+            self.assertIn(needle, self.handoff)
+        self.assertIn("supports a preserved dirty baseline", self.handoff)
+        self.assertNotIn("clean-worktree-only", self.handoff)
+        self.assertNotIn("If `git status --porcelain` is nonempty, do not propose cross-vendor dispatch", self.handoff)
 
     def test_goalbuddy_compile_prints_start_and_stops(self):
         section = self.skill.split("## GoalBuddy route", 1)[1].split(

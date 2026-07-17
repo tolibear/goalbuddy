@@ -293,6 +293,82 @@ checks:
   }
 });
 
+test("warns on malformed queued Worker packages while honest placeholders and complete packages stay clean", () => {
+  const root = makeRoot();
+  try {
+    const state = validScoutBoard.replace("\nchecks:\n", `
+  - id: T003
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Half-hydrated package."
+    allowed_files:
+      - src/partial/**
+    verify: []
+    stop_if: []
+    receipt: null
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Executable package without stop conditions."
+    allowed_files:
+      - src/no-stop/**
+    verify:
+      - npm test
+    stop_if: []
+    receipt: null
+  - id: T005
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Directory scope that does not include descendants."
+    allowed_files:
+      - src/bare/
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
+    receipt: null
+  - id: T006
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Honest JIT placeholder."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "Do not activate before atomic hydration."
+    receipt: null
+  - id: T007
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Complete executable package."
+    allowed_files:
+      - src/complete/**
+    verify:
+      - npm test
+    stop_if:
+      - "Need files outside allowed_files."
+    receipt: null
+
+checks:
+`);
+    writeState(root, state);
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr || JSON.stringify(result.stdout));
+    assert.equal(result.stdout.ok, true);
+    assert.deepEqual(result.stdout.warnings.filter((warning) => warning.startsWith("GBW_")), [
+      "GBW_QUEUED_WORKER_PARTIAL_PACKAGE: queued Worker T003 must be a complete package or an honest empty JIT placeholder",
+      "GBW_QUEUED_WORKER_MISSING_STOP_IF: queued executable Worker T004 is missing stop_if",
+      "GBW_SCOPE_DIRECTORY_WITHOUT_DESCENDANTS: queued Worker T005 scope src/bare/ ends with /; use an exact file or an explicit descendant glob such as src/bare/**",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("warns on active micro Worker/Judge loops without breaking old boards", () => {
   const root = makeRoot();
   try {
@@ -1582,5 +1658,27 @@ test("reports a broken symlink in the goal root instead of crashing", () => {
     assert.equal(result.stdout.ok, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validates the closed task-bound Codex Worker session evidence shape", () => {
+  const sessionBoard = validScoutBoard
+    .replace("type: scout", "type: worker")
+    .replace("assignee: Scout", "assignee: Worker")
+    .replace('    expected_output:\n      - "Repo map"\n      - "Candidate tasks"', '    allowed_files:\n      - src/**\n    verify:\n      - "true"\n    stop_if:\n      - "Need files outside allowed_files."')
+    .replace("    receipt: null\n  - id: T002", `    transition_evidence:\n      codex_worker_session:\n        harness: codex\n        session_id: "66666666-6666-4666-8666-666666666666"\n        task_id: T001\n        board_path_sha256: "${"1".repeat(64)}"\n        workspace_root_sha256: "${"2".repeat(64)}"\n        codex_home_sha256: "${"3".repeat(64)}"\n        dispatch_contract_sha256: "${"4".repeat(64)}"\n        model: ""\n        sandbox: workspace-write\n        brief_path: null\n        brief_sha256: null\n        launch_state_digest: "${"5".repeat(64)}"\n    receipt: null\n  - id: T002`);
+  for (const [name, state, ok] of [
+    ["valid", sessionBoard, true],
+    ["bad UUID", sessionBoard.replace("66666666-6666-4666-8666-666666666666", "not-a-session"), false],
+    ["queued binding", sessionBoard.replace("assignee: Worker\n    status: active", "assignee: Worker\n    status: queued"), false],
+  ]) {
+    const root = makeRoot();
+    try {
+      writeState(root, state);
+      const result = runChecker(root);
+      assert.equal(result.stdout.ok, ok, `${name}: ${JSON.stringify(result.stdout.errors)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });

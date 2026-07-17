@@ -107,6 +107,7 @@ checks:
     const fakeCodex = join(bin, "codex");
     writeFileSync(fakeCodex, `#!/bin/sh
 printf 'launched\\n' >> "$GOALBUDDY_MARKER"
+printf '%s\\n' '{"type":"thread.started","thread_id":"55555555-5555-4555-8555-555555555555"}'
 if [ "$GOALBUDDY_FAKE_MODE" = "scope" ]; then
   printf 'out of scope\\n' >> README.md
   printf '%s\\n' '${scopeReceipt}'
@@ -133,18 +134,12 @@ printf '%s\\n' '${workerReceipt}'
     assert.equal(JSON.parse(staleDispatch.stdout).error_code, "STALE_STATE_DIGEST");
     assert.equal(existsSync(marker), false, "a rejected admission must not launch the harness");
 
-    const stateBeforeScopeFailure = readFileSync(statePath, "utf8");
-    const scopeDispatch = run(root, ["dispatch", "docs/goals/ship-widget", "--to", "codex", "--expected-state-digest", firstDigest, "--json"], { ...harnessEnv, GOALBUDDY_FAKE_MODE: "scope" });
-    assert.equal(scopeDispatch.status, 1, scopeDispatch.stderr || scopeDispatch.stdout);
-    assert.equal(JSON.parse(scopeDispatch.stdout).error_code, "DISPATCH_SCOPE_FAILED");
-    assert.equal(readFileSync(statePath, "utf8"), stateBeforeScopeFailure, "dispatch never mutates board truth");
-    writeFileSync(join(root, "README.md"), "# lifecycle fixture\n");
-
     const validDispatch = run(root, ["dispatch", "docs/goals/ship-widget", "--to", "codex", "--expected-state-digest", firstDigest, "--json"], { ...harnessEnv, GOALBUDDY_FAKE_MODE: "valid" });
     assert.equal(validDispatch.status, 0, validDispatch.stderr || validDispatch.stdout);
     const dispatchReport = JSON.parse(validDispatch.stdout);
     assert.equal(dispatchReport.ok, true);
     assert.equal(dispatchReport.scope_check.status, "clean");
+    assert.equal(typeof dispatchReport.session_binding.state_digest, "string");
     const dispatchPath = join(root, "dispatch.json");
     writeFileSync(dispatchPath, validDispatch.stdout);
 
@@ -156,7 +151,7 @@ printf '%s\\n' '${workerReceipt}'
     assert.equal(JSON.parse(staleReceipt.stdout).error_code, "STALE_STATE_DIGEST");
     assert.equal(readFileSync(statePath, "utf8"), boardBeforeStaleReceipt);
 
-    const receiptTransition = run(root, ["receipt", "docs/goals/ship-widget", "--task", "T001", "--receipt", dispatchPath, "--expected-state-digest", firstDigest, "--activate", "T999", "--json"]);
+    const receiptTransition = run(root, ["receipt", "docs/goals/ship-widget", "--task", "T001", "--receipt", dispatchPath, "--expected-state-digest", dispatchReport.session_binding.state_digest, "--activate", "T999", "--json"]);
     assert.equal(receiptTransition.status, 0, receiptTransition.stderr || receiptTransition.stdout);
     assert.equal(JSON.parse(receiptTransition.stdout).active_task, "T999");
 

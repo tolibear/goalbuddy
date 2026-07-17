@@ -135,6 +135,34 @@ export function applyReceipt(options) {
   return withStateTransitionLock(statePath, () => applyReceiptUnderLock(options, statePath));
 }
 
+export function bindCodexWorkerSession(options, sessionEvidence) {
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => {
+    const context = loadReceiptAdmissionContext(options, statePath);
+    authorizeReceiptSource(context.document, options.taskId);
+    const task = selectedTask(context.document, options.taskId);
+    if (String(task.type || "").toLowerCase() !== "worker") {
+      throw publicError("TASK_NOT_CURRENT_ACTIVE", `Codex session binding requires active Worker ${options.taskId}.`);
+    }
+    const transitionEvidence = task.transition_evidence && typeof task.transition_evidence === "object" && !Array.isArray(task.transition_evidence)
+      ? JSON.parse(JSON.stringify(task.transition_evidence))
+      : {};
+    if (transitionEvidence.codex_worker_session !== undefined) {
+      throw publicError("DISPATCH_SESSION_BIND_FAILED", `Task ${options.taskId} already has a Codex Worker session binding.`);
+    }
+    transitionEvidence.codex_worker_session = sessionEvidence;
+    let lines = context.original.replace(/\r\n/g, "\n").split("\n");
+    lines = upsertTaskNode(lines, options.taskId, "transition_evidence", transitionEvidence, { beforeKey: "receipt" });
+    const candidate = withFinalNewline(lines.join("\n"));
+    return installValidatedCandidate(context, candidate, {
+      mode: "bind_codex_worker_session",
+      task_id: options.taskId,
+      active_task: options.taskId,
+      session_id: sessionEvidence.session_id,
+    });
+  });
+}
+
 function applyReceiptUnderLock(options, statePath) {
   const receipt = loadReceipt(options.receiptPath);
   if (!Object.hasOwn(receipt, "task_id") || !Object.hasOwn(receipt, "board_path")) {

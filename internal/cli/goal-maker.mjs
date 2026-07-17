@@ -45,6 +45,7 @@ const runtimeCapabilities = Object.freeze({
   closed_judge_decision_vocabulary: true,
   atomic_exact_human_wait_resume: true,
   atomic_goal_completion: true,
+  task_bound_codex_exec_resume: true,
 });
 const defaultCodexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
 const defaultClaudeHome = process.env.CLAUDE_HOME || join(homedir(), ".claude");
@@ -345,7 +346,7 @@ Usage:
   ${canonicalCliName} board <docs/goals/slug> [--host <host>] [--port <port>] [--once] [--json]
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
-  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--timeout <seconds>] [--allow-immutable-history] [--json]
+  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--allow-immutable-history] [--json]
   ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]

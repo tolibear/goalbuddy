@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // Dispatch one board task to an external harness CLI and verify the result.
-// Read-only toward state.yaml: prints the receipt and scope verdict; the PM applies them through a direct digest-bound typed transition.
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+// Dispatch one task, bind an external Codex Worker session when applicable, and return the verified receipt/scope report.
+import { spawn } from "node:child_process";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compareDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
+import { compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
 import { sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requiredOptionValue } from "./public-error.mjs";
 import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
+import { bindCodexWorkerSession } from "./apply-receipt.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -16,7 +17,7 @@ const READ_ONLY_ROLES = new Set(["scout", "judge"]);
 if (isDirectRun()) {
   try {
     const options = parseDispatchArgs(process.argv.slice(2));
-    const report = dispatchTask(options);
+    const report = await dispatchTask(options);
     if (options.json) {
       console.log(report.ok ? JSON.stringify(report, null, 2) : JSON.stringify(report));
     } else {
@@ -35,7 +36,7 @@ function isDirectRun() {
 }
 
 export function parseDispatchArgs(args) {
-  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", timeoutSeconds: 1200, json: false };
+  const options = { goalRoot: "", boardPath: "", taskId: "", expectedStateDigest: "", allowImmutableHistory: false, to: "", model: "", timeoutSeconds: 1200, briefPath: "", briefSha256: "", resumeSession: "", confirmedNotLive: false, json: false };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") options.json = true;
@@ -50,6 +51,13 @@ export function parseDispatchArgs(args) {
     else if (arg.startsWith("--to=")) options.to = joinedOptionValue(arg, "--to");
     else if (arg === "--model") { options.model = requiredOptionValue(args, index, arg); index += 1; }
     else if (arg.startsWith("--model=")) options.model = joinedOptionValue(arg, "--model");
+    else if (arg === "--brief") { options.briefPath = requiredOptionValue(args, index, arg); index += 1; }
+    else if (arg.startsWith("--brief=")) options.briefPath = joinedOptionValue(arg, "--brief");
+    else if (arg === "--brief-sha256") { options.briefSha256 = requiredOptionValue(args, index, arg); index += 1; }
+    else if (arg.startsWith("--brief-sha256=")) options.briefSha256 = joinedOptionValue(arg, "--brief-sha256");
+    else if (arg === "--resume-session") { options.resumeSession = requiredOptionValue(args, index, arg); index += 1; }
+    else if (arg.startsWith("--resume-session=")) options.resumeSession = joinedOptionValue(arg, "--resume-session");
+    else if (arg === "--confirmed-not-live") options.confirmedNotLive = true;
     else if (arg === "--timeout") { options.timeoutSeconds = Number(requiredOptionValue(args, index, arg)) || 1200; index += 1; }
     else if (arg.startsWith("--timeout=")) options.timeoutSeconds = Number(joinedOptionValue(arg, "--timeout")) || 1200;
     else if (arg.startsWith("-")) throw new Error(`Unknown argument: ${arg}`);
@@ -57,23 +65,51 @@ export function parseDispatchArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot && !options.boardPath) {
-    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--timeout <seconds>] [--allow-immutable-history] [--json]");
+    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
   }
   if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
     throw publicError("STALE_STATE_DIGEST", "dispatch requires --expected-state-digest with exactly 64 lowercase hex characters.");
   }
+  if (Boolean(options.briefPath) !== Boolean(options.briefSha256) || (options.briefSha256 && !/^[a-f0-9]{64}$/.test(options.briefSha256))) {
+    throw publicError("INVALID_ARGUMENT", "dispatch requires --brief and --brief-sha256 together with a 64-character lowercase digest.");
+  }
+  if (options.resumeSession && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.resumeSession)) {
+    throw publicError("CODEX_SESSION_RESUME_FAILED", "--resume-session must be an exact UUID; --last is never accepted.");
+  }
+  if (options.resumeSession && !options.confirmedNotLive) {
+    throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact resume requires --confirmed-not-live after the PM or Ledger proves the original Worker is terminal or lost.");
+  }
   return options;
 }
 
-export function dispatchTask(options) {
+export async function dispatchTask(options) {
   const admitted = admitCurrentTask(options);
   const { board, task, role, payload } = admitted;
+  const existingBinding = task.transition_evidence?.codex_worker_session || null;
   const to = options.to || cleanScalar(admitted.harness) || "";
   if (!HARNESSES.has(to)) {
     return failure("INVALID_ARGUMENT", `Unknown or missing dispatch target "${to}". Use --to codex or --to claude-code (or set harness: on the task card).`, { task_id: task.id });
   }
   const root = repositoryRoot(dirname(board.path));
   normalizeRepositoryPath(root, board.path);
+  const effectiveModel = options.resumeSession && existingBinding ? existingBinding.model : options.model;
+  if (options.resumeSession && options.model && options.model !== existingBinding?.model) {
+    throw publicError("CODEX_SESSION_RESUME_FAILED", "Resume model override differs from the bound Worker contract; no process was launched.");
+  }
+  const boundOptions = options.resumeSession && existingBinding?.brief_path && !options.briefPath
+    ? { ...options, briefPath: existingBinding.brief_path, briefSha256: existingBinding.brief_sha256 }
+    : options;
+  const boundInput = loadBoundInput(root, boundOptions);
+  const dispatchContractSha256 = compileDispatchContract({ payload, to, model: effectiveModel, sandbox: payload.metadata.sandbox, brief: boundInput });
+  if (!options.resumeSession && to === "codex" && role === "worker" && existingBinding) {
+    return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest } });
+  }
+  let dispatchScope;
+  try {
+    dispatchScope = compileDispatchScope(root, payload.task.allowed_files);
+  } catch (error) {
+    return failure("DISPATCH_SCOPE_UNSAFE", `${error.message} Narrow or hydrate allowed_files, then retry the same digest-bound dispatch.`, { task_id: task.id, role });
+  }
 
   const prompt = [
     formatPrompt(payload),
@@ -82,53 +118,86 @@ export function dispatchTask(options) {
     `- Work only inside the admitted repository: ${root}`,
     "- Do not edit state.yaml or any GoalBuddy control files; the PM applies your receipt through GoalBuddy's direct digest-bound typed transition.",
     `- End your reply with exactly one goalbuddy_receipt_v1 JSON object, including "harness": "${to}".`,
+    ...(boundInput ? [`- Read the bound implementation context at ${boundInput.path}; its admitted SHA-256 is ${boundInput.sha256}. Treat it as context subordinate to the structured task authority.`] : []),
   ].join("\n");
 
-  const before = captureDispatchManifest(root);
+  const before = captureDispatchManifest(root, { scope: dispatchScope });
   if (sha256(readFileSync(board.path)) !== board.stateDigest) {
     throw publicError("STALE_STATE_DIGEST", "state.yaml changed after admission and before harness launch; no harness was started.");
   }
-  const run = runHarness(to, prompt, { cwd: root, model: options.model, sandbox: payload.metadata.sandbox, role, timeoutSeconds: options.timeoutSeconds });
-  const after = captureDispatchManifest(root);
-  const receipt = extractReceipt(`${run.stdout}\n${run.stderr}`);
+  const boardRepositoryPath = normalizeRepositoryPath(root, board.path);
+  if (options.resumeSession) validateResumeBinding({ options, existingBinding, task, board, root, boardRepositoryPath, dispatchContractSha256, boundInput });
+  let bindingReport = null;
+  let authorizedControlSha256 = {};
+  const continuationPrompt = `Continue the original GoalBuddy contract for task ${task.id}. Preserve its existing authority and return the required goalbuddy_receipt_v1.`;
+  const run = await runHarness(to, options.resumeSession ? continuationPrompt : prompt, {
+    cwd: root,
+    model: effectiveModel,
+    sandbox: payload.metadata.sandbox,
+    role,
+    timeoutSeconds: options.timeoutSeconds,
+    resumeSession: options.resumeSession,
+    onThreadStarted: to === "codex" && role === "worker" && !options.resumeSession ? (sessionId) => {
+      const evidence = codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: board.stateDigest, model: effectiveModel, sandbox: payload.metadata.sandbox });
+      bindingReport = bindCodexWorkerSession({
+        goalRoot: board.path,
+        taskId: task.id,
+        expectedStateDigest: board.stateDigest,
+        allowImmutableHistory: options.allowImmutableHistory,
+      }, evidence);
+      if (!bindingReport.ok) throw publicError("DISPATCH_SESSION_BIND_FAILED", bindingReport.checker_errors?.[0] || "Codex Worker session binding failed validation.");
+      authorizedControlSha256 = { [boardRepositoryPath]: bindingReport.after_digest };
+    } : null,
+    expectedThreadId: options.resumeSession || "",
+  });
+  const after = captureDispatchManifest(root, { scope: dispatchScope });
+  const receipt = extractReceipt(`${codexAgentText(run.stdout)}\n${run.stdout}\n${run.stderr}`);
   if (receipt && !receipt.harness) receipt.harness = to;
   let scope;
   try {
     scope = compareDispatchScope({
       before,
       after,
+      scope: dispatchScope,
       role,
       allowedFiles: payload.task.allowed_files,
       receiptChangedFiles: receipt?.changed_files ?? [],
+      authorizedControlSha256,
     });
   } catch (error) {
     scope = { status: "violations", changed_files: [], receipt_changed_files: [], control_changes: [], out_of_scope: [], missing_receipt_changes: [], extra_receipt_claims: [], violations: [error.message] };
   }
 
   const identityError = receipt ? receiptIdentityError(receipt, { taskId: task.id, boardPath: board.path, root }) : null;
+  const dispatchEvidence = {
+    session_binding: bindingReport ? { session_id: bindingReport.session_id, state_digest: bindingReport.after_digest } : existingBinding ? { session_id: existingBinding.session_id, state_digest: board.stateDigest } : null,
+    dispatch_contract_sha256: dispatchContractSha256,
+    brief: boundInput,
+  };
   if (run.error || run.status !== 0) {
     if (scope.status !== "clean") {
       return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(scope, `${run.error || `The ${to} CLI exited with status ${run.status}`} and left a non-clean dispatch scope.`), {
-        harness: to, task_id: task.id, role, exit_status: run.status ?? null, harness_error: run.error || null, receipt: receipt || null, scope_check: scope,
+        ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, harness_error: run.error || null, receipt: receipt || null, scope_check: scope,
       });
     }
-    return failure("HARNESS_FAILED", run.error || `The ${to} CLI exited with status ${run.status}.`, {
-      harness: to, task_id: task.id, role, exit_status: run.status ?? null, receipt: receipt || null, scope_check: scope,
+    const code = run.sessionError ? (options.resumeSession ? "CODEX_SESSION_RESUME_FAILED" : "DISPATCH_SESSION_BIND_FAILED") : "HARNESS_FAILED";
+    return failure(code, run.error || `The ${to} CLI exited with status ${run.status}.`, {
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status ?? null, receipt: receipt || null, scope_check: scope,
     });
   }
   if (!receipt) {
     return failure("RECEIPT_MISSING", "No goalbuddy_receipt_v1 object found in the harness output.", {
-      harness: to, task_id: task.id, role, exit_status: run.status, receipt: null, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt: null, scope_check: scope,
     });
   }
   if (identityError) {
     return failure("RECEIPT_IDENTITY_MISMATCH", identityError, {
-      harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
     });
   }
   if (scope.status !== "clean") {
     return failure("DISPATCH_SCOPE_FAILED", scopeFailureMessage(scope, "Dispatch writes or receipt claims failed the admitted scope contract."), {
-      harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
+      ...dispatchEvidence, harness: to, task_id: task.id, role, exit_status: run.status, receipt, scope_check: scope,
     });
   }
 
@@ -140,6 +209,7 @@ export function dispatchTask(options) {
     exit_status: run.status,
     receipt: receipt || null,
     scope_check: scope,
+    ...dispatchEvidence,
   };
 }
 
@@ -152,29 +222,75 @@ function scopeFailureMessage(scope, prefix) {
   return details.length > 0 ? `${prefix} ${details.join("; ")}` : prefix;
 }
 
-function runHarness(to, prompt, { cwd, model, sandbox, role, timeoutSeconds }) {
-  const command = harnessCommand(to, prompt, { model, sandbox, role });
-  const result = spawnSync(command.file, command.args, {
-    cwd,
-    encoding: "utf8",
-    timeout: timeoutSeconds * 1000,
-    shell: process.platform === "win32",
-    env: process.env,
-    maxBuffer: 32 * 1024 * 1024,
+function runHarness(to, prompt, { cwd, model, sandbox, role, timeoutSeconds, resumeSession = "", onThreadStarted = null, expectedThreadId = "" }) {
+  const command = harnessCommand(to, prompt, { model, sandbox, role, resumeSession });
+  return new Promise((resolveRun) => {
+    let stdout = "";
+    let stderr = "";
+    let pending = "";
+    let startedThreadId = "";
+    let threadNotified = false;
+    let sessionError = "";
+    let timedOut = false;
+    const child = spawn(command.file, command.args, { cwd, shell: process.platform === "win32", env: process.env, detached: process.platform !== "win32" });
+    const terminate = () => {
+      if (process.platform === "win32") child.kill("SIGTERM");
+      else {
+        try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
+      }
+    };
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, timeoutSeconds * 1000);
+    child.stdout?.on("data", (chunk) => {
+      const text = chunk.toString("utf8");
+      stdout += text;
+      pending += text;
+      const lines = pending.split("\n");
+      pending = lines.pop() || "";
+      for (const line of lines) {
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event?.type !== "thread.started") continue;
+        const threadId = String(event.thread_id || "");
+        if (!threadId) continue;
+        if (startedThreadId && startedThreadId !== threadId) {
+          sessionError = "Codex emitted conflicting thread.started identities.";
+          terminate();
+          continue;
+        }
+        startedThreadId = threadId;
+        if (expectedThreadId && threadId !== expectedThreadId) {
+          sessionError = `Codex resumed thread ${threadId}, expected ${expectedThreadId}.`;
+          terminate();
+          continue;
+        }
+        if (onThreadStarted && !threadNotified) {
+          threadNotified = true;
+          try { onThreadStarted(threadId); } catch (error) {
+            sessionError = error.message;
+            terminate();
+          }
+        }
+      }
+    });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolveRun({ error: error.code === "ENOENT" ? `The ${to} CLI ("${command.file}") was not found on PATH. Install it or choose another --to target.` : error.message, status: null, stdout, stderr, sessionError: false });
+    });
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      if (timedOut) return resolveRun({ error: `The ${to} CLI timed out after ${timeoutSeconds}s.`, status, stdout, stderr, sessionError: false });
+      if (sessionError) return resolveRun({ error: sessionError, status, stdout, stderr, sessionError: true });
+      if (to === "codex" && role === "worker" && !startedThreadId) return resolveRun({ error: "Codex did not emit a thread.started session identity.", status, stdout, stderr, sessionError: true });
+      resolveRun({ status, stdout, stderr, sessionError: false, threadId: startedThreadId });
+    });
   });
-  if (result.error?.code === "ENOENT") {
-    return { error: `The ${to} CLI ("${command.file}") was not found on PATH. Install it or choose another --to target.`, status: null, stdout: result.stdout || "", stderr: result.stderr || "" };
-  }
-  if (result.error?.code === "ETIMEDOUT") {
-    return { error: `The ${to} CLI timed out after ${timeoutSeconds}s.`, status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
-  }
-  if (result.error) return { error: result.error.message, status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
-  return { status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
-export function harnessCommand(to, prompt, { model = "", sandbox = "workspace-write", role = "worker" } = {}) {
+export function harnessCommand(to, prompt, { model = "", sandbox = "workspace-write", role = "worker", resumeSession = "" } = {}) {
   if (to === "codex") {
-    const args = ["exec", "--skip-git-repo-check", "-c", `sandbox_mode=${JSON.stringify(sandbox)}`];
+    const args = resumeSession ? ["exec", "resume", resumeSession] : ["exec"];
+    args.push("--json", "--skip-git-repo-check", "-c", `sandbox_mode=${JSON.stringify(sandbox)}`);
     if (model) args.push("-c", `model=${JSON.stringify(model)}`);
     args.push(prompt);
     return { file: "codex", args };
@@ -183,6 +299,60 @@ export function harnessCommand(to, prompt, { model = "", sandbox = "workspace-wr
   if (model) args.push("--model", model);
   if (!READ_ONLY_ROLES.has(role)) args.push("--permission-mode", "acceptEdits");
   return { file: "claude", args };
+}
+
+export function compileDispatchContract({ payload, to, model = "", sandbox, brief = null }) {
+  return sha256(JSON.stringify({ version: 1, renderer_version: 1, task: payload.task, role: payload.task.type, to, model, sandbox, brief }));
+}
+
+function loadBoundInput(root, options) {
+  if (!options.briefPath) return null;
+  const path = normalizeRepositoryPath(root, options.briefPath);
+  const absolute = resolve(root, path);
+  const stat = lstatSync(absolute);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw publicError("INVALID_ARGUMENT", "Bound implementation context must be a regular non-symlink file inside the repository.");
+  const actual = sha256(readFileSync(absolute));
+  if (actual !== options.briefSha256) throw publicError("INVALID_ARGUMENT", `Bound implementation context digest mismatch: expected ${options.briefSha256}, got ${actual}.`);
+  return Object.freeze({ path, sha256: actual });
+}
+
+function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest, model = "", sandbox = "workspace-write" }) {
+  const codexHome = realpathSync(resolve(process.env.CODEX_HOME || resolve(process.env.HOME || "", ".codex")));
+  return {
+    harness: "codex",
+    session_id: sessionId,
+    task_id: task.id,
+    board_path_sha256: sha256(boardRepositoryPath),
+    workspace_root_sha256: sha256(realpathSync(root)),
+    codex_home_sha256: sha256(codexHome),
+    dispatch_contract_sha256: dispatchContractSha256,
+    model,
+    sandbox,
+    brief_path: boundInput?.path ?? null,
+    brief_sha256: boundInput?.sha256 ?? null,
+    launch_state_digest: boardStateDigest,
+  };
+}
+
+function validateResumeBinding({ options, existingBinding, task, board, root, boardRepositoryPath, dispatchContractSha256, boundInput }) {
+  if ((options.to || "codex") !== "codex" || task.type !== "worker") throw publicError("CODEX_SESSION_RESUME_FAILED", "Exact Codex resume is available only for a Codex Worker task.");
+  if (!existingBinding || existingBinding.session_id !== options.resumeSession || existingBinding.task_id !== task.id) throw publicError("CODEX_SESSION_RESUME_FAILED", "The active task does not carry the requested exact Codex session binding.");
+  const expected = codexSessionEvidence({ sessionId: options.resumeSession, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest: existingBinding.launch_state_digest, model: existingBinding.model, sandbox: existingBinding.sandbox });
+  for (const key of ["board_path_sha256", "workspace_root_sha256", "codex_home_sha256", "dispatch_contract_sha256", "model", "sandbox", "brief_path", "brief_sha256"]) {
+    if (existingBinding[key] !== expected[key]) throw publicError("CODEX_SESSION_RESUME_FAILED", `Codex session binding no longer matches ${key}; no process was launched.`);
+  }
+  if (board.stateDigest !== options.expectedStateDigest) throw publicError("STALE_STATE_DIGEST", "Board changed before exact resume.");
+}
+
+function codexAgentText(output) {
+  const texts = [];
+  for (const line of String(output || "").split("\n")) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    const item = event?.item || event;
+    for (const value of [item?.text, item?.output_text, event?.message]) if (typeof value === "string") texts.push(value);
+  }
+  return texts.join("\n");
 }
 
 export function extractReceipt(output) {

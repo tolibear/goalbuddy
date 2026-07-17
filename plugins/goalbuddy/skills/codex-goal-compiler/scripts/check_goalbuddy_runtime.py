@@ -37,6 +37,7 @@ REQUIRED_RUNTIME_CAPABILITIES = frozenset(
         "closed_judge_decision_vocabulary",
         "atomic_exact_human_wait_resume",
         "atomic_goal_completion",
+        "task_bound_codex_exec_resume",
     }
 )
 
