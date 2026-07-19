@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Dispatch one board task to an external harness CLI and verify the result.
 // Dispatch one task, bind an external Codex Worker session when applicable, and return the verified receipt/scope report.
-import { spawn } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compareDispatchAuthority, compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
 import { sha256 } from "./immutable-history-proof.mjs";
@@ -19,7 +19,22 @@ const READ_ONLY_ROLES = new Set(["scout", "judge"]);
 if (isDirectRun()) {
   try {
     const options = parseDispatchArgs(process.argv.slice(2));
-    const report = await dispatchTask(options);
+    let report = await dispatchTask(options);
+    if (report.ok) {
+      try {
+        report = compactDispatchOutcome(materializeDispatchReport(report, options));
+      } catch (error) {
+        report = {
+          ...report,
+          report_path: null,
+          report_transport: {
+            kind: "git_local_ephemeral_v1",
+            status: "unavailable",
+            error: String(error?.message || error).slice(0, 300),
+          },
+        };
+      }
+    }
     if (options.json) {
       console.log(report.ok ? JSON.stringify(report, null, 2) : JSON.stringify(report));
     } else {
@@ -494,6 +509,78 @@ function dispatchCommands({ boardPath, taskId, stateDigest, sessionId }) {
   };
 }
 
+function materializeDispatchReport(report, options) {
+  const anchor = resolve(options.boardPath || options.goalRoot);
+  const root = repositoryRoot(options.boardPath ? dirname(anchor) : anchor);
+  const git = spawnSync("git", ["rev-parse", "--git-dir"], { cwd: root, encoding: "utf8" });
+  if (git.status !== 0 || !git.stdout.trim()) {
+    throw new Error(`Could not resolve Git-local dispatch transport: ${(git.stderr || "").trim() || "git rev-parse failed"}`);
+  }
+  const rawGitDir = git.stdout.trim();
+  const gitDir = realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(root, rawGitDir));
+  const reportsRoot = join(gitDir, "goalbuddy", "dispatch-reports");
+  mkdirSync(reportsRoot, { recursive: true, mode: 0o700 });
+  chmodSync(reportsRoot, 0o700);
+  const reportDir = mkdtempSync(join(reportsRoot, `${report.task_id}-`));
+  chmodSync(reportDir, 0o700);
+  const reportPath = join(reportDir, "dispatch-report.json");
+  const applyReceipt = {
+    ...report.commands.apply_receipt,
+    receipt_path: reportPath,
+    unresolved: ["activate_task_id"],
+    command_template: `node ${JSON.stringify(resolve(dirname(fileURLToPath(import.meta.url)), "apply-receipt.mjs"))} ${JSON.stringify(dirname(report.commands.apply_receipt.board_path))} --task ${report.task_id} --receipt ${JSON.stringify(reportPath)} --expected-state-digest ${report.commands.apply_receipt.expected_state_digest} --activate <T###> --json`,
+  };
+  const materialized = {
+    ...report,
+    report_path: reportPath,
+    report_transport: {
+      kind: "git_local_ephemeral_v1",
+      status: "ready",
+      path: reportPath,
+      authority: "transport_only",
+    },
+    commands: {
+      ...report.commands,
+      apply_receipt: applyReceipt,
+    },
+  };
+  writeFileSync(reportPath, `${JSON.stringify(materialized, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  chmodSync(reportPath, 0o600);
+  return materialized;
+}
+
+function compactDispatchOutcome(report) {
+  return {
+    ok: true,
+    harness: report.harness,
+    task_id: report.task_id,
+    role: report.role,
+    exit_status: report.exit_status,
+    receipt: report.receipt,
+    scope_check: {
+      status: report.scope_check.status,
+      changed_files: report.scope_check.changed_files,
+      violations: report.scope_check.violations,
+    },
+    repair: {
+      attempted: report.repair.attempted,
+      succeeded: report.repair.succeeded,
+      failure: report.repair.failure,
+    },
+    state_digest: report.state_digest,
+    digest_kind: report.digest_kind,
+    mutation: report.mutation,
+    session_binding: report.session_binding,
+    brief: report.brief,
+    report_path: report.report_path,
+    report_transport: report.report_transport,
+    next_action: "Review the product diff, then supply only activate_task_id to commands.apply_receipt.",
+    commands: {
+      apply_receipt: report.commands.apply_receipt,
+    },
+  };
+}
+
 function failure(code, message, extra = {}) {
   return { ...publicFailure(publicError(code, message)), receipt: null, scope_check: { status: "skipped" }, ...extra };
 }
@@ -775,5 +862,6 @@ function printHumanReport(report) {
       console.log(`Violations: ${report.scope_check.violations.join(", ")}`);
     }
   }
-  console.log("Dispatch ok. Apply this receipt once with the direct digest-bound goalbuddy receipt transition and an explicit queued successor.");
+  if (report.report_path) console.log(`Validated dispatch report: ${report.report_path}`);
+  console.log("Dispatch ok. Review the product result, then apply the returned report once with the direct digest-bound goalbuddy receipt transition and an explicit queued successor.");
 }

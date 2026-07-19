@@ -43,10 +43,10 @@ Implements **Worker authority and stop conditions**. Prose alone never expands a
 
 ```bash
 node <skill-path>/scripts/apply-receipt.mjs docs/goals/<slug> \
-  --expected-state-digest <sha256> --receipt receipt.json --activate T002 --json
+  --expected-state-digest <sha256> --receipt <returned-dispatch-report-path> --activate T002 --json
 ```
 
-Use `--add-tasks task-cards.json` or `--hydrate-task T###` only through the exact command returned by the current projection/transition and the CLI's current help. Do not embed long task payloads in prose.
+For dispatched work, use the Git-local report path returned by the successful dispatcher; do not copy its receipt into another file. Use `--add-tasks task-cards.json` or `--hydrate-task T###` only through the exact command returned by the current projection/transition and the CLI's current help. Do not embed long task payloads in prose.
 
 ## Keeper request and runtime rebind
 

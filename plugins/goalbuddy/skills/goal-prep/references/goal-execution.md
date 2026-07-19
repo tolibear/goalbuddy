@@ -74,7 +74,7 @@ node <skill-path>/scripts/render-task-prompt.mjs docs/goals/<slug> --expected-st
 node <skill-path>/scripts/dispatch-task.mjs docs/goals/<slug> --to codex --expected-state-digest <sha256> --json
 ```
 
-The dispatcher validates authority before launch, observes the before/after write frontier including declared ignored paths, requires receipt `changed_files` to match observed product changes exactly, rejects GoalBuddy control writes, and reports truthful mutation state. It never normalizes receipt meaning.
+The dispatcher validates authority before launch, observes the before/after write frontier including declared ignored paths, requires receipt `changed_files` to match observed product changes exactly, rejects GoalBuddy control writes, and reports truthful mutation state. It never normalizes receipt meaning. A successful public dispatch stores its authoritative full report in private Git-local transport and returns a compact outcome with that exact `receipt_path` and one apply operation. The PM reviews the product result and supplies only the semantic successor choice. The transport is not board truth and is removed after successful atomic receipt application.
 
 For Codex, bind the exact JSONL session id to the active task. Never use `codex exec resume --last`. Resume only the task-bound session id, only after confirming the old process is not live, and only while workspace, task, execution profile, plan/brief, and dispatch-contract hashes still match. A polling timeout while liveness remains `running` is only a polling interval; do not interrupt, replace, or redispatch solely because a poll expired. A configured runtime deadline or explicit stop condition may terminate the Worker.
 
@@ -90,7 +90,7 @@ A completed Worker receipt lists every actually changed path, reports each decla
 
 The dispatcher and receipt applier import the same role/result-aware validator. They do not infer results, add fields, normalize commands, or rewrite historical receipts. `result` is the sole terminal-status source. Apply only a validated receipt for the exact current active receipt-free task, under the board lock and expected digest, then activate one legal queued successor. A candidate that fails the checker is not installed.
 
-Use the returned `after_digest` and immediately relevant command templates directly. Do not reconstruct or manually retype a digest. Historical receipts remain immutable.
+Use the returned `after_digest`, dispatch `receipt_path`, and immediately relevant command templates directly. Do not reconstruct a digest or materialize dispatch JSON by hand. Historical receipts remain immutable.
 
 Load `goal-execution-reference.md` only for **role receipt examples**, **amendment/hydration**, or **immutable-history recovery**.
 

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -116,6 +116,44 @@ test("dispatch runs an external worker and reports a clean scope", () => {
     assert.notEqual(report.mutation.before_digest, report.mutation.after_digest);
     assert.equal(report.commands.apply_receipt.operation, "apply_receipt");
     assert.equal(report.commands.apply_receipt.expected_state_digest, report.mutation.after_digest);
+    assert.equal(report.commands.apply_receipt.receipt_path, report.report_path);
+    assert.deepEqual(report.commands.apply_receipt.unresolved, ["activate_task_id"]);
+    assert.equal(report.commands.apply_receipt.command_template.includes(`--receipt ${JSON.stringify(report.report_path)} --expected-state-digest`), true);
+    assert.match(report.commands.apply_receipt.command_template, /--activate <T###> --json$/);
+    assert.equal(report.report_transport.kind, "git_local_ephemeral_v1");
+    assert.equal(report.report_transport.status, "ready");
+    assert.equal(statSync(report.report_path).mode & 0o777, 0o600);
+    assert.deepEqual(Object.keys(report.commands), ["apply_receipt"]);
+    assert.match(report.next_action, /supply only activate_task_id/);
+    const fullReportText = readFileSync(report.report_path, "utf8");
+    assert.equal(Buffer.byteLength(result.stdout) < Buffer.byteLength(fullReportText), true);
+    const fullReport = JSON.parse(fullReportText);
+    assert.deepEqual(fullReport.receipt, report.receipt);
+    assert.equal(fullReport.report_path, report.report_path);
+    assert.equal(typeof fullReport.commands.resume_worker, "string");
+    assert.equal(typeof fullReport.commands.recovery, "string");
+    assert.equal(Object.hasOwn(report, "dispatch_contract_sha256"), false);
+    assert.equal(typeof fullReport.dispatch_contract_sha256, "string");
+
+    const apply = spawnSync(process.execPath, [
+      applyReceipt,
+      "docs/goals/one",
+      "--task", "T001",
+      "--receipt", report.report_path,
+      "--expected-state-digest", report.commands.apply_receipt.expected_state_digest,
+      "--activate", "T002",
+      "--json",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(apply.status, 0, apply.stderr || apply.stdout);
+    const transition = JSON.parse(apply.stdout);
+    assert.equal(transition.active_task, "T002");
+    assert.deepEqual(transition.report_transport_cleanup, {
+      attempted: true,
+      removed: true,
+      path: report.report_path,
+      error: null,
+    });
+    assert.equal(existsSync(report.report_path), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -184,7 +222,65 @@ test("dispatch flags out-of-scope writes from an external worker", () => {
     assert.equal(report.mutation.board, "changed");
     assert.equal(report.mutation.product, "observed");
     assert.equal(report.mutation.receipt_applied, false);
+    assert.equal(Object.hasOwn(report, "report_path"), false);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejected receipt application preserves the Git-local dispatch report for a corrected semantic decision", () => {
+  const root = makeProject();
+  try {
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    const beforeApply = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
+    const apply = spawnSync(process.execPath, [
+      applyReceipt,
+      "docs/goals/one",
+      "--task", "T001",
+      "--receipt", report.report_path,
+      "--expected-state-digest", report.commands.apply_receipt.expected_state_digest,
+      "--activate", "T777",
+      "--json",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(apply.status, 1, apply.stderr || apply.stdout);
+    assert.equal(readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8"), beforeApply);
+    assert.equal(existsSync(report.report_path), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Git-local dispatch transport follows the linked worktree recovery identity", () => {
+  const root = makeProject();
+  const worktree = mkdtempSync(join(tmpdir(), "goalbuddy-linked-worktree-"));
+  rmSync(worktree, { recursive: true, force: true });
+  try {
+    const add = spawnSync("git", ["worktree", "add", "-q", "-b", `test-linked-${process.pid}`, worktree], { cwd: root, encoding: "utf8" });
+    assert.equal(add.status, 0, add.stderr || add.stdout);
+    const bin = fakeHarnessBin(worktree, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(worktree, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    const gitDir = spawnSync("git", ["rev-parse", "--git-dir"], { cwd: worktree, encoding: "utf8" }).stdout.trim();
+    assert.equal(report.report_path.startsWith(`${realpathSync(gitDir)}/goalbuddy/dispatch-reports/`), true);
+
+    const apply = spawnSync(process.execPath, [
+      applyReceipt,
+      "docs/goals/one",
+      "--task", "T001",
+      "--receipt", report.report_path,
+      "--expected-state-digest", report.commands.apply_receipt.expected_state_digest,
+      "--activate", "T002",
+      "--json",
+    ], { cwd: worktree, encoding: "utf8" });
+    assert.equal(apply.status, 0, apply.stderr || apply.stdout);
+    assert.equal(existsSync(report.report_path), false);
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: root, encoding: "utf8" });
+    rmSync(worktree, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -451,7 +547,8 @@ test("dispatch repairs one schema-invalid receipt through the exact bound sessio
     const report = JSON.parse(result.stdout);
     assert.equal(report.repair.attempted, true);
     assert.equal(report.repair.succeeded, true);
-    assert.deepEqual(report.repair.original_malformed_receipt.commands, ["true"]);
+    const fullReport = JSON.parse(readFileSync(report.report_path, "utf8"));
+    assert.deepEqual(fullReport.repair.original_malformed_receipt.commands, ["true"]);
     assert.deepEqual(report.receipt.commands, [{ cmd: "true", status: "pass" }]);
     assert.equal(readFileSync(join(root, "src", "widget.mjs"), "utf8"), "export const widget = 2;\n");
   } finally {

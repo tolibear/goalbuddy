@@ -874,6 +874,35 @@ test("apply-receipt accepts a dispatch report and defaults status from the recei
   }
 });
 
+test("apply-receipt never deletes a user-authored dispatch report outside GoalBuddy's Git-local transport", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const receiptPath = join(root, "receipt.json");
+    const dispatchReport = {
+      ok: true,
+      harness: "codex",
+      receipt: DONE_RECEIPT,
+      scope_check: { status: "clean" },
+      report_path: receiptPath,
+      report_transport: {
+        kind: "git_local_ephemeral_v1",
+        status: "ready",
+        path: receiptPath,
+        authority: "transport_only",
+      },
+    };
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], dispatchReport);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, true);
+    assert.equal(report.report_transport_cleanup.removed, false);
+    assert.equal(existsSync(receiptPath), true);
+    assert.match(readFileSync(join(goalDir, "state.yaml"), "utf8"), /active_task: T999/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("exact-human wait and reply are atomic, strict, durable, and final-receipt safe", () => {
   const { root, goalDir } = makeBoard();
   try {

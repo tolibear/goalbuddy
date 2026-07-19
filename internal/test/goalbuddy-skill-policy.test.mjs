@@ -185,6 +185,8 @@ test("current public contracts agree on typed transition ownership and exact dis
   assert.match(canonicalExecution, /--expected-state-digest <sha256>/);
   assert.doesNotMatch(canonicalExecution, /--status done/);
   assert.match(canonicalExecution, /observes the before\/after write frontier/);
+  assert.match(canonicalExecution, /stores its authoritative full report in private Git-local transport and returns a compact outcome/);
+  assert.match(canonicalExecution, /Do not reconstruct a digest or materialize dispatch JSON by hand/);
   assert.match(readme, /match receipt `changed_files` exactly/);
   assert.match(releaseNotes, /one exact checker-admitted current task/);
   assert.match(receiptSpec, /The receipt's `result` is the sole source of terminal status/);

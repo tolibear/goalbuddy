@@ -2,7 +2,7 @@
 // Apply a receipt, task status, and active_task transition to state.yaml atomically.
 // Fail-closed: the result is validated with check-goal-state.mjs and reverted on errors.
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
@@ -139,7 +139,10 @@ export function applyTransition(options) {
 
 export function applyReceipt(options) {
   const statePath = resolveStatePath(options.goalRoot);
-  return withStateTransitionLock(statePath, () => applyReceiptUnderLock(options, statePath));
+  const report = withStateTransitionLock(statePath, () => applyReceiptUnderLock(options, statePath));
+  if (!report.ok) return report;
+  const transportCleanup = cleanupConsumedDispatchReport(options.receiptPath, statePath);
+  return transportCleanup ? { ...report, report_transport_cleanup: transportCleanup } : report;
 }
 
 export function bindCodexWorkerSession(options, sessionEvidence) {
@@ -763,6 +766,36 @@ function loadReceipt(receiptPath) {
     throw publicError("RECEIPT_MISSING", `${receiptPath} does not contain a receipt with a result field.`);
   }
   return { ...candidate };
+}
+
+function cleanupConsumedDispatchReport(receiptPath, statePath) {
+  try {
+    const suppliedPath = resolve(receiptPath);
+    const suppliedLstat = lstatSync(suppliedPath);
+    if (!suppliedLstat.isFile() || suppliedLstat.isSymbolicLink()) return null;
+    const parsed = JSON.parse(readFileSync(suppliedPath, "utf8"));
+    const transport = parsed?.report_transport;
+    if (transport?.kind !== "git_local_ephemeral_v1" || transport.status !== "ready") return null;
+    if (typeof parsed.report_path !== "string" || parsed.report_path !== transport.path) return null;
+    const canonicalReportPath = realpathSync(suppliedPath);
+    if (realpathSync(resolve(parsed.report_path)) !== canonicalReportPath) return null;
+
+    const git = spawnSync("git", ["rev-parse", "--git-dir"], { cwd: dirname(statePath), encoding: "utf8" });
+    if (git.status !== 0 || !git.stdout.trim()) {
+      return { attempted: true, removed: false, path: canonicalReportPath, error: "Could not resolve the Git directory for transport cleanup." };
+    }
+    const rawGitDir = git.stdout.trim();
+    const gitDir = realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(dirname(statePath), rawGitDir));
+    const reportsRoot = realpathSync(join(gitDir, "goalbuddy", "dispatch-reports"));
+    const reportDir = realpathSync(dirname(canonicalReportPath));
+    if (basename(canonicalReportPath) !== "dispatch-report.json" || dirname(reportDir) !== reportsRoot) return null;
+    const reportDirLstat = lstatSync(reportDir);
+    if (!reportDirLstat.isDirectory() || reportDirLstat.isSymbolicLink()) return null;
+    rmSync(reportDir, { recursive: true, force: true });
+    return { attempted: true, removed: true, path: canonicalReportPath, error: null };
+  } catch (error) {
+    return { attempted: true, removed: false, path: resolve(receiptPath), error: String(error?.message || error).slice(0, 300) };
+  }
 }
 
 function validateReceiptIdentity(receipt, taskId, statePath) {
