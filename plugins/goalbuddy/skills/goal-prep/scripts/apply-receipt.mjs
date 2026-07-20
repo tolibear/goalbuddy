@@ -8,14 +8,24 @@ import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { assertTaskReceipt } from "./receipt-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then have the PM run GoalBuddy's direct digest-bound apply_amendment transition to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
 
 if (isDirectRun()) {
+  const args = process.argv.slice(2);
+  if (args.some((arg) => arg === "--help" || arg === "-h")) {
+    printApplyHelp();
+  } else {
+    runApplyCli(args);
+  }
+}
+
+function runApplyCli(args) {
   try {
-    const options = parseApplyArgs(process.argv.slice(2));
+    const options = parseApplyArgs(args);
     const report = applyTransition(options);
     if (!report.ok) {
       const compatibilityDetail = report.immutable_history_rejection?.startsWith("Checker-red history requires") && report.baseline_checker_ok !== false
@@ -52,9 +62,14 @@ if (isDirectRun()) {
     }
     process.exitCode = report.ok ? 0 : 1;
   } catch (error) {
-    printPublicFailure(error, { json: process.argv.slice(2).includes("--json") });
+    printPublicFailure(error, { json: args.includes("--json") });
     process.exitCode = 1;
   }
+}
+
+function printApplyHelp() {
+  console.log("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <sha256>]] [--json]");
+  console.log("Applies one validated task receipt and activates one explicit queued successor atomically.");
 }
 
 function isDirectRun() {
@@ -671,10 +686,10 @@ function installValidatedCandidate(context, candidate, report) {
       after_digest: context.originalDigest,
       digest_kind: "state_yaml_sha256",
       mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
-      commands: transitionCommands(context.statePath, context.originalDigest, report.active_task || null),
+      commands: transitionCommands(context.statePath, context.originalDigest, context.document.active_task || null),
       checker_errors: checkerErrors,
       baseline_checker_ok: baselineReport?.ok === true,
-      recovery_guidance: checkerRecoveryGuidance(checkerErrors),
+      recovery_guidance: checkerRecoveryGuidance(checkerErrors, report.active_task || null),
       immutable_history_rejection: compatibility.reason,
     };
   }
@@ -728,6 +743,9 @@ function transitionCommands(statePath, stateDigest, activeTask) {
       : null,
     planning: `node ${JSON.stringify(join(scriptDir, "resume-board.mjs"))} ${JSON.stringify(goalRoot)} --planning --json`,
     recovery: `node ${JSON.stringify(join(scriptDir, "resume-board.mjs"))} ${JSON.stringify(goalRoot)} --json`,
+    apply_receipt: activeTask
+      ? buildApplyReceiptCommand({ boardPath: statePath, taskId: activeTask, stateDigest })
+      : null,
   };
 }
 
@@ -740,10 +758,22 @@ function runChecker(statePath, candidate) {
   }
 }
 
-function checkerRecoveryGuidance(errors) {
-  return errors.some((error) => /changed file outside allowed_files:/.test(error))
-    ? [OUT_OF_SCOPE_RECOVERY_GUIDANCE]
-    : [];
+function checkerRecoveryGuidance(errors, activateTaskId) {
+  if (errors.some((error) => /changed file outside allowed_files:/.test(error))) {
+    return [OUT_OF_SCOPE_RECOVERY_GUIDANCE];
+  }
+  if (activateTaskId) {
+    const activatedWorkerMissingExecutionScope = errors.some((error) => {
+      const match = error.match(/^active Worker task (T\d+) must include (allowed_files|verify|stop_if)$/);
+      return match?.[1] === activateTaskId;
+    });
+    if (activatedWorkerMissingExecutionScope) {
+      return [
+        `state.yaml is unchanged. Retry the same atomic receipt transition with --hydrate-task ${activateTaskId} --task-card <file> --task-card-sha256 <hex> --activate ${activateTaskId} after writing the exact bounded Worker card.`,
+      ];
+    }
+  }
+  return [];
 }
 
 function stateTopScalar(text, key) {

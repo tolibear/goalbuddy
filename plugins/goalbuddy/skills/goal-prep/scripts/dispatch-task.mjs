@@ -11,6 +11,7 @@ import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requ
 import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
 import { bindCodexWorkerSession } from "./apply-receipt.mjs";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
+import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { validateTaskReceipt } from "./receipt-contract.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
@@ -492,16 +493,7 @@ function dispatchMutation({ board, product, beforeDigest, afterDigest, sessionBi
 function dispatchCommands({ boardPath, taskId, stateDigest, sessionId }) {
   const goalRoot = dirname(boardPath);
   return {
-    apply_receipt: {
-      operation: "apply_receipt",
-      board_path: boardPath,
-      task_id: taskId,
-      expected_state_digest: stateDigest,
-      digest_kind: "state_yaml_sha256",
-      receipt_path: null,
-      activate_task_id: null,
-      unresolved: ["receipt_path", "activate_task_id"],
-    },
+    apply_receipt: buildApplyReceiptCommand({ boardPath, taskId, stateDigest }),
     resume_worker: sessionId
       ? `node ${JSON.stringify(fileURLToPath(import.meta.url))} ${JSON.stringify(goalRoot)} --to codex --resume-session ${sessionId} --confirmed-not-live --expected-state-digest ${stateDigest} --json`
       : null,
@@ -524,12 +516,12 @@ function materializeDispatchReport(report, options) {
   const reportDir = mkdtempSync(join(reportsRoot, `${report.task_id}-`));
   chmodSync(reportDir, 0o700);
   const reportPath = join(reportDir, "dispatch-report.json");
-  const applyReceipt = {
-    ...report.commands.apply_receipt,
-    receipt_path: reportPath,
-    unresolved: ["activate_task_id"],
-    command_template: `node ${JSON.stringify(resolve(dirname(fileURLToPath(import.meta.url)), "apply-receipt.mjs"))} ${JSON.stringify(dirname(report.commands.apply_receipt.board_path))} --task ${report.task_id} --receipt ${JSON.stringify(reportPath)} --expected-state-digest ${report.commands.apply_receipt.expected_state_digest} --activate <T###> --json`,
-  };
+  const applyReceipt = buildApplyReceiptCommand({
+    boardPath: report.commands.apply_receipt.board_path,
+    taskId: report.task_id,
+    stateDigest: report.commands.apply_receipt.expected_state_digest,
+    receiptPath: reportPath,
+  });
   const materialized = {
     ...report,
     report_path: reportPath,

@@ -379,6 +379,14 @@ test("apply-receipt records a done receipt and activates the next task atomicall
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
+    assert.equal(report.commands.apply_receipt.task_id, "T999");
+    assert.equal(report.commands.apply_receipt.expected_state_digest, report.after_digest);
+    assert.equal(report.commands.apply_receipt.digest_kind, "state_yaml_sha256");
+    assert.equal(report.commands.apply_receipt.receipt_path, null);
+    assert.equal(report.commands.apply_receipt.activate_task_id, null);
+    assert.deepEqual(report.commands.apply_receipt.unresolved, ["receipt_path", "activate_task_id"]);
+    assert.match(report.commands.apply_receipt.command_template, /--receipt "<receipt-path>" /);
+    assert.match(report.commands.apply_receipt.command_template, /--activate <T###> --json$/);
 
     const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
     assert.match(state, /active_task: T999/);
@@ -388,6 +396,30 @@ test("apply-receipt records a done receipt and activates the next task atomicall
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt help is read-only while malformed ordinary calls still fail closed", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const statePath = join(goalDir, "state.yaml");
+    const before = readFileSync(statePath, "utf8");
+    for (const flag of ["--help", "-h"]) {
+      const help = spawnSync(process.execPath, [script, flag], { cwd: root, encoding: "utf8" });
+      assert.equal(help.status, 0, help.stderr || help.stdout);
+      assert.match(help.stdout, /^Usage: node apply-receipt\.mjs /);
+      for (const option of ["--add-tasks", "--hydrate-task", "--task-card", "--task-card-sha256"]) {
+        assert.match(help.stdout, new RegExp(option), `${flag} help includes ${option}`);
+      }
+      assert.equal(readFileSync(statePath, "utf8"), before);
+    }
+
+    const malformed = spawnSync(process.execPath, [script, goalDir, "--task", "T001"], { cwd: root, encoding: "utf8" });
+    assert.notEqual(malformed.status, 0, malformed.stderr || malformed.stdout);
+    assert.match(malformed.stderr || malformed.stdout, /Usage: node apply-receipt\.mjs/);
+    assert.equal(readFileSync(statePath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -626,6 +658,26 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
     assert.doesNotMatch(state, /approval_phrase|approval_phrases|boundary_classification/);
     assert.doesNotMatch(state, /Provisional worker/);
     assert.doesNotMatch(state, /provisional card has not been replaced/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("activating an unhydrated Worker placeholder fails closed with exact atomic retry guidance", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    const statePath = join(goalDir, "state.yaml");
+    const before = readFileSync(statePath, "utf8");
+    const result = runApply(root, ["--task", "T001", "--activate", "T042"], DONE_RECEIPT);
+    const report = failureReport(result);
+    assert.equal(report.error_code, "CHECKER_FAILED");
+    assert.match(
+      report.error,
+      /state\.yaml is unchanged\. Retry the same atomic receipt transition with --hydrate-task T042 --task-card <file> --task-card-sha256 <hex> --activate T042/,
+    );
+    assert.equal(report.mutation.board, "unchanged");
+    assert.equal(report.mutation.before_digest, report.mutation.after_digest);
+    assert.equal(readFileSync(statePath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

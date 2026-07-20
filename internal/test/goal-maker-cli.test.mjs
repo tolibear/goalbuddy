@@ -2120,6 +2120,9 @@ goal:
     proof_type: test
     completion_proof: "npm test passes and the final audit is complete."
     likely_misfire: "Changing code without proving behavior."
+    existing_plan_facts:
+      - "Keep the existing widget API unchanged."
+      - "Run npm test before the final audit."
 rules:
   continuous_until_full_outcome: true
   missing_input_or_credentials_do_not_stop_goal: true
@@ -2167,6 +2170,22 @@ tasks:
         - cmd: npm test
           status: pass
       summary: "done"`}
+${active ? `  - id: T003
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Audit the ready successor."
+    receipt: null
+  - id: T004
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Provisional Worker card awaiting exact hydration."
+    allowed_files: []
+    verify: []
+    stop_if: []
+    receipt: null
+` : ""}
 ${active ? "" : `  - id: T999
     type: judge
     assignee: Judge
@@ -2456,6 +2475,10 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.equal(scopedReport.board.state_digest_status, "checker_validated");
     assert.equal(scopedReport.board.intake.original_request, "Make the widget work.");
     assert.equal(scopedReport.board.intake.interpreted_outcome, "The widget works and the test proves it.");
+    assert.deepEqual(scopedReport.board.intake.existing_plan_facts, [
+      "Keep the existing widget API unchanged.",
+      "Run npm test before the final audit.",
+    ]);
     assert.equal(scopedReport.board.active_task.id, "T002");
     assert.deepEqual(scopedReport.board.active_task.allowed_files, ["src/widget.mjs"]);
     assert.deepEqual(scopedReport.board.active_task.verify, ["npm test"]);
@@ -2477,10 +2500,53 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     assert.match(scopedReport.commands.resume, /scripts\/resume-board\.mjs/);
     assert.match(scopedReport.commands.prompt, /scripts\/render-task-prompt\.mjs/);
     assert.match(scopedReport.commands.prompt, new RegExp(`--task T002 --expected-state-digest ${scopedReport.board.state_digest} --json$`));
+    assert.deepEqual(scopedReport.commands.apply_receipt, {
+      operation: "apply_receipt",
+      board_path: scopedReport.board.state_path,
+      task_id: "T002",
+      expected_state_digest: scopedReport.board.state_digest,
+      digest_kind: "state_yaml_sha256",
+      receipt_path: null,
+      activate_task_id: null,
+      unresolved: ["receipt_path", "activate_task_id"],
+      command_template: scopedReport.commands.apply_receipt.command_template,
+    });
+    assert.match(
+      scopedReport.commands.apply_receipt.command_template,
+      /--receipt "<receipt-path>" /,
+      "resume supplies the receipt-path slot instead of requiring CLI discovery",
+    );
+    assert.match(
+      scopedReport.commands.apply_receipt.command_template,
+      /--activate <T###> --json$/,
+      "resume supplies the semantic-successor slot instead of inviting a successorless guess",
+    );
     assert.equal(scopedReport.board.planning_inventory.included, false);
     assert.deepEqual(scopedReport.board.planning_inventory.blocked_tasks, []);
     assert.deepEqual(scopedReport.board.planning_inventory.queued_tasks, []);
     assert.match(scopedReport.commands.planning, /--planning --json$/);
+
+    const planning = runGoalMaker(["resume", "docs/goals/one", "--planning", "--json"], { cwd: root });
+    assert.equal(planning.status, 0, planning.stderr || planning.stdout);
+    const planningReport = JSON.parse(planning.stdout);
+    const readyTransition = planningReport.board.planning_inventory.queued_tasks.find((task) => task.id === "T003").next_transition;
+    assert.equal(readyTransition.operation, "apply_receipt");
+    assert.equal(readyTransition.task_id, "T002");
+    assert.equal(readyTransition.activate_task_id, "T003");
+    assert.equal(readyTransition.expected_state_digest, planningReport.board.state_digest);
+    assert.deepEqual(readyTransition.unresolved, ["receipt_path"]);
+    assert.match(readyTransition.command_template, /--receipt "<receipt-path>" /);
+    assert.match(readyTransition.command_template, /--activate T003 --json$/);
+
+    const hydrationTransition = planningReport.board.planning_inventory.queued_tasks.find((task) => task.id === "T004").next_transition;
+    assert.equal(hydrationTransition.operation, "apply_hydration");
+    assert.equal(hydrationTransition.task_id, "T002");
+    assert.equal(hydrationTransition.hydrate_task_id, "T004");
+    assert.equal(hydrationTransition.activate_task_id, "T004");
+    assert.equal(hydrationTransition.expected_state_digest, planningReport.board.state_digest);
+    assert.deepEqual(hydrationTransition.unresolved, ["receipt_path", "task_card_path", "task_card_sha256"]);
+    assert.match(hydrationTransition.command_template, /--receipt "<receipt-path>" /);
+    assert.match(hydrationTransition.command_template, /--hydrate-task T004 --task-card "<task-card-path>" --task-card-sha256 <sha256> --activate T004 --json$/);
 
     const direct = spawnSync(process.execPath, [bundledResume, "docs/goals/one", "--json"], {
       cwd: root,

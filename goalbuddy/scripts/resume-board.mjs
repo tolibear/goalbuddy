@@ -15,6 +15,7 @@ import {
   normalizeGoalBoard,
   parseGoalStateText,
 } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { buildApplyHydrationCommand, buildApplyReceiptCommand } from "./controller-commands.mjs";
 
 const skillRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -405,7 +406,10 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
   const stateDigest = sha256(stateText);
   const queuedTasks = rawTasks
     .filter((task) => resumeText(task?.status) === "queued")
-    .map((task) => projectQueuedTask(task, rawTasks, stateDigest));
+    .map((task) => projectQueuedTask(task, rawTasks, stateDigest, {
+      boardPath: statePath,
+      sourceTaskId: activeTask?.id || null,
+    }));
   const goal = document.goal && typeof document.goal === "object" ? document.goal : {};
   const oracle = goal.oracle && typeof goal.oracle === "object" ? goal.oracle : {};
   const intake = goal.intake && typeof goal.intake === "object" ? goal.intake : {};
@@ -453,6 +457,9 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
         proof_type: resumeText(intake.proof_type),
         completion_proof: resumeText(intake.completion_proof),
         likely_misfire: resumeText(intake.likely_misfire),
+        existing_plan_facts: Array.isArray(intake.existing_plan_facts)
+          ? structuredClone(intake.existing_plan_facts)
+          : [],
       },
       counts: {
         total: board.tasks.length,
@@ -505,6 +512,9 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
       recovery: `node ${shellArgument(join(skillRoot, "scripts", "resume-board.mjs"))} ${shellArgument(path)} --json`,
       parallel_plan: activeLanes.length > 1
         ? `goalbuddy parallel-plan ${shellArgument(path)} --expected-state-digest ${stateDigest} --expected-board-tree-digest ${checker.board_tree_digest} --json`
+        : null,
+      apply_receipt: activeTask
+        ? buildApplyReceiptCommand({ boardPath: statePath, taskId: activeTask.id, stateDigest })
         : null,
     },
   };
@@ -640,26 +650,27 @@ function projectBlockedTask(task, tasks) {
   };
 }
 
-function projectQueuedTask(task, tasks, stateDigest) {
+function projectQueuedTask(task, tasks, stateDigest, { boardPath, sourceTaskId }) {
   const dependencies = resumeList(task.depends_on);
   const statusById = new Map(tasks.map((candidate) => [resumeText(candidate.id), resumeText(candidate.status)]));
   const blockedBy = dependencies.filter((id) => statusById.get(id) !== "done");
+  const taskId = resumeText(task.id);
+  const unhydratedWorker = resumeText(task.type || "pm") === "worker"
+    && [task.allowed_files, task.verify, task.stop_if].some((field) => resumeList(field).length === 0);
+  const nextTransition = !sourceTaskId
+    ? null
+    : unhydratedWorker
+      ? buildApplyHydrationCommand({ boardPath, taskId: sourceTaskId, stateDigest, hydrateTaskId: taskId })
+      : buildApplyReceiptCommand({ boardPath, taskId: sourceTaskId, stateDigest, activateTaskId: taskId });
   return {
-    id: resumeText(task.id),
+    id: taskId,
     type: resumeText(task.type || "pm"),
     objective: boundedResumeText(task.objective, 60).text,
     depends_on: dependencies,
     dependency_ready: blockedBy.length === 0,
     blocked_by: blockedBy,
     gate: projectGate(task),
-    next_transition: {
-      operation: "apply_receipt",
-      activate: resumeText(task.id),
-      expected_state_digest: stateDigest,
-      digest_kind: "state_yaml_sha256",
-      receipt_path: null,
-      unresolved: ["receipt_path"],
-    },
+    next_transition: nextTransition,
   };
 }
 
