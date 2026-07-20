@@ -39,7 +39,6 @@ if (args.includes("--json")) {
 
 function findCurrentVersion() {
   const candidates = [
-    join(scriptDir, "..", ".goalbuddy-install.json"),
     join(scriptDir, "..", "..", "..", ".codex-plugin", "plugin.json"),
     join(scriptDir, "..", "..", "package.json"),
   ];

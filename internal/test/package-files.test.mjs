@@ -22,7 +22,7 @@ test("packed canonical and plugin skill trees stay complete and aligned", () => 
   assert.deepEqual(canonicalFiles, pluginFiles);
 });
 
-test("the packed npm artifact installs the Claude contract and role agents", () => {
+test("the packed npm artifact ships the Claude plugin contract and role agents", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-packed-install-"));
   try {
     const pack = runNpm(["pack", "--json", "--pack-destination", root]);
@@ -40,33 +40,18 @@ test("the packed npm artifact installs the Claude contract and role agents", () 
     ]);
     assert.equal(install.status, 0, install.stderr || install.stdout);
 
-    const extractedRoot = join(packageRoot, "node_modules", "goalbuddy");
-    const claudeHome = join(root, "claude-home");
-    const cli = spawnSync(process.execPath, [
-      join(extractedRoot, "internal", "cli", "goal-maker.mjs"),
-      "install",
-      "--target",
-      "claude",
-      "--claude-home",
-      claudeHome,
-      "--json",
-    ], {
-      encoding: "utf8",
-      env: { ...process.env, GOALBUDDY_SKIP_POSTINSTALL: "1" },
-    });
-    assert.equal(cli.status, 0, cli.stderr || cli.stdout);
-    const report = JSON.parse(cli.stdout);
-    assert.equal(report.skill.status, "installed");
-    assert.deepEqual(
-      report.agents.map((agent) => agent.file).sort(),
-      ["goal-judge.md", "goal-scout.md", "goal-worker.md"],
-    );
+    // Claude surfaces the skill, /goal command, and role agents from the plugin, so the packed
+    // artifact must ship a complete Claude plugin tree rather than loose personal-directory copies.
+    const pluginRoot = join(packageRoot, "node_modules", "goalbuddy", "plugins", "goalbuddy");
+    assert.equal(existsSync(join(pluginRoot, ".claude-plugin", "plugin.json")), true);
+    assert.equal(existsSync(join(pluginRoot, "commands", "goal.md")), true);
 
-    const installedContract = join(claudeHome, "skills", "goal-prep", "references", "goal-execution.md");
-    assert.equal(existsSync(installedContract), true);
-    assert.match(readFileSync(installedContract, "utf8"), /governs `\/goal` runs/);
+    const skillContract = join(pluginRoot, "skills", "goal-prep", "references", "goal-execution.md");
+    assert.equal(existsSync(skillContract), true);
+    assert.match(readFileSync(skillContract, "utf8"), /governs `\/goal` runs/);
+
     for (const file of ["goal-judge.md", "goal-scout.md", "goal-worker.md"]) {
-      assert.equal(existsSync(join(claudeHome, "agents", file)), true);
+      assert.equal(existsSync(join(pluginRoot, "agents", file)), true);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

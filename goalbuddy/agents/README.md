@@ -5,8 +5,8 @@ This directory contains skill metadata and bundled agent definitions for Codex a
 ## Files
 
 - `openai.yaml` stays with the skill as metadata.
-- `goal_scout.toml`, `goal_judge.toml`, `goal_worker.toml` — Codex agent configs. Copy into `.codex/agents/` for project-scoped agents or `~/.codex/agents/` for personal agents.
-- Claude Code agent markdown lives in `plugins/goalbuddy/agents/` (installed to `~/.claude/agents/` by `npx goalbuddy --target claude`).
+- `goal_scout.toml`, `goal_judge.toml`, `goal_worker.toml`: Codex agent configs. Copy into `.codex/agents/` for project-scoped agents or `~/.codex/agents/` for personal agents.
+- Claude Code agent markdown lives in `plugins/goalbuddy/agents/` and ships inside the native plugin, so it surfaces from the plugin cache (`~/.claude/plugins/cache/...`). `npx goalbuddy --target claude` installs the plugin (via the `claude` CLI) and never writes loose agent files under `~/.claude/agents/`.
 
 ## Agent Matrix
 

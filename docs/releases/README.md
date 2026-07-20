@@ -45,17 +45,29 @@ Starting in `0.3.0`, the installer is target-aware: `npx goalbuddy` installs int
 
 ## Release Flow
 
-1. Update `package.json` version.
-2. Run local checks:
+Version bumping is automated: an `npm version` lifecycle hook (`internal/cli/sync-manifest-version.mjs`) stamps both `plugin.json` manifests from `package.json`, so the package and both plugin manifests always move together in one commit and tag. The parity test (`internal/test/plugin-marketplace.test.mjs`) is a backstop.
+
+1. On a clean `main`, write the release notes:
+   - In `CHANGELOG.md`, rename the `## Unreleased: <title>` heading to `## <version>: <title> (<date>)`.
+   - Add `docs/releases/<version>.md` and link it at the top of this file.
+   - Commit these (for example `docs: <version> release notes`).
+2. Verify locally, then bump every manifest in one commit and tag:
 
 ```bash
 npm run check
 npm run pack:dry-run
-node internal/cli/check-publish-version.mjs
+npm version minor   # or patch / major
 ```
 
-3. Commit and push the version change.
-4. Create and publish a GitHub release whose tag matches the package version, for example `v0.4.1`. The workflow refuses to publish when the release tag and `package.json` version differ.
+`npm version` bumps `package.json`, stamps both `plugin.json` files via the hook, and creates the commit plus the `v<version>` tag. It requires a clean working tree.
+
+3. Push the commit and tag:
+
+```bash
+git push --follow-tags
+```
+
+4. Create and publish a GitHub release for the tag `v<version>`. The workflow refuses to publish when the release tag and `package.json` version differ; the hook guarantees they match. `prepublishOnly` also re-checks version monotonicity against npm.
 5. Confirm the GitHub Actions workflow `Publish npm package` completed.
 6. Verify npm:
 

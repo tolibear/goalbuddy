@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: Native Claude Code Plugin
+
+- **`npx goalbuddy` installs a native Claude Code plugin.** On Claude Code the installer now registers the marketplace and installs the managed plugin through the `claude` CLI (`claude plugin marketplace add` + `claude plugin install --scope user`), matching the Codex native-plugin model. The plugin surfaces the `$goal-prep` skill, the Scout/Judge/Worker subagents, and the `/goal` command from its own versioned cache, so a clean install no longer scatters loose files under `~/.claude/{skills,agents,commands}`; the installer removes any left from an earlier version. Claude is plugin-only: there is no loose-file fallback. When the `claude` CLI is not on PATH, the installer writes no loose files and prints how to finish install from inside Claude Code (`/plugin marketplace add` + `/plugin install`); any pre-existing loose files are left in place and reported, and clear only on a successful install or `reset`. This keeps GoalBuddy's Claude skill out of `~/.claude/skills`, where a `~/.agents/skills` symlink would otherwise surface a duplicate skill in Codex.
+- **Auto-update stays the user's choice.** The installer installs and enables the plugin but does not turn on marketplace auto-update, matching the Codex path and how Claude Code treats third-party marketplaces. Enable it yourself in `/plugin`, or update with `npx goalbuddy update`. `doctor --target claude` reports whether auto-update is on, and `reset --target claude` understands the native plugin.
+- **Releases stamp every manifest atomically.** A `version` npm lifecycle script (`sync-manifest-version.mjs`) rewrites both `plugin.json` versions from `package.json` and stages them, so `npm version <bump>` keeps the package and both plugin manifests in lockstep in one commit. The parity test becomes a backstop instead of the only guard.
+
 ## 0.4.1: Installed Contract Fixes (2026-07-18)
 
 - **npm installs include the full execution contract.** The package now ships the canonical `goalbuddy/` directory as one boundary, including `references/goal-execution.md`. A packed-artifact regression test compares the canonical and plugin skill trees and performs a clean Claude Code install from the generated tarball.

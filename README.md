@@ -95,6 +95,29 @@ npx goalbuddy reset --target codex
 
 Native `codex plugin remove goalbuddy@goalbuddy` only removes the native plugin surface. GoalBuddy also owns the `goal_*.toml` agent files it installed, its Codex plugin cache, its marketplace entry, and old personal skill folders from earlier installs. Use `goalbuddy reset --target codex` when you want those GoalBuddy-owned files removed too.
 
+## Claude Install Model
+
+For Claude Code, `npx goalbuddy` installs the native plugin through the `claude` CLI:
+
+```text
+claude plugin marketplace add tolibear/goalbuddy
+claude plugin install goalbuddy@goalbuddy --scope user
+~/.claude/plugins/cache/goalbuddy/goalbuddy/<version>/
+```
+
+The plugin surfaces the `$goal-prep` skill, the Scout/Judge/Worker subagents, and the `/goal` command from its own cache, so a clean install needs no loose files under `~/.claude/skills`, `~/.claude/agents`, or `~/.claude/commands`. The installer removes any left over from an earlier version.
+
+Auto-update is your choice. Third-party marketplaces default to auto-update off, and the installer leaves that setting alone rather than flipping it on your behalf. Turn it on for the `goalbuddy` marketplace in `/plugin` if you want Claude Code to refresh the plugin automatically at startup; otherwise update on your own terms with `npx goalbuddy update`, the reliable cross-harness updater.
+
+Claude Code is plugin-only: there is no loose-file fallback. If the `claude` CLI is not on your PATH when you run `npx goalbuddy`, the installer writes no loose files, reports an `unmanaged` result, and prints how to finish install from inside Claude Code (`/plugin marketplace add tolibear/goalbuddy` then `/plugin install goalbuddy@goalbuddy`). Install the Claude Code CLI and re-run for the managed native plugin. Writing loose files into `~/.claude/skills` would leak a duplicate skill into Codex through a `~/.agents/skills` symlink, so GoalBuddy never does. Any pre-existing loose files from an older version are left in place and reported (they clear on a successful install or `npx goalbuddy reset --target claude`), so a transient failure never wipes a working setup.
+
+To verify or reset a Claude install:
+
+```bash
+npx goalbuddy doctor --target claude
+npx goalbuddy reset --target claude
+```
+
 ## What It Creates
 
 ```text
