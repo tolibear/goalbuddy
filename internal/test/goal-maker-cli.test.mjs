@@ -637,7 +637,7 @@ test("bundled agent contracts stay strict and receipt-shaped", () => {
   assert.match(ledger, /Independently read the complete `goal\.md`, root `state\.yaml`, and every depth-one child `state\.yaml`/);
   assert.match(ledger, /goalbuddy_ledger_audit_v1/);
   assert.match(ledger, /never `congruent`/);
-  assert.match(worker, /model_reasoning_effort = "high"/);
+  assert.match(worker, /model_reasoning_effort = "medium"/);
   assert.match(worker, /default_permissions = "workspace-network"/);
   assert.match(worker, /\[permissions\.workspace-network\]/);
   assert.match(worker, /extends = ":workspace"/);
@@ -816,7 +816,7 @@ checks:
     const report = JSON.parse(result.stdout);
     assert.equal(report.metadata.recommended_agent, "goal_worker");
     assert.equal(report.metadata.required_spawn_agent_type, "goal_worker");
-    assert.equal(report.metadata.recommended_reasoning, "high");
+    assert.equal(report.metadata.recommended_reasoning, "medium");
     assert.equal(report.metadata.sandbox, "workspace-write");
     assert.equal(report.metadata.changed_files_path_style, "repository-relative");
     assert.match(report.metadata.scope_change_recovery, /stop before those writes and return a blocked receipt/);
@@ -1005,7 +1005,7 @@ test("prompt receipt schemas mirror bundled agent receipt contracts", () => {
         type: "worker",
         agent: "goal_worker",
         assignee: "Worker",
-        reasoning: "high",
+        reasoning: "medium",
         extra: [
           "    allowed_files:",
           "      - goalbuddy/scripts/**",

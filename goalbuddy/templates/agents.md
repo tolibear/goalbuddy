@@ -5,7 +5,7 @@ Use three task agents plus two control-plane agents: a low-reasoning Board Keepe
 | Agent | model_reasoning_effort | sandbox_mode | Purpose |
 |---|---:|---|---|
 | goal_scout | medium | read-only | Targeted evidence mapping and candidate facts |
-| goal_worker | high | workspace-write | One coherent bounded implementation/recovery slice |
+| goal_worker | medium | workspace-write | One coherent bounded implementation/recovery slice |
 | goal_judge | xhigh | read-only | Strategic review, escalation, completion skepticism |
 | goal_keeper | low | workspace-write | Exceptional PM-authorized board inspection, repair, rebinding, and noncanonical validation |
 | goal_ledger | medium | read-only | Recovery-only board/projection/repository reconciliation |

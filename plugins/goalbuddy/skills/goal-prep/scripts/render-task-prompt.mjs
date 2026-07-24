@@ -14,7 +14,7 @@ const WORKER_SCOPE_CHANGE_RECOVERY = "If a stop_if condition fires because work 
 const ROLE_DEFAULTS = {
   scout: { agent: "goal_scout", reasoning: "medium", sandbox: "read-only" },
   judge: { agent: "goal_judge", reasoning: "xhigh", sandbox: "read-only" },
-  worker: { agent: "goal_worker", reasoning: "high", sandbox: "workspace-write" },
+  worker: { agent: "goal_worker", reasoning: "medium", sandbox: "workspace-write" },
   pm: { agent: "PM", reasoning: "medium", sandbox: "workspace-write" },
 };
 

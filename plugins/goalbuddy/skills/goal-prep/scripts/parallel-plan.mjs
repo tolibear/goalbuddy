@@ -176,7 +176,7 @@ function reasoningHint(task, role) {
   const hint = String(task.reasoning_hint || "").toLowerCase();
   if (["low", "medium", "high", "xhigh"].includes(hint)) return hint;
   if (role === "judge") return "xhigh";
-  if (role === "worker") return "high";
+  if (role === "worker") return "medium";
   return "medium";
 }
 

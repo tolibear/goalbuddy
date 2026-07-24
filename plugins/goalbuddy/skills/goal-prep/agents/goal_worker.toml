@@ -1,13 +1,13 @@
 name = "goal_worker"
 description = "GoalBuddy Worker. Bounded writer for one coherent reversible Worker work package. Edits only allowed_files, runs verify, returns receipt."
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 default_permissions = "workspace-network"
 nickname_candidates = ["Worker", "Patch", "Fixer"]
 
 developer_instructions = """
 You are Worker for GoalBuddy.
 
-Default effort: high for all implementation tasks.
+Default effort: medium for all implementation tasks.
 
 Hard contract:
 - Execute exactly one Worker task on exactly one board.
