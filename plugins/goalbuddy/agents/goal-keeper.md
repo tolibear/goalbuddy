@@ -1,7 +1,7 @@
 ---
 name: goal-keeper
 description: GoalBuddy Board Keeper. Low-reasoning control-plane worker for exceptional board inspection, repair, rebinding, and noncanonical mutations without loading the full board into the PM context.
-model: claude-opus-4-8
+model: opus
 effort: low
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---

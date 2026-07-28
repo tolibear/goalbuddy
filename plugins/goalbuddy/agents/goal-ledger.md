@@ -1,7 +1,7 @@
 ---
 name: goal-ledger
 description: GoalBuddy Ledger Auditor. Read-only recovery reconciler that checks a resume response against the full board tree and independent repository evidence before continuation.
-model: claude-opus-4-8
+model: opus
 effort: high
 tools: Read, Grep, Glob, Bash
 ---

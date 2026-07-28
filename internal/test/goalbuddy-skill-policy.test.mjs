@@ -285,7 +285,7 @@ test("recovery ledger is a read-only reconciler rather than a task actor", () =>
   assert.doesNotMatch(canonicalLedger, /Run `goalbuddy resume/);
   assert.match(canonicalLedger, /SHA-256 before and after/);
   assert.match(canonicalLedger, /main_agent_action.*continue.*congruent/s);
-  assert.match(claudeLedger, /model: claude-opus-4-8/);
+  assert.match(claudeLedger, /model: opus/);
   assert.match(claudeLedger, /effort: high/);
   assert.match(claudeLedger, /goalbuddy_ledger_audit_v1/);
   assert.match(claudeLedger, /board_tree_digest/);
@@ -319,7 +319,7 @@ test("board keeper is a low-reasoning control-plane writer rather than a task ac
   assert.match(canonicalKeeper, /--allow-immutable-history/);
   assert.match(canonicalKeeper, /inspect \| rebind_goalbuddy \| update_control \| repair/);
   assert.doesNotMatch(canonicalKeeper, /\| add_task \|/);
-  assert.match(claudeKeeper, /model: claude-opus-4-8/);
+  assert.match(claudeKeeper, /model: opus/);
   assert.match(claudeKeeper, /effort: low/);
   assert.match(claudeKeeper, /goalbuddy_keeper_receipt_v1/);
   assert.match(claudeKeeper, /Reject `apply_receipt`, `apply_amendment`, `apply_hydration`, `enter_exact_human_wait`, `resume_exact_human_reply`, and `complete_goal` requests/);
