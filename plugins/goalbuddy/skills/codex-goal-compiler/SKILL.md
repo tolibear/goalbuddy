@@ -159,7 +159,7 @@ Workflow:
 
 1. Read `references/native-goal-compiler.md`.
 2. Choose a lowercase-hyphen slug.
-3. Check the future path:
+3. Check the future path. `<compiler-skill>` below is the absolute path to this skill's own installed directory — the folder containing this `SKILL.md` — never a path relative to the target project's working directory:
 
 ```bash
 python3 <compiler-skill>/scripts/check_new_native_goal_path.py docs/codex-goals/<slug> --json
