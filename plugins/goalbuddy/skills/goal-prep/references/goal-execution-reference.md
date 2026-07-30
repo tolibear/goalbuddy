@@ -33,9 +33,31 @@ Implements **Typed transitions and exceptional Keeper work**. Use the typed wait
 
 Use the digest-bound command emitted by the preceding transition. Never hand-edit `waiting_for_user_approval`, `required_reply`, or the successor.
 
+For whole-set deviation acceptance, compute the canonical digest for the complete ordered accepted-deviation set first. The required reply is exactly:
+
+```text
+approve GoalBuddy deviation set <sha256>
+```
+
+Later completion cites the persisted task id and reply index. Never accept entries one at a time, reuse an unrelated exact reply, or let a Judge create owner acceptance.
+
+## Held-receipt preservation
+
+Implements **Typed transitions and exceptional Keeper work**. Use only when the PM has one exact candidate artifact worth preserving but is not applying or accepting it:
+
+```bash
+node <skill-path>/scripts/goal-operation.mjs hold docs/goals/<slug> \
+  --task T004 --source <exact-path> \
+  --expected-state-digest <sha256> --json
+```
+
+Add `--origin-artifact <exact-path>` only for a separately authored PM blocked closeout whose rejected dispatch artifact is the origin. The transition safely validates both artifacts, receipt admissibility, repository-relative board identity, the admitted board digest, task authority, and any dispatch contract, then records one checked held handle without changing task status. Use the returned checked projection. A hold is recovery evidence, not terminal status; an unselected held entry may remain as checked unapplied history after a different receipt closes the task.
+
 ## Role receipt examples
 
 Implements **Exact receipts and proof**. The executable source is `scripts/receipt-contract.mjs`; the exact current task's done and blocked examples are printed by `render-task-prompt.mjs`. Do not maintain copied static JSON schemas here or in help text. Return one of those shapes with truthful values.
+
+The sole cross-role exception is the separately validated `pm_blocked_closeout` after a rejected dispatch. It is blocked-only, identifies the source task and board, preserves the rejected origin, and cannot contain Worker success claims.
 
 ## Amendment and hydration
 

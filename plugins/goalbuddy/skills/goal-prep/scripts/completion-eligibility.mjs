@@ -20,15 +20,27 @@ export function completionEligibility({
   if (Object.hasOwn(task, "receipt") && task.receipt !== null) {
     return { eligible: false, reason: "task_has_receipt", message: `complete requires task ${taskId} to be receipt-free.`, blocking_task_ids: [] };
   }
+  const unfinishedSubgoalTaskIds = tasks.filter((candidate) => (
+    candidate?.subgoal
+    && candidate.subgoal.status !== "done"
+  )).map((candidate) => candidate.id);
+  if (unfinishedSubgoalTaskIds.length > 0) {
+    return {
+      eligible: false,
+      reason: "unfinished_subgoals",
+      message: `complete requires every referenced subgoal to be done; found ${unfinishedSubgoalTaskIds.join(", ")}.`,
+      blocking_task_ids: unfinishedSubgoalTaskIds,
+    };
+  }
   const blockingTaskIds = tasks.filter((candidate) => (
     candidate?.id !== task.id
-    && ["queued", "active"].includes(candidate?.status)
+    && candidate?.status !== "done"
   )).map((candidate) => candidate.id);
   if (blockingTaskIds.length > 0) {
     return {
       eligible: false,
       reason: "unfinished_sibling_tasks",
-      message: `complete requires no other queued or active tasks; found ${blockingTaskIds.join(", ")}.`,
+      message: `complete requires every other task to be done; found ${blockingTaskIds.join(", ")}.`,
       blocking_task_ids: blockingTaskIds,
     };
   }

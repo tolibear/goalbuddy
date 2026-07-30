@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -141,8 +141,12 @@ test("dispatch runs an external worker and reports a clean scope", () => {
     assert.equal(fullReport.report_path, report.report_path);
     assert.equal(typeof fullReport.commands.resume_worker, "string");
     assert.equal(typeof fullReport.commands.recovery, "string");
-    assert.equal(Object.hasOwn(report, "dispatch_contract_sha256"), false);
+    assert.equal(typeof report.dispatch_contract_sha256, "string");
     assert.equal(typeof fullReport.dispatch_contract_sha256, "string");
+    assert.equal(report.dispatch_contract_sha256, fullReport.dispatch_contract_sha256);
+    assert.equal(report.source_binding.dispatch_contract_sha256, fullReport.dispatch_contract_sha256);
+    assert.equal(report.source_binding.task_role, "worker");
+    assert.equal(report.source_binding.session_binding.session_id, CODEX_SESSION_ID);
 
     const apply = spawnSync(process.execPath, [
       applyReceipt,
@@ -291,6 +295,55 @@ test("Git-local dispatch transport follows the linked worktree recovery identity
     spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: root, encoding: "utf8" });
     rmSync(worktree, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Git-local dispatch transport refuses a symlinked goalbuddy directory without external chmod or writes", () => {
+  const root = makeProject();
+  const external = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-external-"));
+  try {
+    const sentinel = join(external, "sentinel.txt");
+    writeFileSync(sentinel, "untouched\n");
+    chmodSync(external, 0o755);
+    symlinkSync(external, join(root, ".git", "goalbuddy"));
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.report_path, null);
+    assert.equal(report.report_transport.status, "unavailable");
+    assert.match(report.report_transport.error, /real directory|symlink/i);
+    assert.equal(statSync(external).mode & 0o777, 0o755);
+    assert.equal(readFileSync(sentinel, "utf8"), "untouched\n");
+    assert.deepEqual(readdirSync(external), ["sentinel.txt"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test("Git-local dispatch transport refuses a symlinked dispatch-reports directory without external chmod or writes", () => {
+  const root = makeProject();
+  const external = mkdtempSync(join(tmpdir(), "goalbuddy-reports-external-"));
+  try {
+    const sentinel = join(external, "sentinel.txt");
+    writeFileSync(sentinel, "untouched\n");
+    chmodSync(external, 0o751);
+    mkdirSync(join(root, ".git", "goalbuddy"), { mode: 0o700 });
+    symlinkSync(external, join(root, ".git", "goalbuddy", "dispatch-reports"));
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.report_path, null);
+    assert.equal(report.report_transport.status, "unavailable");
+    assert.match(report.report_transport.error, /real directory|symlink/i);
+    assert.equal(statSync(external).mode & 0o777, 0o751);
+    assert.equal(readFileSync(sentinel, "utf8"), "untouched\n");
+    assert.deepEqual(readdirSync(external), ["sentinel.txt"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
   }
 });
 
@@ -990,6 +1043,15 @@ test("an interrupted Codex Worker resumes only by its exact task-bound session i
     let report = JSON.parse(result.stdout);
     assert.equal(report.error_code, "HARNESS_FAILED");
     assert.equal(report.session_binding.session_id, sessionId);
+    assert.deepEqual(report.report_transport, {
+      kind: "not_applicable",
+      status: "not_applicable",
+    });
+    assert.equal(report.source_binding.task_role, "worker");
+    assert.equal(report.source_binding.session_binding.session_id, sessionId);
+    assert.equal(report.source_binding.dispatch_contract_sha256, report.dispatch_contract_sha256);
+    assert.equal(report.scope_check.status, "clean");
+    assert.deepEqual(report.scope_check.violations, []);
     const boundState = readFileSync(join(root, "docs", "goals", "one", "state.yaml"), "utf8");
     assert.match(boundState, new RegExp(sessionId));
 

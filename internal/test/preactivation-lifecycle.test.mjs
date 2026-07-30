@@ -2,8 +2,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { currentArtifactIdentity } from "../../goalbuddy/scripts/current-artifact-identity.mjs";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
 
@@ -17,6 +19,7 @@ function run(root, args, env = {}) {
 
 test("public preactivation lifecycle stays digest-bound from init through completion", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-preactivation-lifecycle-"));
+  const bin = mkdtempSync(join(tmpdir(), "goalbuddy-preactivation-bin-"));
   const marker = `${root}.harness-launched`;
   try {
     const initialized = run(root, ["init", "ship-widget", "--json"]);
@@ -79,6 +82,7 @@ checks:
     assert.equal(git(["init", "-q"]).status, 0);
     assert.equal(git(["add", "-A"]).status, 0);
     assert.equal(git(["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"]).status, 0);
+    const baseCommit = git(["rev-parse", "HEAD"]).stdout.trim();
 
     const workerReceipt = JSON.stringify({
       goalbuddy_receipt_v1: {
@@ -102,8 +106,6 @@ checks:
         harness: "codex",
       },
     });
-    const bin = join(root, "fake-bin");
-    mkdirSync(bin, { recursive: true });
     const fakeCodex = join(bin, "codex");
     writeFileSync(fakeCodex, `#!/bin/sh
 printf 'launched\\n' >> "$GOALBUDDY_MARKER"
@@ -140,8 +142,9 @@ printf '%s\\n' '${workerReceipt}'
     assert.equal(dispatchReport.ok, true);
     assert.equal(dispatchReport.scope_check.status, "clean");
     assert.equal(typeof dispatchReport.session_binding.state_digest, "string");
-    const dispatchPath = join(root, "dispatch.json");
-    writeFileSync(dispatchPath, validDispatch.stdout);
+    const dispatchPath = dispatchReport.report_path;
+    assert.equal(typeof dispatchPath, "string");
+    assert.equal(existsSync(dispatchPath), true);
 
     const boardBeforeStaleReceipt = readFileSync(statePath, "utf8");
     const staleReceipt = run(root, ["receipt", "docs/goals/ship-widget", "--task", "T001", "--receipt", dispatchPath, "--expected-state-digest", "0".repeat(64), "--activate", "T999", "--json"]);
@@ -165,6 +168,24 @@ printf '%s\\n' '${workerReceipt}'
     assert.equal(finalPrompt.status, 0, finalPrompt.stderr || finalPrompt.stdout);
     assert.equal(JSON.parse(finalPrompt.stdout).task.id, "T999");
 
+    const reviewScope = {
+      kind: "goalbuddy_review_scope_v1",
+      patterns: ["src/**"],
+    };
+    const reviewedIdentity = currentArtifactIdentity({ root, scope: reviewScope });
+    const reviewArtifact = {
+      kind: "goalbuddy_final_review_v1",
+      workflow_version: "goalbuddy-preactivation-test-review@1",
+      scope: reviewScope,
+      base_identity: { kind: "git_commit", value: baseCommit },
+      reviewed_identity: reviewedIdentity,
+      completeness_status: "complete",
+      decision: "complete",
+      unresolved_blocking_findings: [],
+    };
+    mkdirSync(join(root, "reviews"), { recursive: true });
+    const reviewBytes = `${JSON.stringify(reviewArtifact, null, 2)}\n`;
+    writeFileSync(join(root, "reviews", "final-review.json"), reviewBytes);
     const finalReceiptPath = join(root, "final-receipt.json");
     writeFileSync(finalReceiptPath, JSON.stringify({
       goalbuddy_receipt_v1: {
@@ -176,6 +197,21 @@ printf '%s\\n' '${workerReceipt}'
         rationale: "The current receipts and exact verification satisfy the goal oracle.",
         evidence: ["src/widget.mjs", "node --check src/widget.mjs"],
         summary: "The exact current widget bytes satisfy the full outcome.",
+        completion_disposition: "exact",
+        accepted_deviations: [],
+        deviation_acceptance: null,
+        final_review: {
+          status: "complete",
+          artifact: {
+            path: "reviews/final-review.json",
+            sha256: createHash("sha256").update(reviewBytes).digest("hex"),
+          },
+          workflow_version: reviewArtifact.workflow_version,
+          scope: reviewArtifact.scope,
+          base_identity: reviewArtifact.base_identity,
+          reviewed_identity: reviewArtifact.reviewed_identity,
+          completeness_status: reviewArtifact.completeness_status,
+        },
       },
     }));
     const completed = run(root, ["complete", "docs/goals/ship-widget", "--task", "T999", "--receipt", finalReceiptPath, "--expected-state-digest", secondDigest, "--json"]);
@@ -189,6 +225,7 @@ printf '%s\\n' '${workerReceipt}'
     assert.equal(finalProjection.board.active_task, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
     rmSync(marker, { force: true });
   }
 });

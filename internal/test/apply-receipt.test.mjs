@@ -1,15 +1,25 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { bindCodexWorkerSession } from "../../goalbuddy/scripts/apply-receipt.mjs";
+import {
+  canonicalJsonSha256,
+  createReceiptSourceContext,
+} from "../../goalbuddy/scripts/receipt-provenance.mjs";
 
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
+
+function git(root, args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}
 
 function makeBoard({ placeholder = false, populatedWorker = false, omitReceipts = false, sourceType = "worker" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-apply-receipt-"));
@@ -84,6 +94,8 @@ ${populatedWorker ? `  - id: T043
     receipt: null
 ` : ""}
 `);
+  const gitInit = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+  assert.equal(gitInit.status, 0, gitInit.stderr || gitInit.stdout);
   return { root, goalDir };
 }
 
@@ -101,6 +113,89 @@ const DONE_RECEIPT = {
   harness: "codex",
 };
 
+function acceptedDispatchReport(root, receipt, { status = "unavailable", reportPath = null } = {}) {
+  const statePath = join(root, "docs", "goals", "one", "state.yaml");
+  const stateDigest = createHash("sha256").update(readFileSync(statePath)).digest("hex");
+  const ready = status === "ready";
+  const sourceContext = createReceiptSourceContext({
+    cwd: root,
+    statePath,
+    taskId: "T001",
+    admittedStateDigest: stateDigest,
+  });
+  const executionProfile = {
+    model: "gpt-5.6-sol",
+    reasoning_effort: "medium",
+    service_tier: "default",
+    sandbox: "danger-full-access",
+  };
+  const dispatchContractSha256 = createHash("sha256").update(JSON.stringify({
+    version: 1,
+    renderer_version: 1,
+    task: sourceContext.task_authority,
+    role: sourceContext.task_authority.type,
+    to: "codex",
+    model: executionProfile.model,
+    reasoning_effort: executionProfile.reasoning_effort,
+    service_tier: executionProfile.service_tier,
+    sandbox: executionProfile.sandbox,
+    brief: sourceContext.expected_brief,
+  })).digest("hex");
+  const sourceBinding = {
+    task_role: sourceContext.task_authority.type,
+    harness: "codex",
+    task_authority_sha256: canonicalJsonSha256(sourceContext.task_authority),
+    scope_authority_sha256: canonicalJsonSha256(sourceContext.task_authority.allowed_files),
+    dispatch_contract_sha256: dispatchContractSha256,
+    execution_profile: executionProfile,
+    brief: sourceContext.expected_brief,
+    session_binding: sourceContext.expected_session_binding,
+  };
+  return {
+    ok: true,
+    board_path: statePath,
+    harness: "codex",
+    task_id: "T001",
+    role: "worker",
+    exit_status: 0,
+    receipt,
+    scope_check: { status: "clean", violations: [] },
+    repair: { attempted: false, succeeded: false, failure: null },
+    state_digest: stateDigest,
+    digest_kind: "state_yaml_sha256",
+    mutation: {
+      board: "unchanged",
+      product: "none_observed",
+      receipt_applied: false,
+      before_digest: stateDigest,
+      after_digest: stateDigest,
+      digest_kind: "state_yaml_sha256",
+      session_binding_preserved: null,
+    },
+    commands: {
+      apply_receipt: {
+        operation: "apply_receipt",
+        board_path: statePath,
+        task_id: "T001",
+        expected_state_digest: stateDigest,
+        digest_kind: "state_yaml_sha256",
+        receipt_path: ready ? reportPath : null,
+        activate_task_id: null,
+        unresolved: ready ? ["activate_task_id"] : ["receipt_path", "activate_task_id"],
+        command_template: "goalbuddy receipt fixture",
+      },
+    },
+    session_binding: null,
+    dispatch_contract_sha256: dispatchContractSha256,
+    source_binding: sourceBinding,
+    brief: null,
+    report_path: ready ? reportPath : null,
+    report_transport: ready
+      ? { kind: "git_local_ephemeral_v1", status: "ready", path: reportPath, authority: "transport_only" }
+      : { kind: "git_local_ephemeral_v1", status: "unavailable", error: "transport unavailable" },
+  };
+}
+
 function failureReport(result) {
   assert.notEqual(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
@@ -113,6 +208,8 @@ function failureText(result) {
 function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hydrateSha256 = null) {
   const receiptPath = join(root, "receipt.json");
   writeFileSync(receiptPath, JSON.stringify(receipt));
+  const repository = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8" });
+  if (repository.status !== 0) git(root, ["init", "-q"]);
   const taskArgs = [];
   if (taskCards !== null) {
     const taskCardsPath = join(root, "task-cards.json");
@@ -127,6 +224,14 @@ function runApply(root, args, receipt, taskCards = null, hydrateCard = null, hyd
   }
   const digest = createHash("sha256").update(readFileSync(join(root, "docs/goals/one/state.yaml"))).digest("hex");
   return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, "--expected-state-digest", digest, ...taskArgs, "--json", ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+function runApplySource(root, args, receiptPath) {
+  const digest = createHash("sha256").update(readFileSync(join(root, "docs/goals/one/state.yaml"))).digest("hex");
+  return spawnSync(process.execPath, [script, "docs/goals/one", "--receipt", receiptPath, "--expected-state-digest", digest, "--json", ...args], {
     cwd: root,
     encoding: "utf8",
   });
@@ -151,7 +256,7 @@ function runReply(root, args, reply) {
 }
 
 function runComplete(root, args, receipt) {
-  const receiptPath = join(root, "final.json");
+  const receiptPath = join(root, "docs", "goals", "one", "notes", "final.json");
   writeFileSync(receiptPath, JSON.stringify(receipt));
   return spawnSync(process.execPath, [script, "complete", "docs/goals/one", "--receipt", receiptPath, "--json", ...args], {
     cwd: root,
@@ -189,11 +294,21 @@ function waitForPath(path, timeoutMs = 3000) {
   throw new Error(`Timed out waiting for ${path}.`);
 }
 
-function makeCompletionBoard({ taskType = "judge", extraQueued = false, legacyDecision = false, legacyDialect = false, liveTailError = false } = {}) {
+function makeCompletionBoard({
+  taskType = "judge",
+  extraQueued = false,
+  includeWorker = true,
+  legacyDecision = false,
+  legacyDialect = false,
+  liveTailError = false,
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-complete-"));
   const goalDir = join(root, "docs", "goals", "one");
   mkdirSync(join(goalDir, "notes"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  mkdirSync(join(root, "reviews"), { recursive: true });
   writeFileSync(join(goalDir, "goal.md"), "# one\n");
+  writeFileSync(join(root, "src", "widget.mjs"), "export const widget = 1;\n");
   writeFileSync(join(goalDir, "state.yaml"), `version: 2
 goal:
   title: "one goal"
@@ -214,7 +329,7 @@ agents:
   judge: unknown
 active_task: T999
 tasks:
-  - id: T001
+${includeWorker ? `  - id: T001
     type: worker
     assignee: Worker
     status: done
@@ -233,7 +348,7 @@ tasks:
         - cmd: npm test
           status: pass
       summary: "Widget adjusted."
-${legacyDecision ? `  - id: T007
+` : ""}${legacyDecision ? `  - id: T007
     type: judge
     assignee: Judge
     status: done
@@ -269,12 +384,64 @@ ${extraQueued ? `  - id: T998
   dirty_fingerprint: unknown
   last_verification:
     result: pass
-    task: T001
+    task: ${includeWorker ? "T001" : "T999"}
     commands:
-      - cmd: npm test
+      - cmd: ${includeWorker ? "npm test" : "audit source evidence"}
         status: pass
 `);
+  git(root, ["init", "-q"]);
+  git(root, ["add", "."]);
+  git(root, ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "completion fixture"]);
   return { root, goalDir };
+}
+
+function exactCompletionReceipt(root, boardPath, overrides = {}) {
+  const identity = {
+    kind: "git_commit",
+    value: git(root, ["rev-parse", "HEAD"]),
+  };
+  const review = {
+    kind: "goalbuddy_final_review_v1",
+    workflow_version: "goalbuddy-test-review@1",
+    scope: {
+      kind: "goalbuddy_review_scope_v1",
+      patterns: ["src/**"],
+    },
+    base_identity: identity,
+    reviewed_identity: identity,
+    completeness_status: "complete",
+    decision: "complete",
+    unresolved_blocking_findings: [],
+  };
+  const reviewBytes = `${JSON.stringify(review, null, 2)}\n`;
+  const reviewPath = "reviews/final-review.json";
+  writeFileSync(join(root, reviewPath), reviewBytes);
+  return {
+    result: "done",
+    task_id: "T999",
+    board_path: boardPath,
+    decision: "complete",
+    full_outcome_complete: true,
+    rationale: "Current receipts and verification satisfy the original oracle.",
+    evidence: ["Current verification and transition evidence."],
+    summary: "The complete goal outcome is proven.",
+    completion_disposition: "exact",
+    accepted_deviations: [],
+    deviation_acceptance: null,
+    final_review: {
+      status: "complete",
+      artifact: {
+        path: reviewPath,
+        sha256: createHash("sha256").update(reviewBytes).digest("hex"),
+      },
+      workflow_version: review.workflow_version,
+      scope: review.scope,
+      base_identity: review.base_identity,
+      reviewed_identity: review.reviewed_identity,
+      completeness_status: review.completeness_status,
+    },
+    ...overrides,
+  };
 }
 
 function addExistingGoalbuddyBinding(statePath) {
@@ -394,6 +561,15 @@ test("apply-receipt records a done receipt and activates the next task atomicall
     assert.match(state, /summary: "widget adjusted"/);
     assert.match(state, /harness: codex/);
     assert.match(state, /status: pass/);
+    const parsed = parseGoalStateText(state, { allowFallback: false });
+    const provenance = parsed.tasks.find((task) => task.id === "T001").transition_evidence.receipt_provenance;
+    assert.equal(provenance.kind, "goalbuddy_receipt_provenance_v1");
+    assert.equal(provenance.closeout_authority, "original_role");
+    assert.equal(provenance.receipt_transport, "explicit_file");
+    assert.equal(provenance.receipt_artifact.retention_policy, "retained");
+    assert.equal(provenance.receipt_value_sha256, createHash("sha256").update(
+      '{"board_path":"docs/goals/one/state.yaml","changed_files":["src/widget.mjs"],"commands":[{"cmd":"npm test","status":"pass"},{"cmd":"npm run lint","status":"pass"},{"cmd":"git diff --check","status":"pass"}],"harness":"codex","result":"done","summary":"widget adjusted","task_id":"T001"}',
+    ).digest("hex"));
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
@@ -1087,7 +1263,7 @@ test("apply-receipt allows extra passing commands after all declared verificatio
 test("apply-receipt accepts a dispatch report and defaults status from the receipt", () => {
   const { root, goalDir } = makeBoard();
   try {
-    const dispatchReport = { ok: true, harness: "codex", receipt: DONE_RECEIPT, scope_check: { status: "clean" } };
+    const dispatchReport = acceptedDispatchReport(root, DONE_RECEIPT);
     const result = runApply(root, ["--task", "T001", "--activate", "T999"], dispatchReport);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
@@ -1100,32 +1276,83 @@ test("apply-receipt accepts a dispatch report and defaults status from the recei
   }
 });
 
-test("apply-receipt never deletes a user-authored dispatch report outside GoalBuddy's Git-local transport", () => {
+test("apply-receipt preserves retained transport-unavailable dispatch output", () => {
   const { root, goalDir } = makeBoard();
   try {
     const receiptPath = join(root, "receipt.json");
-    const dispatchReport = {
-      ok: true,
-      harness: "codex",
-      receipt: DONE_RECEIPT,
-      scope_check: { status: "clean" },
-      report_path: receiptPath,
-      report_transport: {
-        kind: "git_local_ephemeral_v1",
-        status: "ready",
-        path: receiptPath,
-        authority: "transport_only",
-      },
-    };
+    const dispatchReport = acceptedDispatchReport(root, DONE_RECEIPT);
     const result = runApply(root, ["--task", "T001", "--activate", "T999"], dispatchReport);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
-    assert.equal(report.report_transport_cleanup.removed, false);
+    assert.equal(report.report_transport_cleanup, undefined);
     assert.equal(existsSync(receiptPath), true);
+    const state = parseGoalStateText(readFileSync(join(goalDir, "state.yaml"), "utf8"), { allowFallback: false });
+    const provenance = state.tasks.find((task) => task.id === "T001").transition_evidence.receipt_provenance;
+    assert.equal(provenance.report_transport, "unavailable");
+    assert.equal(provenance.receipt_artifact.retention_policy, "retained");
     assert.match(readFileSync(join(goalDir, "state.yaml"), "utf8"), /active_task: T999/);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt removes only the rehashed Git-local report and preserves unrelated sidecars", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const reportDir = join(root, ".git", "goalbuddy", "dispatch-reports", "T001-fixture");
+    mkdirSync(reportDir, { recursive: true });
+    const reportPath = realpathSync(reportDir) + "/dispatch-report.json";
+    writeFileSync(reportPath, JSON.stringify(acceptedDispatchReport(root, DONE_RECEIPT, {
+      status: "ready",
+      reportPath,
+    })));
+    const sidecarPath = join(reportDir, "unrelated-sidecar.txt");
+    writeFileSync(sidecarPath, "preserve me\n");
+    const result = runApplySource(root, ["--task", "T001", "--activate", "T999"], reportPath);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.report_transport_cleanup.removed, true);
+    assert.equal(existsSync(reportPath), false);
+    assert.equal(existsSync(reportDir), true);
+    assert.equal(readFileSync(sidecarPath, "utf8"), "preserve me\n");
+    const state = parseGoalStateText(readFileSync(join(goalDir, "state.yaml"), "utf8"), { allowFallback: false });
+    const provenance = state.tasks.find((task) => task.id === "T001").transition_evidence.receipt_provenance;
+    assert.equal(provenance.receipt_artifact.retention_policy, "cleanup_eligible");
+    assert.equal(provenance.receipt_transport, "git_local_report");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt persists and cleans exact provenance from a linked worktree Git directory", () => {
+  const fixture = makeBoard();
+  const linked = join(dirname(fixture.root), `${basename(fixture.root)}-linked`);
+  try {
+    git(fixture.root, ["add", "-A"]);
+    git(fixture.root, ["-c", "user.name=GoalBuddy Test", "-c", "user.email=goalbuddy@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"]);
+    git(fixture.root, ["worktree", "add", "-q", "-b", "linked-provenance", linked]);
+    const rawGitDir = git(linked, ["rev-parse", "--git-dir"]);
+    const activeGitDir = realpathSync(resolve(linked, rawGitDir));
+    const reportDir = join(activeGitDir, "goalbuddy", "dispatch-reports", "T001-fixture");
+    mkdirSync(reportDir, { recursive: true });
+    const reportPath = join(reportDir, "dispatch-report.json");
+    writeFileSync(reportPath, JSON.stringify(acceptedDispatchReport(linked, DONE_RECEIPT, {
+      status: "ready",
+      reportPath,
+    })));
+
+    const result = runApplySource(linked, ["--task", "T001", "--activate", "T999"], reportPath);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).report_transport_cleanup.removed, true);
+    assert.equal(existsSync(reportDir), false);
+    const state = parseGoalStateText(readFileSync(join(linked, "docs", "goals", "one", "state.yaml"), "utf8"), { allowFallback: false });
+    const provenance = state.tasks.find((task) => task.id === "T001").transition_evidence.receipt_provenance;
+    assert.equal(provenance.receipt_artifact.root, "git_common_dir");
+    assert.match(provenance.receipt_artifact.path, /^worktrees\/[^/]+\/goalbuddy\/dispatch-reports\/T001-fixture\/dispatch-report\.json$/);
+  } finally {
+    if (existsSync(linked)) git(fixture.root, ["worktree", "remove", "--force", linked]);
+    rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 
@@ -1300,16 +1527,7 @@ test("complete closes the active audit and goal atomically while preserving tran
     const boardPath = join(goalDir, "state.yaml");
     const before = readFileSync(boardPath, "utf8");
     const beforeDigest = createHash("sha256").update(before).digest("hex");
-    const receipt = {
-      result: "done",
-      task_id: "T999",
-      board_path: boardPath,
-      decision: "complete",
-      full_outcome_complete: true,
-      rationale: "Current receipts and verification satisfy the original oracle.",
-      evidence: ["Current verification and transition evidence."],
-      summary: "The complete goal outcome is proven.",
-    };
+    const receipt = exactCompletionReceipt(root, boardPath);
     const result = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
@@ -1323,13 +1541,60 @@ test("complete closes the active audit and goal atomically while preserving tran
     assert.equal(board.active_task, null);
     assert.equal(task.status, "done");
     assert.deepEqual(task.receipt, receipt);
-    assert.deepEqual(task.transition_evidence, { marker: "kept" });
+    assert.equal(task.transition_evidence.marker, "kept");
+    assert.equal(task.transition_evidence.receipt_provenance.kind, "goalbuddy_receipt_provenance_v1");
+    assert.equal(task.transition_evidence.receipt_provenance.receipt_value_sha256, canonicalJsonSha256(receipt));
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(check.status, 0, check.stdout);
+
+    const reviewPath = join(root, receipt.final_review.artifact.path);
+    const reviewBytes = readFileSync(reviewPath);
+    rmSync(reviewPath);
+    const missingReview = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(missingReview.status, 1, missingReview.stdout);
+    assert.match(JSON.parse(missingReview.stdout).errors.join("\n"), /Artifact does not exist/);
+    writeFileSync(reviewPath, reviewBytes);
+
+    const widgetPath = join(root, "src", "widget.mjs");
+    const widgetBytes = readFileSync(widgetPath);
+    writeFileSync(widgetPath, "export const widget = 2;\n");
+    const staleReview = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(staleReview.status, 1, staleReview.stdout);
+    assert.match(JSON.parse(staleReview.stdout).errors.join("\n"), /reviewed_identity|current scoped product identity/);
+    writeFileSync(widgetPath, widgetBytes);
 
     const replay = runComplete(root, ["--task", "T999", "--expected-state-digest", report.after_digest], receipt);
     assert.equal(replay.status, 1, replay.stdout);
     assert.equal(readFileSync(boardPath, "utf8"), finalText);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("complete closes a read-only goal whose Worker coverage oracle is empty", () => {
+  const { root, goalDir } = makeCompletionBoard({ includeWorker: false });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const receipt = exactCompletionReceipt(root, boardPath, {
+      rationale: "The read-only audit directly proves the requested outcome.",
+      summary: "The read-only goal is complete without invented Worker changes.",
+    });
+
+    const result = runComplete(
+      root,
+      ["--task", "T999", "--expected-state-digest", beforeDigest],
+      receipt,
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const board = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    assert.equal(board.goal.status, "done");
+    assert.equal(board.tasks.length, 1);
+    assert.equal(board.tasks[0].type, "judge");
+    const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stdout);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1347,16 +1612,9 @@ test("completion preserves byte-identical done history while admitting only its 
     const baselineErrors = JSON.parse(baselineCheck.stdout).errors;
     assert.equal(baselineErrors.length, 1);
 
-    const receipt = {
-      result: "done",
-      task_id: "T999",
-      board_path: boardPath,
-      decision: "complete",
-      full_outcome_complete: true,
-      rationale: "Current receipts and verification satisfy the original oracle.",
-      evidence: ["Current verification and transition evidence."],
+    const receipt = exactCompletionReceipt(root, boardPath, {
       summary: "The live outcome is complete without rewriting old history.",
-    };
+    });
     const implicit = runComplete(root, ["--task", "T999", "--expected-state-digest", beforeDigest], receipt);
     assert.equal(implicit.status, 1);
     assert.match(JSON.parse(implicit.stdout).error, /explicit --allow-immutable-history/);
@@ -1386,16 +1644,14 @@ test("immutable-history compatibility rejects checker errors that touch the live
     const boardPath = join(goalDir, "state.yaml");
     const before = readFileSync(boardPath, "utf8");
     const digest = createHash("sha256").update(before).digest("hex");
-    const result = runComplete(root, ["--task", "T999", "--expected-state-digest", digest, "--allow-immutable-history"], {
-      result: "done",
-      task_id: "T999",
-      board_path: boardPath,
-      decision: "complete",
-      full_outcome_complete: true,
-      rationale: "The live task would be invalid even with complete audit proof.",
-      evidence: ["Current verification and transition evidence."],
-      summary: "This must be rejected because the live task is invalid.",
-    });
+    const result = runComplete(
+      root,
+      ["--task", "T999", "--expected-state-digest", digest, "--allow-immutable-history"],
+      exactCompletionReceipt(root, boardPath, {
+        rationale: "The live task would be invalid even with complete audit proof.",
+        summary: "This must be rejected because the live task is invalid.",
+      }),
+    );
     assert.equal(result.status, 1, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.match(report.error, /live or missing task T999/);
@@ -1525,22 +1781,15 @@ test("concurrent same-digest completion writers serialize and cannot overwrite e
     const boardPath = join(goalDir, "state.yaml");
     const before = readFileSync(boardPath, "utf8");
     const beforeDigest = createHash("sha256").update(before).digest("hex");
-    const firstReceipt = {
-      result: "done",
-      task_id: "T999",
-      board_path: boardPath,
-      decision: "complete",
-      full_outcome_complete: true,
-      rationale: "Current receipts and verification satisfy the original oracle.",
-      evidence: ["Current verification and transition evidence."],
+    const firstReceipt = exactCompletionReceipt(root, boardPath, {
       summary: "The first serialized writer completed the goal.",
-    };
+    });
     const secondReceipt = {
       ...firstReceipt,
       summary: "The competing writer must never overwrite the first.",
     };
-    const firstReceiptPath = join(root, "first-final.json");
-    const secondReceiptPath = join(root, "second-final.json");
+    const firstReceiptPath = join(goalDir, "notes", "first-final.json");
+    const secondReceiptPath = join(goalDir, "notes", "second-final.json");
     writeFileSync(firstReceiptPath, JSON.stringify(firstReceipt));
     writeFileSync(secondReceiptPath, JSON.stringify(secondReceipt));
     const transitionArgs = ["complete", "docs/goals/one", "--task", "T999", "--expected-state-digest", beforeDigest, "--json"];
@@ -1591,15 +1840,7 @@ test("complete rejects unsafe or incomplete finalization without writing", () =>
       const boardPath = join(goalDir, "state.yaml");
       const before = readFileSync(boardPath, "utf8");
       const digest = createHash("sha256").update(before).digest("hex");
-      const receipt = {
-        result: "done",
-        task_id: "T999",
-        board_path: boardPath,
-        decision: "complete",
-        full_outcome_complete: true,
-        summary: "The complete goal outcome is proven.",
-        ...testCase.receipt,
-      };
+      const receipt = exactCompletionReceipt(root, boardPath, testCase.receipt);
       if (testCase.name === "missing identity") {
         delete receipt.task_id;
         delete receipt.board_path;

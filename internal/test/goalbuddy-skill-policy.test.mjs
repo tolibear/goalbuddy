@@ -379,6 +379,30 @@ test("receipt spec stays consistent with the shipped contracts", () => {
   }
 });
 
+test("Milestone 2 policy owners require durable provenance and exact terminal proof", () => {
+  for (const text of [receiptSpec, canonicalExecution]) {
+    assert.match(text, /receipt_provenance/);
+    assert.match(text, /goalbuddy_receipt_provenance_v1/);
+    assert.match(text, /held_receipts/);
+    assert.match(text, /goalbuddy_held_receipt_v1/);
+    assert.match(text, /pm_blocked_closeout/);
+    assert.match(text, /approve GoalBuddy deviation set <sha256>/);
+    assert.match(text, /exact-final-review/);
+    assert.match(text, /whole-set owner acceptance|complete ordered deviation set/i);
+    assert.match(text, /current scoped (?:repository )?bytes|exact-current/i);
+    assert.doesNotMatch(text, /final_review(?:\.status)?:? not_required/);
+  }
+  assert.match(canonicalExecutionReference, /## Held-receipt preservation/);
+  assert.match(canonicalExecutionReference, /does not apply or semantically accept|not terminal status/);
+  assert.match(canonicalSkill, /typed hold transition/);
+  assert.match(canonicalGoalTemplate, /supplies all terminal proof fields/);
+  const stateTemplate = readFileSync("goalbuddy/templates/state.yaml", "utf8");
+  assert.match(stateTemplate, /completion_disposition: exact \| accepted_deviation/);
+  assert.match(stateTemplate, /complete ordered set/);
+  assert.doesNotMatch(stateTemplate, /^\s+transition_evidence:/m);
+  assert.doesNotMatch(stateTemplate, /^\s+receipt_provenance:/m);
+});
+
 test("adaptive execution strategy governs quality routing in contract and charter", () => {
   const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
   const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");

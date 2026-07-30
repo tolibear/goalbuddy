@@ -162,6 +162,22 @@ receipt:
 
 Judge, Scout, and PM blocked receipts likewise include `result: blocked`, identity, and a nonempty `blocked_reason`; the rendered prompt supplies each role's exact additional evidence fields. A completed PM receipt includes a nonempty `summary` and optional evidence. GoalBuddy validates these role/result distinctions at both dispatch extraction and receipt application using the same module; it never normalizes one role's output into another shape.
 
+One cross-role closeout is intentionally separate from those role receipts. After a rejected dispatch, the PM may author only this exact blocked closeout for the active source task:
+
+```yaml
+receipt:
+  result: blocked
+  task_id: T001
+  board_path: docs/goals/example/state.yaml
+  authored_by: pm
+  summary: "<what was attempted and preserved>"
+  blocked_reason: "<why the rejected source cannot close normally>"
+  remaining_blockers: ["<what remains required>"]
+  evidence: ["<reference to the preserved rejected artifact>"]
+```
+
+The `pm_blocked_closeout` validator requires all eight displayed keys, nonempty blocker and evidence arrays, and `authored_by: pm`. It cannot claim passing commands, successful Worker scope, Worker authorship, or `result: done`. The rejected artifact remains the closeout's origin evidence; GoalBuddy does not convert its contents into a Worker receipt.
+
 ## Optional fields
 
 Any receipt may additionally include:
@@ -197,7 +213,64 @@ transition_evidence:
 
 This evidence records only a deterministic workflow transition. It is not authenticated-human evidence and conveys no product authorization. Historical tasks without `transition_evidence` remain valid and require no migration.
 
-Final goal completion uses `goalbuddy complete` with a mandatory expected digest and an identity-bound Judge or PM receipt containing `result: done`, `decision: complete`, and `full_outcome_complete: true`. It atomically records the final receipt, sets `goal.status: done`, and clears `active_task` while preserving task-level transition evidence. Every official state mutation is serialized by one stable per-board lock held across the fresh read, digest check, candidate validation, rename, and directory fsync. A competing same-digest writer fails closed and must recover from a fresh resume projection; it cannot overwrite the accepted receipt. Invalid, stale, wrong-task, non-audit, incomplete, duplicate, and replayed completion requests cannot mutate the board.
+## Adjacent transition evidence
+
+Prospective receipt transitions preserve how the exact receipt reached board authority in `task.transition_evidence.receipt_provenance`; this evidence is adjacent to the receipt and is never accepted from an agent-authored receipt:
+
+```yaml
+receipt_provenance:
+  kind: goalbuddy_receipt_provenance_v1
+  receipt_transport: git_local_report # git_local_report | explicit_file
+  report_transport: ready # ready | unavailable | not_applicable
+  dispatch_disposition: accepted # accepted | rejected | not_applicable
+  closeout_authority: original_role # original_role | pm_blocked_closeout
+  application_state: applied
+  receipt_artifact:
+    root: git_common_dir # git_common_dir | repository
+    path: goalbuddy/dispatch-reports/<report>/dispatch-report.json
+    sha256: <64 lowercase hex>
+    retention_policy: cleanup_eligible # cleanup_eligible | retained
+  origin_artifact: null
+  receipt_value_sha256: <canonical-JSON SHA-256 of the exact receipt value>
+```
+
+The transport, dispatch disposition, and closeout authority are orthogonal closed fields. Artifact paths are safely opened non-symlink regular files beneath their declared repository or Git-common-dir root. The receipt value digest uses canonical JSON with recursively sorted object keys and preserved array order. Eligible Git-local transport may be cleaned only after the applied provenance is atomically durable. Cleanup unlinks only the authenticated `dispatch-report.json` and removes its directory only when empty; unrelated sidecars are preserved. Retained explicit, unavailable, rejected, or PM-closeout evidence is not removed.
+
+The PM may preserve an exact unapplied candidate with the digest-bound `goalbuddy hold` transition. A held entry lives in `task.transition_evidence.held_receipts` and has the closed `goalbuddy_held_receipt_v1` shape: task and repository-relative board identity; the admitted state digest; task-authority and nullable dispatch-contract digests; `application_state: held`; the same orthogonal transport and dispatch fields; safely bound `source_artifact` and optional `origin_artifact`; the canonical receipt-value digest; and a `handle` equal to the canonical-JSON SHA-256 of every other held field. Holding does not apply or semantically accept the receipt and does not change task status. Duplicate, stale-task, changed-authority, changed-artifact, malformed, and digest-stale holds fail without mutation. An unselected entry may remain as checked, unapplied history after its task closes; only the later exact-handle transition consumes a selected entry. Historical receipts without prospective terminal fields, provenance, or held evidence remain valid and are not rewritten.
+
+## Final completion proof
+
+Final goal completion uses `goalbuddy complete` with a mandatory expected digest and an identity-bound final Judge or PM receipt containing `result: done`, `decision: complete`, and `full_outcome_complete: true`. Prospective final receipts must also supply all four terminal proof fields together:
+
+```yaml
+completion_disposition: exact # exact | accepted_deviation
+accepted_deviations: []
+deviation_acceptance: null
+final_review:
+  status: complete
+  artifact: {path: "<repository-relative JSON>", sha256: "<exact file SHA-256>"}
+  workflow_version: "<nonempty workflow identity>"
+  scope:
+    kind: goalbuddy_review_scope_v1
+    patterns: ["<closed exact path or bounded terminal /** tree>"]
+  base_identity: {kind: git_commit, value: "<review base identity>"}
+  reviewed_identity: {kind: git_commit, value: "<exact reviewed identity>"}
+  completeness_status: complete
+```
+
+`completion_disposition: exact` requires an empty deviation set, null acceptance, and the `complete` final-review branch. The safely opened `goalbuddy_final_review_v1` artifact repeats the workflow version, scope, identities, completeness status, `decision: complete`, and an empty `unresolved_blocking_findings` array. Receipt and artifact fields must deep-equal, the artifact byte digest must match, and the closed review scope must cover the exact union of changed product paths from every completed Worker receipt on the checked root and child boards. That Worker-history union is the coverage oracle; receipt and review artifact locations cannot subtract from it, and receipt-supplied `base_identity` cannot add, remove, or hide required paths. For a genuinely read-only goal with no completed Worker product paths, the union is empty and the coverage condition is vacuously satisfied; the declared review itself must still be complete and exact-current. GoalBuddy control bytes under `docs/goals/` are excluded from scoped product identities even when a bounded scope such as `docs/**` contains that subtree, so an atomic board transition cannot stale its own product review. Immediately before completion, GoalBuddy recomputes the exact current scoped identity. The checker repeats the artifact, coverage, owner-acceptance, and current-identity validation on every prospective completed board, so later deletion or product drift makes the board checker-red. A stale product identity, incomplete coverage, incomplete review, unresolved blocker, unfinished sibling, or non-done child fails closed.
+
+An owner may instead accept one complete ordered deviation set. Each entry contains a unique `requirement_id`, requirement, observed shortfall, reason, and nonempty evidence. The set digest is the canonical-JSON SHA-256 of the entire ordered array, so adding, removing, editing, or reordering any entry invalidates acceptance. The PM first enters the existing exact-human wait with exactly:
+
+```text
+approve GoalBuddy deviation set <sha256>
+```
+
+`deviation_acceptance` must locate that persisted exact reply by task id and reply index and repeat the same set digest. This is whole-set owner acceptance, not per-entry approval and not a Judge-created assertion. If the accepted set does not include `exact-final-review`, the complete exact-current final-review branch is still required. Only when exactly one accepted deviation has `requirement_id: exact-final-review` may `final_review.status` be `accepted_deviation`; that closed branch binds the same set digest and may retain only an optional safely hashed `observed_artifact` with a runtime-derived failure class. It records an owner-approved missing requirement and never represents the review as current or complete. There is no `not_required` branch.
+
+The completion transition atomically records the final receipt and its adjacent provenance, sets `goal.status: done`, and clears `active_task` while preserving task-level transition evidence. Every official state mutation is serialized by one stable per-board lock held across the fresh read, digest check, candidate validation, rename, and directory fsync. A competing same-digest writer fails closed and must recover from a fresh resume projection; it cannot overwrite the accepted receipt. Invalid, stale, wrong-task, non-audit, incomplete, duplicate, and replayed completion requests cannot mutate the board.
+
+These hashes prove internal consistency and drift under GoalBuddy's PM-owned local-state trust boundary; they are not cryptographic authorship attestations against another process running as the same operating-system user. Stronger authorship would require an external signing or protected authority and is outside this format.
 
 For a reviewed version 2 board whose only checker errors are frozen completed-task history, the PM may explicitly add `--allow-immutable-history`. Admission requires an identical pre/post checker-error multiset, exactly one already-done task ID per error, and byte-identical raw YAML for every referenced task. Global, live-tail, new, changed, ambiguous, or malformed errors fail closed. A successful report uses `checker_status: immutable_history_compatible` and carries only a compact error digest/count and preserved task IDs; it does not rewrite receipts or claim that the raw checker passed.
 

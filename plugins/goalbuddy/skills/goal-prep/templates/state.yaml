@@ -139,14 +139,20 @@ tasks:
       - "All done task receipts"
       - "Last verification"
       - "Current dirty diff"
+      - "Exact current product paths changed by completed Worker tasks"
+      - "Final review artifact and reviewed identity"
     constraints:
       - "Do not implement."
-      - "Reject completion if required Worker work is still queued or active."
+      - "Reject completion unless every sibling task and referenced child board is done."
       - "Reject completion if the broader original outcome still has safe local follow-up slices."
       - "Reject stopping only because a slice needs owner input, credentials, production access, destructive operations, or policy decisions."
     expected_output:
       - "complete | not_complete"
       - "full_outcome_complete: true | false"
+      - "completion_disposition: exact | accepted_deviation"
+      - "accepted_deviations: complete ordered set (empty for exact completion)"
+      - "deviation_acceptance: persisted whole-set owner reply locator or null"
+      - "final_review: exact-current complete review or accepted exact-final-review deviation"
       - "missing evidence"
       - "next task if not complete"
     receipt: null

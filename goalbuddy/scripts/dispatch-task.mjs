@@ -2,7 +2,19 @@
 // Dispatch one board task to an external harness CLI and verify the result.
 // Dispatch one task, bind an external Codex Worker session when applicable, and return the verified receipt/scope report.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compareDispatchAuthority, compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
@@ -14,6 +26,7 @@ import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { validateTaskReceipt } from "./receipt-contract.mjs";
 import { equalBriefBindings, verifyBrief } from "./brief-binding.mjs";
+import { completionEligibility } from "./completion-eligibility.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -140,6 +153,13 @@ export async function dispatchTask(options) {
     });
   }
   const { board, task, role, payload } = admitted;
+  const terminalCompletionEligible = board.projection?.mode !== "immutable_history_active_task"
+    && completionEligibility({
+      goalStatus: board.goal?.status,
+      activeTaskId: board.activeTask,
+      task,
+      tasks: board.tasks,
+    }).eligible;
   const existingBinding = task.transition_evidence?.codex_worker_session || null;
   const to = options.to || cleanScalar(admitted.harness) || "";
   if (!HARNESSES.has(to)) {
@@ -240,6 +260,7 @@ export async function dispatchTask(options) {
     taskId: task.id,
     verify: payload.task.verify,
     boundary: "dispatch receipt",
+    terminalCompletionEligible,
   }) : [];
   let authority;
   try {
@@ -270,12 +291,28 @@ export async function dispatchTask(options) {
   }
 
   const identityError = receipt ? receiptIdentityError(receipt, { taskId: task.id, boardPath: board.path, root }) : null;
+  const currentStateDigest = bindingReport?.after_digest || board.stateDigest;
   const dispatchEvidence = {
+    board_path: board.path,
+    state_digest: currentStateDigest,
+    digest_kind: "state_yaml_sha256",
     session_binding: bindingReport ? { session_id: bindingReport.session_id, state_digest: bindingReport.after_digest } : existingBinding ? { session_id: existingBinding.session_id, state_digest: board.stateDigest } : null,
     dispatch_contract_sha256: dispatchContractSha256,
     brief: boundInput,
+    source_binding: dispatchSourceBinding({
+      task: dispatchPayload.task,
+      role,
+      to,
+      executionProfile,
+      brief: boundInput,
+      dispatchContractSha256,
+      sessionBinding: bindingReport
+        ? { session_id: bindingReport.session_id, state_digest: currentStateDigest }
+        : existingBinding
+          ? { session_id: existingBinding.session_id, state_digest: currentStateDigest }
+          : null,
+    }),
   };
-  const currentStateDigest = bindingReport?.after_digest || board.stateDigest;
   const postRunMutation = dispatchMutation({
     board: bindingReport ? "changed" : "unchanged",
     product: authority.observation_unknown ? "unknown" : (authority.changed_files.length > 0 ? "observed" : "none_observed"),
@@ -387,6 +424,7 @@ export async function dispatchTask(options) {
       taskId: task.id,
       verify: payload.task.verify,
       boundary: "repaired dispatch receipt",
+      terminalCompletionEligible,
     }) : [];
     if (!correctedReceipt || correctedIdentityError || correctedFindings.length > 0) {
       const message = correctedIdentityError || `${correctedFindings[0].path}: ${correctedFindings[0].message}`;
@@ -526,17 +564,26 @@ function dispatchCommands({ boardPath, taskId, stateDigest, sessionId }) {
 function materializeDispatchReport(report, options) {
   const anchor = resolve(options.boardPath || options.goalRoot);
   const root = repositoryRoot(options.boardPath ? dirname(anchor) : anchor);
-  const git = spawnSync("git", ["rev-parse", "--git-dir"], { cwd: root, encoding: "utf8" });
+  const git = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd: root, encoding: "utf8" });
   if (git.status !== 0 || !git.stdout.trim()) {
     throw new Error(`Could not resolve Git-local dispatch transport: ${(git.stderr || "").trim() || "git rev-parse failed"}`);
   }
   const rawGitDir = git.stdout.trim();
+  if (rawGitDir.includes("\0") || rawGitDir.includes("\n") || rawGitDir.includes("\r")) {
+    throw new Error("Could not resolve Git-local dispatch transport: Git returned an invalid directory path.");
+  }
   const gitDir = realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(root, rawGitDir));
-  const reportsRoot = join(gitDir, "goalbuddy", "dispatch-reports");
-  mkdirSync(reportsRoot, { recursive: true, mode: 0o700 });
-  chmodSync(reportsRoot, 0o700);
-  const reportDir = mkdtempSync(join(reportsRoot, `${report.task_id}-`));
-  chmodSync(reportDir, 0o700);
+  const gitDirIdentity = verifiedDirectoryIdentity(gitDir, "Git directory");
+  const goalbuddyRoot = createVerifiedChildDirectory(gitDir, gitDirIdentity, "goalbuddy");
+  const reportsRoot = createVerifiedChildDirectory(goalbuddyRoot.path, goalbuddyRoot.identity, "dispatch-reports");
+  assertDirectoryIdentity(gitDir, gitDirIdentity, "Git directory");
+  assertDirectoryIdentity(goalbuddyRoot.path, goalbuddyRoot.identity, "GoalBuddy transport directory");
+  const reportDir = mkdtempSync(join(reportsRoot.path, `${report.task_id}-`));
+  assertDirectoryIdentity(reportsRoot.path, reportsRoot.identity, "dispatch report parent");
+  const reportDirIdentity = verifiedDirectoryIdentity(reportDir, "dispatch report directory", { mode: 0o700 });
+  if (dirname(reportDir) !== reportsRoot.path || realpathSync(reportDir) !== reportDir) {
+    throw new Error("Refusing Git-local dispatch transport outside the verified report parent.");
+  }
   const reportPath = join(reportDir, "dispatch-report.json");
   const applyReceipt = buildApplyReceiptCommand({
     boardPath: report.commands.apply_receipt.board_path,
@@ -558,9 +605,84 @@ function materializeDispatchReport(report, options) {
       apply_receipt: applyReceipt,
     },
   };
-  writeFileSync(reportPath, `${JSON.stringify(materialized, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-  chmodSync(reportPath, 0o600);
+  assertDirectoryIdentity(reportDir, reportDirIdentity, "dispatch report directory");
+  writeVerifiedExclusiveFile(reportPath, `${JSON.stringify(materialized, null, 2)}\n`, reportDirIdentity);
   return materialized;
+}
+
+function createVerifiedChildDirectory(parentPath, parentIdentity, name) {
+  if (!/^[a-z0-9-]+$/.test(name)) {
+    throw new Error(`Refusing unsafe Git-local transport component: ${name}`);
+  }
+  assertDirectoryIdentity(parentPath, parentIdentity, "dispatch transport parent");
+  const childPath = join(parentPath, name);
+  try {
+    mkdirSync(childPath, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  assertDirectoryIdentity(parentPath, parentIdentity, "dispatch transport parent");
+  const identity = verifiedDirectoryIdentity(childPath, `${name} transport directory`, { mode: 0o700 });
+  if (dirname(childPath) !== parentPath || realpathSync(childPath) !== childPath) {
+    throw new Error(`Refusing symlinked or escaped Git-local transport directory: ${childPath}`);
+  }
+  return { path: childPath, identity };
+}
+
+function verifiedDirectoryIdentity(path, label, { mode = null } = {}) {
+  const before = lstatSync(path);
+  if (before.isSymbolicLink() || !before.isDirectory()) {
+    throw new Error(`${label} must be a real directory, not a symlink.`);
+  }
+  const noFollow = constants.O_NOFOLLOW || 0;
+  const directoryOnly = constants.O_DIRECTORY || 0;
+  const descriptor = openSync(path, constants.O_RDONLY | noFollow | directoryOnly);
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isDirectory() || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error(`${label} changed while it was being verified.`);
+    }
+    if (mode !== null) fchmodSync(descriptor, mode);
+    const secured = fstatSync(descriptor);
+    return { dev: secured.dev, ino: secured.ino };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function assertDirectoryIdentity(path, expected, label) {
+  const current = lstatSync(path);
+  if (current.isSymbolicLink() || !current.isDirectory() || current.dev !== expected.dev || current.ino !== expected.ino) {
+    throw new Error(`${label} changed during Git-local dispatch report materialization.`);
+  }
+}
+
+function writeVerifiedExclusiveFile(reportPath, contents, reportDirIdentity) {
+  const reportDir = dirname(reportPath);
+  assertDirectoryIdentity(reportDir, reportDirIdentity, "dispatch report directory");
+  const noFollow = constants.O_NOFOLLOW || 0;
+  const descriptor = openSync(
+    reportPath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
+    0o600,
+  );
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile()) throw new Error("Dispatch report destination is not a regular file.");
+    writeFileSync(descriptor, contents, { encoding: "utf8" });
+    fchmodSync(descriptor, 0o600);
+    const secured = fstatSync(descriptor);
+    if ((secured.mode & 0o777) !== 0o600) {
+      throw new Error("Dispatch report permissions could not be restricted to the current user.");
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  assertDirectoryIdentity(reportDir, reportDirIdentity, "dispatch report directory");
+  const materialized = lstatSync(reportPath);
+  if (materialized.isSymbolicLink() || !materialized.isFile() || realpathSync(reportPath) !== reportPath) {
+    throw new Error("Dispatch report path changed after exclusive materialization.");
+  }
 }
 
 function compactDispatchOutcome(report) {
@@ -586,6 +708,8 @@ function compactDispatchOutcome(report) {
     mutation: report.mutation,
     session_binding: report.session_binding,
     brief: report.brief,
+    dispatch_contract_sha256: report.dispatch_contract_sha256,
+    source_binding: report.source_binding,
     report_path: report.report_path,
     report_transport: report.report_transport,
     next_action: "Review the product diff, then supply only activate_task_id to commands.apply_receipt.",
@@ -596,7 +720,51 @@ function compactDispatchOutcome(report) {
 }
 
 function failure(code, message, extra = {}) {
-  return { ...publicFailure(publicError(code, message)), receipt: null, scope_check: { status: "skipped" }, ...extra };
+  return {
+    ...publicFailure(publicError(code, message)),
+    receipt: null,
+    scope_check: { status: "skipped" },
+    report_transport: { kind: "not_applicable", status: "not_applicable" },
+    ...extra,
+  };
+}
+
+function dispatchSourceBinding({
+  task,
+  role,
+  to,
+  executionProfile,
+  brief,
+  dispatchContractSha256,
+  sessionBinding,
+}) {
+  return {
+    task_role: role,
+    harness: to,
+    task_authority_sha256: canonicalJsonSha256(task),
+    scope_authority_sha256: canonicalJsonSha256(task.allowed_files),
+    dispatch_contract_sha256: dispatchContractSha256,
+    execution_profile: {
+      model: executionProfile.model,
+      reasoning_effort: executionProfile.reasoningEffort,
+      service_tier: executionProfile.serviceTier,
+      sandbox: executionProfile.sandbox,
+    },
+    brief,
+    session_binding: sessionBinding,
+  };
+}
+
+function canonicalJsonSha256(value) {
+  return sha256(canonicalJson(value));
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+  )).join(",")}}`;
 }
 
 function scopeFailureMessage(scope, prefix) {

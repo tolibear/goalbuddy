@@ -28,9 +28,35 @@ test("prompt strictly renders the active task across an exact malformed historic
     assert.equal(report.task.status, "active");
     assert.equal(report.task.objective, "Audit the corrected boundary.");
     assert.deepEqual(report.task.constraints, ["Read only."]);
+    assert.equal(report.metadata.terminal_completion_eligible, false);
+    assert.equal(Object.hasOwn(report.receipt_schemas.done, "completion_disposition"), false);
     assert.equal(result.stdout.includes("Historical detail that must not enter the prompt."), false);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("immutable-history prompt includes terminal proof fields only when the full board is mechanically final", () => {
+  for (const activeType of ["judge", "pm"]) {
+    const state = legacyBoard({ queuedSibling: false, activeType });
+    const fixture = createGoal(state);
+    try {
+      const result = runPrompt(fixture.goalDir, compatibilityArgs(state));
+      assert.equal(result.status, 0, `${activeType}: ${result.stderr || result.stdout}`);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.metadata.projection_mode, "immutable_history_active_task");
+      assert.equal(report.metadata.terminal_completion_eligible, true);
+      assert.equal(report.receipt_schemas.done.decision, "complete");
+      assert.equal(report.receipt_schemas.done.full_outcome_complete, true);
+      assert.equal(report.receipt_schemas.done.completion_disposition, "exact");
+      assert.deepEqual(report.receipt_schemas.done.accepted_deviations, []);
+      assert.equal(report.receipt_schemas.done.deviation_acceptance, null);
+      assert.equal(report.receipt_schemas.done.final_review.status, "complete");
+      assert.equal(Object.hasOwn(report.receipt_schemas.blocked, "completion_disposition"), false);
+      assert.equal(readFileSync(fixture.statePath, "utf8"), state);
+    } finally {
+      fixture.cleanup();
+    }
   }
 });
 
@@ -163,7 +189,14 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function legacyBoard({ activeExtra = "", secondActive = false, omitActiveReceipt = false, activeNotes = false } = {}) {
+function legacyBoard({
+  activeExtra = "",
+  secondActive = false,
+  omitActiveReceipt = false,
+  activeNotes = false,
+  queuedSibling = true,
+  activeType = "judge",
+} = {}) {
   return `version: 2
 goal:
   title: "Immutable prompt fixture"
@@ -194,15 +227,16 @@ tasks:
       evidence:
       - kind: finding_closure
         status: retained
-  - id: T081
+${queuedSibling ? `  - id: T081
     type: judge
     assignee: Judge
     status: ${secondActive ? "active" : "queued"}
     objective: "Queued historical successor."
     receipt: null
+` : ""}
   - id: T082
-    type: judge
-    assignee: Judge
+    type: ${activeType}
+    assignee: ${activeType === "pm" ? "PM" : "Judge"}
     status: active
     reasoning_hint: xhigh
     objective: "Audit the corrected boundary."

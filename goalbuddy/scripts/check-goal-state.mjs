@@ -3,9 +3,29 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "n
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { equalBriefBindings, verifyBrief } from "./brief-binding.mjs";
+import {
+  artifactIdentity,
+  canonicalJson,
+  canonicalJsonSha256,
+  deriveReceiptSource,
+  heldReceiptFromDerivedSource,
+  openContainedArtifact,
+  provenanceFromDerivedSource,
+  resolveArtifactRoots,
+  validateHeldReceipt,
+  validateReceiptProvenance,
+  validateReceiptSourceContext,
+} from "./receipt-provenance.mjs";
+import {
+  validatePmBlockedCloseoutReceipt,
+  validateTaskReceipt,
+} from "./receipt-contract.mjs";
+import { completionEligibility } from "./completion-eligibility.mjs";
+import { collectRequiredReviewPaths } from "./completion-review-scope.mjs";
+import { validateFinalReviewContract } from "./final-review-contract.mjs";
 
 const inputPath = process.argv[2];
 const isChildCheck = process.argv.includes("--child");
@@ -443,9 +463,11 @@ const tasks = parseTasks();
 const ids = new Set();
 const transitionEvidenceTasks = new Map();
 const strictTasks = new Map();
+const heldReceiptHandles = new Set();
+let strictDocument = null;
 if (/^    (?:transition_evidence|brief):/m.test(text)) {
   try {
-    const strictDocument = parseGoalStateText(text, { allowFallback: false });
+    strictDocument = parseGoalStateText(text, { allowFallback: false });
     for (const task of strictDocument.tasks || []) {
       strictTasks.set(task.id, task);
       transitionEvidenceTasks.set(task.id, task);
@@ -486,11 +508,11 @@ const terminalApprovalWait = isTerminalApprovalWait(tasks, activeTasks, activeTa
 if (goalStatus === "done") {
   if (activeTasks.length !== 0) errors.push("done goals must not have an active task");
   if (activeTask !== null) errors.push("done goals must set active_task: null");
-  const unfinishedWorkers = tasks
-    .filter((task) => task.type === "worker" && ["queued", "active"].includes(task.status))
+  const unfinishedTasks = tasks
+    .filter((task) => task.status !== "done")
     .map((task) => task.id);
-  if (unfinishedWorkers.length > 0) {
-    errors.push(`done goals must not leave queued or active Worker tasks: ${unfinishedWorkers.join(", ")}`);
+  if (unfinishedTasks.length > 0) {
+    errors.push(`done goals require every task to be done; unfinished tasks: ${unfinishedTasks.join(", ")}`);
   }
 } else if (goalStatus === "blocked") {
   if (activeTasks.length > 1) errors.push("blocked goals may have at most one active task");
@@ -677,10 +699,21 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
 }
 
 function validateTransitionEvidence(task, evidence, persistedBrief) {
+  const persistedReceipt = strictTasks.get(task.id)?.receipt;
+  if (hasProspectiveTerminalFields(persistedReceipt)
+      && (!evidence || !Object.hasOwn(evidence, "receipt_provenance"))) {
+    errors.push(`task ${task.id} prospective terminal completion fields require transition_evidence.receipt_provenance`);
+  }
   if (evidence === undefined) return;
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
     errors.push(`task ${task.id} transition_evidence must be an object`);
     return;
+  }
+  if (Object.hasOwn(evidence, "receipt_provenance")) {
+    validateAppliedReceiptEvidence(task, evidence.receipt_provenance);
+  }
+  if (Object.hasOwn(evidence, "held_receipts")) {
+    validateHeldReceiptEvidence(task, evidence.held_receipts);
   }
   if (Object.hasOwn(evidence, "codex_worker_session")) validateCodexWorkerSession(task, evidence.codex_worker_session, persistedBrief);
   if (!Object.hasOwn(evidence, "exact_human_replies")) return;
@@ -716,6 +749,376 @@ function validateTransitionEvidence(task, evidence, persistedBrief) {
       errors.push(`${label}.wait_receipt must not claim completion`);
     }
   }
+}
+
+function hasProspectiveTerminalFields(receipt) {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  return [
+    "completion_disposition",
+    "accepted_deviations",
+    "deviation_acceptance",
+    "final_review",
+  ].some((key) => Object.hasOwn(receipt, key));
+}
+
+function validateAppliedReceiptEvidence(task, rawProvenance) {
+  const label = `task ${task.id} transition_evidence.receipt_provenance`;
+  const persistedTask = strictTasks.get(task.id);
+  if (!persistedTask || strictDocument === null) {
+    errors.push(`${label} requires one strictly parsed board task`);
+    return;
+  }
+  let provenance;
+  try {
+    provenance = validateReceiptProvenance(rawProvenance);
+  } catch (error) {
+    errors.push(`${label} is invalid: ${error.message}`);
+    return;
+  }
+  if (!persistedTask.receipt || typeof persistedTask.receipt !== "object" || Array.isArray(persistedTask.receipt)) {
+    errors.push(`${label} requires one persisted task receipt`);
+    return;
+  }
+  try {
+    if (canonicalJsonSha256(persistedTask.receipt) !== provenance.receipt_value_sha256) {
+      throw new Error("receipt_value_sha256 does not match the exact canonical persisted receipt.");
+    }
+    validateProspectiveReceiptContract({
+      task: persistedTask,
+      receipt: persistedTask.receipt,
+      closeoutAuthority: provenance.closeout_authority,
+      label,
+    });
+    if (hasProspectiveTerminalFields(persistedTask.receipt)) {
+      validatePersistedTerminalReview(persistedTask);
+    }
+    if (provenance.receipt_artifact.retention_policy === "cleanup_eligible") {
+      validateCleanupEligibleLocation(task.id, provenance.receipt_artifact);
+    }
+    const source = reopenPersistedArtifact(provenance.receipt_artifact, {
+      allowMissing: provenance.receipt_artifact.retention_policy === "cleanup_eligible",
+      label: `${label}.receipt_artifact`,
+    });
+    const origin = provenance.origin_artifact === null
+      ? null
+      : reopenPersistedArtifact(provenance.origin_artifact, {
+          allowMissing: false,
+          label: `${label}.origin_artifact`,
+        });
+    if (source === null) return;
+    const sourceValue = parseArtifactJson(source, `${label}.receipt_artifact`);
+    const originValue = origin === null ? null : parseArtifactJson(origin, `${label}.origin_artifact`);
+    const derived = deriveReceiptSource({
+      source: sourceValue,
+      sourceArtifact: artifactIdentity(source),
+      origin: originValue,
+      originArtifact: origin === null ? null : artifactIdentity(origin),
+      closeoutAuthority: provenance.closeout_authority,
+      sourceContext: persistedReceiptSourceContext({
+        task: persistedTask,
+        sourceValue,
+        originValue,
+      }),
+    });
+    const rederived = provenanceFromDerivedSource(derived);
+    if (canonicalJson(rederived) !== canonicalJson(provenance)) {
+      throw new Error("persisted provenance does not exactly match the safely rederived source descriptor.");
+    }
+    if (canonicalJson(derived.receipt) !== canonicalJson(persistedTask.receipt)) {
+      throw new Error("persisted receipt does not exactly match the safely rederived source receipt.");
+    }
+  } catch (error) {
+    errors.push(`${label} is invalid: ${error.message}`);
+  }
+}
+
+function validatePersistedTerminalReview(task) {
+  const boardSnapshots = [{ path: "state.yaml", state_path: statePath, text }];
+  for (const candidate of strictDocument.tasks || []) {
+    const childPath = candidate?.subgoal?.path;
+    if (typeof childPath !== "string" || childPath.length === 0) continue;
+    const childStatePath = resolve(root, childPath);
+    const rootPath = resolve(root);
+    if (!childStatePath.startsWith(`${rootPath}${sep}`)) {
+      throw new Error(`terminal review child board path escapes the goal root: ${childPath}`);
+    }
+    boardSnapshots.push({
+      path: childPath,
+      state_path: childStatePath,
+      text: readFileSync(childStatePath, "utf8"),
+    });
+  }
+  const requiredReviewPaths = collectRequiredReviewPaths({
+    root,
+    boardSnapshots,
+  });
+  validateFinalReviewContract({
+    root,
+    completionDisposition: task.receipt.completion_disposition,
+    acceptedDeviations: task.receipt.accepted_deviations,
+    deviationAcceptance: task.receipt.deviation_acceptance,
+    finalReview: task.receipt.final_review,
+    tasks: strictDocument.tasks || [],
+    boardPath: statePath,
+    requiredReviewPaths,
+    required: true,
+  });
+}
+
+function validateHeldReceiptEvidence(task, rawEntries) {
+  const label = `task ${task.id} transition_evidence.held_receipts`;
+  const persistedTask = strictTasks.get(task.id);
+  if (!Array.isArray(rawEntries)) {
+    errors.push(`${label} must be an array`);
+    return;
+  }
+  if (!persistedTask || strictDocument === null) {
+    errors.push(`${label} requires one strictly parsed board task`);
+    return;
+  }
+  if (persistedTask.status === "queued") {
+    errors.push(`${label} is not allowed on a queued task`);
+  } else if (persistedTask.status === "active"
+      && (persistedTask.id !== strictDocument.active_task || persistedTask.receipt !== null)) {
+    errors.push(`${label} on an active task requires the current active receipt-free task`);
+  } else if (persistedTask.status !== "active" && persistedTask.receipt === null) {
+    errors.push(`${label} on closed task history requires the task's persisted receipt`);
+  }
+  for (const [index, rawEntry] of rawEntries.entries()) {
+    const entryLabel = `${label}[${index}]`;
+    let entry;
+    try {
+      entry = validateHeldReceipt(rawEntry);
+      if (entry.task_id !== task.id) {
+        throw new Error(`held task_id must identify ${task.id}.`);
+      }
+      if (heldReceiptHandles.has(entry.handle)) {
+        throw new Error(`held handle ${entry.handle} must be unique across the board.`);
+      }
+      heldReceiptHandles.add(entry.handle);
+      const source = reopenPersistedArtifact(entry.source_artifact, {
+        allowMissing: false,
+        label: `${entryLabel}.source_artifact`,
+      });
+      const origin = entry.origin_artifact === null
+        ? null
+        : reopenPersistedArtifact(entry.origin_artifact, {
+            allowMissing: false,
+            label: `${entryLabel}.origin_artifact`,
+          });
+      const sourceValue = parseArtifactJson(source, `${entryLabel}.source_artifact`);
+      const originValue = origin === null ? null : parseArtifactJson(origin, `${entryLabel}.origin_artifact`);
+      const closeoutAuthority = origin === null ? "original_role" : "pm_blocked_closeout";
+      const taskAuthority = persistedTaskAuthority(persistedTask);
+      const actualBoardPath = relative(
+        resolveArtifactRoots(root).repository,
+        realpathSync(statePath),
+      ).split(sep).join("/");
+      if (entry.board_path !== actualBoardPath) {
+        throw new Error("held board_path does not identify the current board.");
+      }
+      if (entry.task_authority_sha256 !== canonicalJsonSha256(taskAuthority)) {
+        throw new Error("held task_authority_sha256 does not match the current task authority.");
+      }
+      const workerSession = persistedTask.transition_evidence?.codex_worker_session ?? null;
+      const currentDispatchContract = workerSession?.dispatch_contract_sha256 ?? null;
+      if (entry.dispatch_contract_sha256 !== currentDispatchContract) {
+        throw new Error("held dispatch_contract_sha256 does not match the current task session authority.");
+      }
+      const derived = deriveReceiptSource({
+        source: sourceValue,
+        sourceArtifact: artifactIdentity(source),
+        origin: originValue,
+        originArtifact: origin === null ? null : artifactIdentity(origin),
+        closeoutAuthority,
+        sourceContext: persistedReceiptSourceContext({
+          task: persistedTask,
+          sourceValue,
+          originValue,
+          admissionBinding: entry,
+        }),
+      });
+      const rederived = heldReceiptFromDerivedSource({ taskId: task.id, derived });
+      if (canonicalJson(rederived) !== canonicalJson(entry)) {
+        throw new Error("held descriptor does not exactly match the safely rederived source.");
+      }
+      validateProspectiveReceiptContract({
+        task: persistedTask,
+        receipt: derived.receipt,
+        closeoutAuthority,
+        label: entryLabel,
+      });
+    } catch (error) {
+      errors.push(`${entryLabel} is invalid: ${error.message}`);
+    }
+  }
+}
+
+function reopenPersistedArtifact(binding, { allowMissing, label }) {
+  let roots;
+  try {
+    roots = resolveArtifactRoots(root);
+  } catch (error) {
+    throw new Error(`${label} roots cannot be resolved: ${error.message}`);
+  }
+  try {
+    const opened = openContainedArtifact({
+      roots,
+      root: binding.root,
+      path: binding.path,
+    });
+    if (opened.sha256 !== binding.sha256) {
+      throw new Error(`${label} sha256 does not match the exact current file bytes.`);
+    }
+    return opened;
+  } catch (error) {
+    if (allowMissing && /Artifact does not exist:/.test(error.message)) return null;
+    throw error;
+  }
+}
+
+function validateCleanupEligibleLocation(taskId, artifact) {
+  const roots = resolveArtifactRoots(root);
+  const activeGitDir = activeGitDirectory();
+  const absolute = resolve(roots[artifact.root], ...artifact.path.split("/"));
+  const activeRelative = relative(activeGitDir, absolute).split(sep).join("/");
+  const escaped = activeRelative === ".."
+    || activeRelative.startsWith("../")
+    || isAbsolute(activeRelative);
+  const expected = new RegExp(
+    `^goalbuddy/dispatch-reports/${escapeRegExp(taskId)}-[^/]+/dispatch-report\\.json$`,
+  );
+  if (artifact.root !== "git_common_dir" || escaped || !expected.test(activeRelative)) {
+    throw new Error("cleanup-eligible receipt artifact must identify the active worktree's exact Git-local dispatch report.");
+  }
+}
+
+function parseArtifactJson(opened, label) {
+  try {
+    return JSON.parse(opened.bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`${label} must contain valid JSON: ${error.message}`);
+  }
+}
+
+function persistedReceiptSourceContext({
+  task,
+  sourceValue,
+  originValue,
+  admissionBinding = null,
+}) {
+  const roots = resolveArtifactRoots(root);
+  const state = realpathSync(statePath);
+  const boardPath = relative(roots.repository, state).split(sep).join("/");
+  const admittedStateDigest = admissionBinding?.admitted_state_digest
+    ?? sourceDigest(sourceValue, originValue);
+  const activeGitDir = activeGitDirectory();
+  const workerSession = task.transition_evidence?.codex_worker_session ?? null;
+  return validateReceiptSourceContext({
+    task_id: task.id,
+    board_path: boardPath,
+    admitted_state_digest: admittedStateDigest,
+    digest_kind: "state_yaml_sha256",
+    repository_root: roots.repository,
+    git_common_dir: roots.git_common_dir,
+    active_git_dir: activeGitDir,
+    task_authority: persistedTaskAuthority(task),
+    expected_dispatch_contract_sha256: workerSession?.dispatch_contract_sha256 ?? null,
+    expected_session_binding: workerSession
+      ? {
+          session_id: workerSession.session_id,
+          state_digest: admittedStateDigest,
+        }
+      : null,
+    expected_brief: task.brief ?? null,
+  });
+}
+
+function persistedTaskAuthority(task) {
+  return {
+    id: task.id,
+    type: String(task.type || "").toLowerCase(),
+    assignee: task.assignee || defaultAssignee(task.type),
+    status: "active",
+    objective: task.objective || "",
+    inputs: stringArray(task.inputs),
+    constraints: stringArray(task.constraints),
+    allowed_files: stringArray(task.allowed_files),
+    verify: stringArray(task.verify),
+    stop_if: stringArray(task.stop_if),
+    reasoning_hint: task.reasoning_hint || null,
+    expected_output: stringArray(task.expected_output),
+  };
+}
+
+function activeGitDirectory() {
+  const git = spawnSync("git", ["rev-parse", "--git-dir"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (git.status !== 0 || !git.stdout.trim()) {
+    throw new Error(`could not resolve active Git directory: ${git.stderr.trim() || "git rev-parse failed"}`);
+  }
+  const rawGitDir = git.stdout.trim();
+  return realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(root, rawGitDir));
+}
+
+function sourceDigest(sourceValue, originValue) {
+  for (const candidate of [sourceValue?.state_digest, originValue?.state_digest]) {
+    if (/^[a-f0-9]{64}$/.test(String(candidate || ""))) return candidate;
+  }
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function stringArray(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => entry !== null && entry !== undefined).map(String)
+    : [];
+}
+
+function defaultAssignee(role) {
+  if (role === "scout") return "Scout";
+  if (role === "worker") return "Worker";
+  if (role === "judge") return "Judge";
+  return "PM";
+}
+
+function validateProspectiveReceiptContract({
+  task,
+  receipt,
+  closeoutAuthority,
+  label,
+}) {
+  const findings = closeoutAuthority === "pm_blocked_closeout"
+    ? validatePmBlockedCloseoutReceipt(receipt, {
+        taskId: task.id,
+        boardPath: receipt.board_path,
+        boundary: label,
+      })
+    : validateTaskReceipt(receipt, {
+        role: String(task.type || "").toLowerCase(),
+        taskId: task.id,
+        verify: stringArray(task.verify),
+        terminalCompletionEligible: prospectiveCompletionEligibility(task),
+        boundary: label,
+      });
+  if (findings.length > 0) {
+    throw new Error(findings.map((finding) => `${finding.path}: ${finding.message}`).join("; "));
+  }
+}
+
+function prospectiveCompletionEligibility(task) {
+  if (!["judge", "pm"].includes(String(task.type || "").toLowerCase())) return false;
+  const activeVersion = { ...task, status: "active", receipt: null };
+  const taskVersions = (strictDocument?.tasks || []).map((candidate) => (
+    candidate.id === task.id ? activeVersion : candidate
+  ));
+  return completionEligibility({
+    goalStatus: "active",
+    activeTaskId: task.id,
+    task: activeVersion,
+    tasks: taskVersions,
+  }).eligible;
 }
 
 function validateCodexWorkerSession(task, session, persistedBrief) {
@@ -802,6 +1205,12 @@ function validateSubgoal(task) {
     for (const childError of report.errors || ["unknown child state error"]) {
       errors.push(`task ${task.id} subgoal invalid: ${childError}`);
     }
+  }
+  if (report.goal_status !== task.subgoal.status) {
+    errors.push(`task ${task.id} subgoal.status ${task.subgoal.status || "<missing>"} must match child goal.status ${report.goal_status || "<missing>"}`);
+  }
+  if (goalStatus === "done" && report.goal_status !== "done") {
+    errors.push(`done goal must not reference non-done child goal for task ${task.id}; child goal.status is ${report.goal_status || "<missing>"}`);
   }
 }
 

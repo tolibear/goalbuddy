@@ -2,8 +2,8 @@
 // Apply a receipt, task status, and active_task transition to state.yaml atomically.
 // Fail-closed: the result is validated with check-goal-state.mjs and reverted on errors.
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
@@ -13,6 +13,21 @@ import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { completionEligibility } from "./completion-eligibility.mjs";
 import { assertTaskReceipt, validateWorkerPackage } from "./receipt-contract.mjs";
 import { bindBrief } from "./brief-binding.mjs";
+import {
+  artifactIdentity,
+  createReceiptSourceContext,
+  deriveReceiptSource,
+  openContainedArtifact,
+  provenanceFromDerivedSource,
+  resolveArtifactRoots,
+  validateReceiptProvenance,
+} from "./receipt-provenance.mjs";
+import { validateFinalReviewContract } from "./final-review-contract.mjs";
+import { collectRequiredReviewPaths } from "./completion-review-scope.mjs";
+import {
+  assertBoardTreeSnapshotsCurrent,
+  captureBoardTreeSnapshots,
+} from "./resume-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then have the PM run GoalBuddy's direct digest-bound apply_amendment transition to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
@@ -164,8 +179,38 @@ export function applyReceipt(options) {
   const statePath = resolveStatePath(options.goalRoot);
   const report = withStateTransitionLock(statePath, () => applyReceiptUnderLock(options, statePath));
   if (!report.ok) return report;
-  const transportCleanup = cleanupConsumedDispatchReport(options.receiptPath, statePath);
+  const transportCleanup = cleanupConsumedDispatchReport(options.taskId, statePath);
   return transportCleanup ? { ...report, report_transport_cleanup: transportCleanup } : report;
+}
+
+export function applyTaskTransitionEvidence(options, transition) {
+  const statePath = resolveStatePath(options.goalRoot);
+  return withStateTransitionLock(statePath, () => {
+    const context = loadReceiptAdmissionContext(options, statePath);
+    authorizeReceiptSource(context.document, options.taskId);
+    const task = selectedTask(context.document, options.taskId);
+    const transitionEvidence = task.transition_evidence && typeof task.transition_evidence === "object" && !Array.isArray(task.transition_evidence)
+      ? JSON.parse(JSON.stringify(task.transition_evidence))
+      : {};
+    const result = transition({
+      context,
+      task,
+      transitionEvidence,
+      statePath,
+    });
+    if (!result || typeof result !== "object" || Array.isArray(result)
+        || !result.transitionEvidence || typeof result.transitionEvidence !== "object"
+        || Array.isArray(result.transitionEvidence)
+        || !result.report || typeof result.report !== "object" || Array.isArray(result.report)) {
+      throw new Error("Task transition-evidence builder returned an invalid candidate description.");
+    }
+    let lines = context.original.replace(/\r\n/g, "\n").split("\n");
+    lines = upsertTaskNode(lines, options.taskId, "transition_evidence", result.transitionEvidence, { beforeKey: "receipt" });
+    const candidate = withFinalNewline(lines.join("\n"));
+    return installValidatedCandidate(context, candidate, result.report, [
+      receiptExpectation(options.taskId, ["transition_evidence"], result.transitionEvidence),
+    ]);
+  });
 }
 
 export function bindCodexWorkerSession(options, sessionEvidence) {
@@ -197,26 +242,72 @@ export function bindCodexWorkerSession(options, sessionEvidence) {
 }
 
 function applyReceiptUnderLock(options, statePath) {
-  const receipt = loadReceipt(options.receiptPath);
-  if (!Object.hasOwn(receipt, "task_id") || !Object.hasOwn(receipt, "board_path")) {
-    throw publicError("RECEIPT_IDENTITY_MISMATCH", "receipt requires exact task_id and board_path identity.");
-  }
-  validateReceiptIdentity(receipt, options.taskId, statePath);
-  if (!["done", "blocked"].includes(receipt.result)) {
-    throw new Error(`Receipt result must be exactly done or blocked; got ${JSON.stringify(receipt.result)}.`);
-  }
-  const taskCards = options.addTasksPath ? loadTaskCards(options.addTasksPath) : [];
-  const hydration = options.hydrateTaskId ? loadHydration(options, receipt) : null;
-  const status = receipt.result;
-
   const context = loadReceiptAdmissionContext(options, statePath);
   authorizeReceiptSource(context.document, options.taskId);
   const sourceTask = selectedTask(context.document, options.taskId);
+  const openedSource = openSuppliedReceiptArtifact({
+    cwd: dirname(statePath),
+    sourcePath: options.receiptPath,
+  });
+  let source;
   try {
+    source = JSON.parse(openedSource.bytes.toString("utf8"));
+  } catch (error) {
+    throw publicError("RECEIPT_MISSING", `${options.receiptPath} is not exact JSON: ${error.message}`);
+  }
+  if (source && typeof source === "object" && !Array.isArray(source)
+      && (Object.hasOwn(source, "receipt") || Object.hasOwn(source, "scope_check") || Object.hasOwn(source, "ok"))
+      && (source.ok !== true || source.scope_check?.status !== "clean" || !source.receipt)) {
+    throw publicError("DISPATCH_SCOPE_FAILED", "Dispatch report is not authoritative: require ok: true, scope_check.status: clean, and one receipt.");
+  }
+  let sourceContext;
+  try {
+    sourceContext = createReceiptSourceContext({
+      cwd: dirname(statePath),
+      statePath,
+      taskId: options.taskId,
+      admittedStateDigest: context.originalDigest,
+    });
+  } catch (error) {
+    throw publicError("CHECKER_FAILED", `Receipt provenance requires a strictly resumable source board: ${error.message}`, {
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+      before_digest: context.originalDigest,
+      after_digest: context.originalDigest,
+      digest_kind: "state_yaml_sha256",
+    });
+  }
+  let derived;
+  try {
+    derived = deriveReceiptSource({
+      source,
+      sourceArtifact: artifactIdentity(openedSource),
+      closeoutAuthority: "original_role",
+      sourceContext,
+    });
+  } catch (error) {
+    const identityFailure = /task_id|board_path|ENOENT|no such file/i.test(error.message);
+    throw publicError(identityFailure ? "RECEIPT_IDENTITY_MISMATCH" : "RECEIPT_SCHEMA_INVALID", identityFailure
+      ? `Receipt board_path or task_id identity mismatch: ${error.message}`
+      : error.message, {
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+    });
+  }
+  const receipt = derived.receipt;
+  if (!["done", "blocked"].includes(receipt.result)) {
+    throw new Error(`Receipt result must be exactly done or blocked; got ${JSON.stringify(receipt.result)}.`);
+  }
+  try {
+    const terminal = completionEligibility({
+      goalStatus: context.document.goal?.status,
+      activeTaskId: context.document.active_task,
+      task: sourceTask,
+      tasks: context.document.tasks || [],
+    });
     assertTaskReceipt(receipt, {
       role: String(sourceTask.type || "").toLowerCase(),
       taskId: options.taskId,
       verify: Array.isArray(sourceTask.verify) ? sourceTask.verify : [],
+      terminalCompletionEligible: terminal.eligible,
       boundary: "apply receipt",
     });
   } catch (error) {
@@ -225,6 +316,10 @@ function applyReceiptUnderLock(options, statePath) {
       mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
     });
   }
+  const provenance = provenanceFromDerivedSource(derived);
+  const taskCards = options.addTasksPath ? loadTaskCards(options.addTasksPath) : [];
+  const hydration = options.hydrateTaskId ? loadHydration(options, receipt) : null;
+  const status = receipt.result;
   let lines = context.original.replace(/\r\n/g, "\n").split("\n");
 
   if (taskCards.length) lines = appendTaskCards(lines, taskCards);
@@ -233,6 +328,14 @@ function applyReceiptUnderLock(options, statePath) {
   const transitionDocument = parseExactTaskProjection(preTransition, [options.taskId, options.activate], "receipt transition");
   authorizeReceiptSuccessor(transitionDocument, options.activate);
   lines = setTaskField(lines, options.taskId, "status", status);
+  const transitionEvidence = sourceTask.transition_evidence && typeof sourceTask.transition_evidence === "object" && !Array.isArray(sourceTask.transition_evidence)
+    ? JSON.parse(JSON.stringify(sourceTask.transition_evidence))
+    : {};
+  if (transitionEvidence.receipt_provenance !== undefined) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Task ${options.taskId} already has receipt_provenance before receipt application.`);
+  }
+  transitionEvidence.receipt_provenance = provenance;
+  lines = upsertTaskNode(lines, options.taskId, "transition_evidence", transitionEvidence, { beforeKey: "receipt" });
   lines = setTaskReceipt(lines, options.taskId, receipt);
   lines = setTaskField(lines, options.activate, "status", "active");
   const nextActive = options.activate;
@@ -247,7 +350,9 @@ function applyReceiptUnderLock(options, statePath) {
     hydration_sha256: hydration?.sha256 ?? null,
     status,
     active_task: nextActive,
+    receipt_provenance: provenance,
   }, [
+    receiptExpectation(options.taskId, ["transition_evidence", "receipt_provenance"], provenance),
     receiptExpectation(options.taskId, ["receipt"], receipt),
     ...taskCards.map((task) => receiptExpectation(task.id, ["receipt"], null)),
     ...(hydration ? [receiptExpectation(options.hydrateTaskId, ["receipt"], null)] : []),
@@ -366,17 +471,57 @@ function resumeExactHumanReplyUnderLock(options, statePath) {
 
 export function completeGoal(options) {
   const statePath = resolveStatePath(options.goalRoot);
-  return withStateTransitionLock(statePath, () => completeGoalUnderLock(options, statePath));
+  const report = withStateTransitionLock(statePath, () => completeGoalUnderLock(options, statePath));
+  if (!report.ok) return report;
+  const transportCleanup = cleanupConsumedDispatchReport(options.taskId, statePath);
+  return transportCleanup ? { ...report, report_transport_cleanup: transportCleanup } : report;
 }
 
 function completeGoalUnderLock(options, statePath) {
   const context = loadTransitionContext(options, statePath);
-  const receipt = loadReceipt(options.receiptPath);
-  if (!Object.hasOwn(receipt, "task_id") || !Object.hasOwn(receipt, "board_path")) {
-    throw new Error("complete requires receipt task_id and board_path identity.");
-  }
-  validateReceiptIdentity(receipt, options.taskId, context.statePath);
+  authorizeReceiptSource(context.document, options.taskId);
   const task = selectedTask(context.document, options.taskId);
+  const openedSource = openSuppliedReceiptArtifact({
+    cwd: dirname(statePath),
+    sourcePath: options.receiptPath,
+  });
+  let source;
+  try {
+    source = JSON.parse(openedSource.bytes.toString("utf8"));
+  } catch (error) {
+    throw publicError("RECEIPT_MISSING", `${options.receiptPath} is not exact JSON: ${error.message}`);
+  }
+  if (source && typeof source === "object" && !Array.isArray(source)
+      && (Object.hasOwn(source, "receipt") || Object.hasOwn(source, "scope_check") || Object.hasOwn(source, "ok"))
+      && (source.ok !== true || source.scope_check?.status !== "clean" || !source.receipt)) {
+    throw publicError("DISPATCH_SCOPE_FAILED", "Dispatch report is not authoritative: require ok: true, scope_check.status: clean, and one receipt.");
+  }
+  const sourceContext = createReceiptSourceContext({
+    cwd: dirname(statePath),
+    statePath,
+    taskId: options.taskId,
+    admittedStateDigest: context.originalDigest,
+  });
+  let derived;
+  try {
+    derived = deriveReceiptSource({
+      source,
+      sourceArtifact: artifactIdentity(openedSource),
+      closeoutAuthority: "original_role",
+      sourceContext,
+    });
+  } catch (error) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", error.message, {
+      mutation: mutationTruth({
+        board: "unchanged",
+        product: "none_observed",
+        receiptApplied: false,
+        beforeDigest: context.originalDigest,
+        afterDigest: context.originalDigest,
+      }),
+    });
+  }
+  const receipt = derived.receipt;
   const eligibility = completionEligibility({
     goalStatus: context.document.goal?.status,
     activeTaskId: context.document.active_task,
@@ -388,6 +533,7 @@ function completeGoalUnderLock(options, statePath) {
     assertTaskReceipt(receipt, {
       role: task.type,
       taskId: options.taskId,
+      terminalCompletionEligible: eligibility.eligible,
       boundary: "complete receipt",
     });
   } catch (error) {
@@ -399,9 +545,18 @@ function completeGoalUnderLock(options, statePath) {
   if (receipt.result !== "done" || receipt.decision !== "complete" || receipt.full_outcome_complete !== true) {
     throw new Error("complete requires result done, decision complete, and full_outcome_complete true.");
   }
+  const provenance = provenanceFromDerivedSource(derived);
 
   let lines = context.original.replace(/\r\n/g, "\n").split("\n");
   lines = setTaskField(lines, options.taskId, "status", "done");
+  const transitionEvidence = task.transition_evidence && typeof task.transition_evidence === "object" && !Array.isArray(task.transition_evidence)
+    ? JSON.parse(JSON.stringify(task.transition_evidence))
+    : {};
+  if (transitionEvidence.receipt_provenance !== undefined) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Task ${options.taskId} already has receipt_provenance before completion.`);
+  }
+  transitionEvidence.receipt_provenance = provenance;
+  lines = upsertTaskNode(lines, options.taskId, "transition_evidence", transitionEvidence, { beforeKey: "receipt" });
   lines = setTaskReceipt(lines, options.taskId, receipt);
   lines = setTopLevel(lines, "active_task", "null");
   lines = setNestedScalar(lines, "goal", "status", "done");
@@ -412,7 +567,41 @@ function completeGoalUnderLock(options, statePath) {
     status: "done",
     active_task: null,
     no_change: false,
-  }, [receiptExpectation(options.taskId, ["receipt"], receipt)]);
+    receipt_provenance: provenance,
+  }, [
+    receiptExpectation(options.taskId, ["transition_evidence", "receipt_provenance"], provenance),
+    receiptExpectation(options.taskId, ["receipt"], receipt),
+  ], {
+    beforeInstall({ compatibility }) {
+      const originalCheckerReport = runChecker(statePath, context.original);
+      if (originalCheckerReport.ok !== true && compatibility.used !== true) {
+        throw new Error(
+          `Final completion could not validate the exact pre-transition board: ${
+            (originalCheckerReport.errors || ["checker returned no detail"]).join("; ")
+          }`,
+        );
+      }
+      const boardTree = captureBoardTreeSnapshots(dirname(statePath), originalCheckerReport, context.original, {
+        allowRootCheckerErrors: compatibility.used === true,
+      });
+      const requiredReviewPaths = collectRequiredReviewPaths({
+        root: dirname(statePath),
+        boardSnapshots: boardTree.snapshots,
+      });
+      assertBoardTreeSnapshotsCurrent(boardTree.snapshots);
+      validateFinalReviewContract({
+        root: dirname(statePath),
+        completionDisposition: receipt.completion_disposition,
+        acceptedDeviations: receipt.accepted_deviations,
+        deviationAcceptance: receipt.deviation_acceptance,
+        finalReview: receipt.final_review,
+        tasks: context.document.tasks || [],
+        boardPath: statePath,
+        requiredReviewPaths,
+        required: true,
+      });
+    },
+  });
 }
 
 export function rebindGoalbuddy(options) {
@@ -674,7 +863,13 @@ function loadGoalbuddyBinding(bindingPath, installedCheckerPaths) {
   return binding;
 }
 
-function installValidatedCandidate(context, candidate, report, receiptExpectations = []) {
+function installValidatedCandidate(
+  context,
+  candidate,
+  report,
+  receiptExpectations = [],
+  { beforeInstall = null } = {},
+) {
   const checkerReport = runChecker(context.statePath, candidate);
   const baselineReport = checkerReport.ok ? null : runChecker(context.statePath, context.original);
   const compatibility = checkerReport.ok
@@ -724,9 +919,31 @@ function installValidatedCandidate(context, candidate, report, receiptExpectatio
   if (sha256(readFileSync(context.statePath)) !== context.originalDigest) {
     throw new Error("state.yaml changed during the serialized transition; candidate was not installed.");
   }
-  const candidatePath = `${context.statePath}.goalbuddy-candidate-${process.pid}`;
+  const goalDirectory = dirname(context.statePath);
+  const candidatePath = join(
+    dirname(goalDirectory),
+    `.${basename(goalDirectory)}.goalbuddy-state-candidate-${process.pid}`,
+  );
   writeAtomic(candidatePath, candidate);
-  renameSync(candidatePath, context.statePath);
+  try {
+    if (beforeInstall !== null) {
+      if (typeof beforeInstall !== "function") throw new Error("beforeInstall must be a function.");
+      beforeInstall({
+        checkerReport,
+        baselineReport,
+        compatibility,
+        context,
+        candidate,
+      });
+      if (sha256(readFileSync(context.statePath)) !== context.originalDigest) {
+        throw new Error("state.yaml changed during final pre-install validation; candidate was not installed.");
+      }
+    }
+    renameSync(candidatePath, context.statePath);
+  } catch (error) {
+    rmSync(candidatePath, { force: true });
+    throw error;
+  }
   fsyncDirectory(dirname(context.statePath));
   const afterDigest = sha256(candidate);
   return {
@@ -857,33 +1074,83 @@ function loadReceipt(receiptPath) {
   return { ...candidate };
 }
 
-function cleanupConsumedDispatchReport(receiptPath, statePath) {
+export function openSuppliedReceiptArtifact({ cwd, sourcePath, absoluteGitReportOnly = false }) {
+  const roots = resolveArtifactRoots(cwd);
+  if (!isAbsolute(sourcePath)) {
+    return openContainedArtifact({
+      roots,
+      root: "repository",
+      path: sourcePath,
+    });
+  }
+
+  const absolute = realpathSync(resolve(sourcePath));
+  const commonRelative = relative(roots.git_common_dir, absolute);
+  const repositoryRelative = relative(roots.repository, absolute);
+  const inCommon = commonRelative !== "" && commonRelative !== ".." && !commonRelative.startsWith(`..${sep}`) && !isAbsolute(commonRelative);
+  const inRepository = repositoryRelative !== "" && repositoryRelative !== ".." && !repositoryRelative.startsWith(`..${sep}`) && !isAbsolute(repositoryRelative);
+  if (inCommon) {
+    return openContainedArtifact({
+      roots,
+      root: "git_common_dir",
+      path: commonRelative.split(sep).join("/"),
+    });
+  }
+  if (absoluteGitReportOnly) {
+    throw new Error("An absolute receipt source must be an explicit Git-local dispatch report path.");
+  }
+  if (inRepository) {
+    return openContainedArtifact({
+      roots,
+      root: "repository",
+      path: repositoryRelative.split(sep).join("/"),
+    });
+  }
+  throw new Error("Receipt source must be contained below the repository or git_common_dir.");
+}
+
+function cleanupConsumedDispatchReport(taskId, statePath) {
   try {
-    const suppliedPath = resolve(receiptPath);
-    const suppliedLstat = lstatSync(suppliedPath);
-    if (!suppliedLstat.isFile() || suppliedLstat.isSymbolicLink()) return null;
-    const parsed = JSON.parse(readFileSync(suppliedPath, "utf8"));
-    const transport = parsed?.report_transport;
-    if (transport?.kind !== "git_local_ephemeral_v1" || transport.status !== "ready") return null;
-    if (typeof parsed.report_path !== "string" || parsed.report_path !== transport.path) return null;
-    const canonicalReportPath = realpathSync(suppliedPath);
-    if (realpathSync(resolve(parsed.report_path)) !== canonicalReportPath) return null;
+    const document = parseGoalStateText(readFileSync(statePath, "utf8"), { allowFallback: false });
+    const task = selectedTask(document, taskId);
+    const provenance = validateReceiptProvenance(task.transition_evidence?.receipt_provenance);
+    if (provenance.receipt_artifact.retention_policy !== "cleanup_eligible") return null;
+
+    const roots = resolveArtifactRoots(dirname(statePath));
+    const reopened = openContainedArtifact({
+      roots,
+      root: provenance.receipt_artifact.root,
+      path: provenance.receipt_artifact.path,
+    });
+    const canonicalReportPath = resolve(roots[reopened.root], ...reopened.path.split("/"));
+    if (reopened.sha256 !== provenance.receipt_artifact.sha256) {
+      return { attempted: true, removed: false, path: canonicalReportPath, error: "Persisted cleanup-eligible artifact changed after installation." };
+    }
 
     const git = spawnSync("git", ["rev-parse", "--git-dir"], { cwd: dirname(statePath), encoding: "utf8" });
     if (git.status !== 0 || !git.stdout.trim()) {
-      return { attempted: true, removed: false, path: canonicalReportPath, error: "Could not resolve the Git directory for transport cleanup." };
+      return { attempted: true, removed: false, path: canonicalReportPath, error: "Could not resolve the active Git directory for transport cleanup." };
     }
     const rawGitDir = git.stdout.trim();
-    const gitDir = realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(dirname(statePath), rawGitDir));
-    const reportsRoot = realpathSync(join(gitDir, "goalbuddy", "dispatch-reports"));
+    const activeGitDir = realpathSync(isAbsolute(rawGitDir) ? rawGitDir : resolve(dirname(statePath), rawGitDir));
+    const activeRelative = relative(roots.git_common_dir, activeGitDir);
+    if (activeRelative === ".." || activeRelative.startsWith(`..${sep}`) || isAbsolute(activeRelative)) {
+      return { attempted: true, removed: false, path: canonicalReportPath, error: "Active Git directory is outside git_common_dir." };
+    }
+    const reportsRoot = realpathSync(join(activeGitDir, "goalbuddy", "dispatch-reports"));
     const reportDir = realpathSync(dirname(canonicalReportPath));
     if (basename(canonicalReportPath) !== "dispatch-report.json" || dirname(reportDir) !== reportsRoot) return null;
     const reportDirLstat = lstatSync(reportDir);
     if (!reportDirLstat.isDirectory() || reportDirLstat.isSymbolicLink()) return null;
-    rmSync(reportDir, { recursive: true, force: true });
+    unlinkSync(canonicalReportPath);
+    try {
+      rmdirSync(reportDir);
+    } catch (error) {
+      if (error?.code !== "ENOTEMPTY" && error?.code !== "EEXIST") throw error;
+    }
     return { attempted: true, removed: true, path: canonicalReportPath, error: null };
   } catch (error) {
-    return { attempted: true, removed: false, path: resolve(receiptPath), error: String(error?.message || error).slice(0, 300) };
+    return { attempted: true, removed: false, path: null, error: String(error?.message || error).slice(0, 300) };
   }
 }
 

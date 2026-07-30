@@ -1,16 +1,45 @@
+import { validateCompletionFieldShape } from "./final-review-contract.mjs";
+
 const ROLES = new Set(["worker", "judge", "scout", "pm"]);
 const RESULTS = new Set(["done", "blocked"]);
 const JUDGE_DECISIONS = new Set(["approved", "rejected", "approve_subgoal", "reject_subgoal", "not_complete", "complete"]);
 const BLOCKED_COMMAND_STATUSES = new Set(["pass", "fail", "blocked", "error", "not_run", "skipped"]);
 const WORKER_PACKAGE_KEYS = Object.freeze(["objective", "allowed_files", "verify", "stop_if"]);
+const PM_BLOCKED_CLOSEOUT_KEYS = Object.freeze([
+  "result",
+  "task_id",
+  "board_path",
+  "authored_by",
+  "summary",
+  "blocked_reason",
+  "remaining_blockers",
+  "evidence",
+]);
+const TERMINAL_COMPLETION_KEYS = Object.freeze([
+  "completion_disposition",
+  "accepted_deviations",
+  "deviation_acceptance",
+  "final_review",
+]);
+const TERMINAL_BLOCKER_ARRAY_KEYS = Object.freeze([
+  "blocked_tasks",
+  "missing_evidence",
+  "remaining_blockers",
+  "required_board_updates",
+]);
+const TERMINAL_BLOCKER_SCALAR_KEYS = Object.freeze([
+  "blocked_reason",
+  "required_reply",
+  "waiting_for_user_approval",
+]);
 const RESERVED_BY_ROLE = Object.freeze({
-  worker: new Set(["decision", "full_outcome_complete", "worker_package", "facts", "contradictions", "ambiguity_requiring_judge"]),
+  worker: new Set(["decision", "full_outcome_complete", "worker_package", "facts", "contradictions", "ambiguity_requiring_judge", ...TERMINAL_COMPLETION_KEYS]),
   judge: new Set(["changed_files", "commands", "deviations", "verification_attempts", "facts", "contradictions", "ambiguity_requiring_judge"]),
-  scout: new Set(["changed_files", "deviations", "verification_attempts", "decision", "full_outcome_complete", "worker_package"]),
+  scout: new Set(["changed_files", "deviations", "verification_attempts", "decision", "full_outcome_complete", "worker_package", ...TERMINAL_COMPLETION_KEYS]),
   pm: new Set(["changed_files", "deviations", "verification_attempts", "worker_package", "facts", "contradictions", "ambiguity_requiring_judge"]),
 });
 
-export function receiptExample({ role, result }) {
+export function receiptExample({ role, result, terminalCompletionEligible = false }) {
   assertRoleAndResult(role, result);
   const common = {
     result,
@@ -38,7 +67,7 @@ export function receiptExample({ role, result }) {
     };
   }
   if (role === "judge" && result === "done") {
-    return {
+    const example = {
       ...common,
       decision: "approved",
       full_outcome_complete: false,
@@ -49,6 +78,7 @@ export function receiptExample({ role, result }) {
       missing_evidence: [],
       required_board_updates: [],
     };
+    return terminalCompletionEligible ? terminalCompletionExample(example) : example;
   }
   if (role === "judge") {
     return {
@@ -81,11 +111,12 @@ export function receiptExample({ role, result }) {
     };
   }
   if (result === "done") {
-    return {
+    const example = {
       ...common,
       summary: "Completed the authorized PM control task.",
       evidence: ["Recorded the deterministic transition result."],
     };
+    return terminalCompletionEligible ? terminalCompletionExample(example) : example;
   }
   return {
     ...common,
@@ -96,7 +127,48 @@ export function receiptExample({ role, result }) {
   };
 }
 
-export function validateTaskReceipt(receipt, { role, taskId, boardPath, verify = [], boundary = "receipt" } = {}) {
+function terminalCompletionExample(example) {
+  const terminal = {
+    ...example,
+    decision: "complete",
+    full_outcome_complete: true,
+    completion_disposition: "exact",
+    accepted_deviations: [],
+    deviation_acceptance: null,
+    final_review: {
+      status: "complete",
+      artifact: {
+        path: "reviews/final-review.json",
+        sha256: "0".repeat(64),
+      },
+      workflow_version: "goalbuddy-final-review@1",
+      scope: {
+        kind: "goalbuddy_review_scope_v1",
+        patterns: ["src/**"],
+      },
+      base_identity: {
+        kind: "git_commit",
+        value: "0".repeat(40),
+      },
+      reviewed_identity: {
+        kind: "git_commit",
+        value: "0".repeat(40),
+      },
+      completeness_status: "complete",
+    },
+  };
+  if (Object.hasOwn(example, "worker_package")) terminal.worker_package = null;
+  return terminal;
+}
+
+export function validateTaskReceipt(receipt, {
+  role,
+  taskId,
+  boardPath,
+  verify = [],
+  boundary = "receipt",
+  terminalCompletionEligible = false,
+} = {}) {
   const findings = [];
   const add = (path, message, value, code = "RECEIPT_SCHEMA_INVALID") => findings.push({
     code,
@@ -129,11 +201,67 @@ export function validateTaskReceipt(receipt, { role, taskId, boardPath, verify =
   else if (role === "judge") validateJudge(receipt, add);
   else if (role === "scout") validateScout(receipt, add);
   else if (role === "pm") validatePm(receipt, add);
+  validateTerminalCompletionFields(receipt, role, terminalCompletionEligible, add);
   return findings;
 }
 
 export function assertTaskReceipt(receipt, context = {}) {
   const findings = validateTaskReceipt(receipt, context);
+  if (findings.length === 0) return receipt;
+  const first = findings[0];
+  const error = new Error(`${first.path}: ${first.message}`);
+  error.code = "RECEIPT_SCHEMA_INVALID";
+  error.findings = findings;
+  throw error;
+}
+
+export function validatePmBlockedCloseoutReceipt(receipt, {
+  taskId,
+  boardPath,
+  boundary = "pm_blocked_closeout",
+} = {}) {
+  const findings = [];
+  const add = (path, message, value) => findings.push({
+    code: "RECEIPT_SCHEMA_INVALID",
+    path,
+    value: boundedValue(value),
+    message: `${boundary}: ${message}`,
+  });
+
+  if (!isPlainObject(receipt)) {
+    add("$", "receipt must be a JSON object", receipt);
+    return findings;
+  }
+
+  const missing = PM_BLOCKED_CLOSEOUT_KEYS.filter((key) => !Object.hasOwn(receipt, key));
+  const extras = Object.keys(receipt).filter((key) => !PM_BLOCKED_CLOSEOUT_KEYS.includes(key));
+  if (missing.length || extras.length) {
+    add("$", `PM blocked closeout keys must be exact; missing [${missing.join(", ")}], unexpected [${extras.join(", ")}]`, receipt);
+  }
+
+  if (!/^T\d{3}$/.test(taskId || "")) add("context.taskId", "expected taskId must use T### format", taskId);
+  if (typeof boardPath !== "string" || boardPath.trim() === "") {
+    add("context.boardPath", "expected boardPath must be a nonempty string", boardPath);
+  }
+  if (receipt.result !== "blocked") add("result", "result must be exactly blocked", receipt.result);
+  if (!/^T\d{3}$/.test(receipt.task_id || "")) add("task_id", "task_id must use T### format", receipt.task_id);
+  else if (/^T\d{3}$/.test(taskId || "") && receipt.task_id !== taskId) add("task_id", `task_id must identify ${taskId}`, receipt.task_id);
+  if (typeof receipt.board_path !== "string" || receipt.board_path.trim() === "") {
+    add("board_path", "board_path must be a nonempty string", receipt.board_path);
+  } else if (typeof boardPath === "string" && boardPath.trim() !== "" && receipt.board_path !== boardPath) {
+    add("board_path", `board_path must identify ${boardPath}`, receipt.board_path);
+  }
+  if (receipt.authored_by !== "pm") add("authored_by", "authored_by must be exactly pm", receipt.authored_by);
+  requireString(receipt, "summary", add);
+  requireString(receipt, "blocked_reason", add);
+  requireStringArray(receipt, "remaining_blockers", add, { required: true });
+  requireStringArray(receipt, "evidence", add, { required: true });
+  if (!isJsonSafe(receipt)) add("$", "receipt must contain only JSON-safe data", receipt);
+  return findings;
+}
+
+export function assertPmBlockedCloseoutReceipt(receipt, context = {}) {
+  const findings = validatePmBlockedCloseoutReceipt(receipt, context);
   if (findings.length === 0) return receipt;
   const first = findings[0];
   const error = new Error(`${first.path}: ${first.message}`);
@@ -209,6 +337,71 @@ function validatePm(receipt, add) {
   if (Object.hasOwn(receipt, "decision") && !JUDGE_DECISIONS.has(receipt.decision)) add("decision", "PM decision uses unsupported vocabulary", receipt.decision);
   if (Object.hasOwn(receipt, "full_outcome_complete") && typeof receipt.full_outcome_complete !== "boolean") {
     add("full_outcome_complete", "full_outcome_complete must be boolean", receipt.full_outcome_complete);
+  }
+}
+
+function validateTerminalCompletionFields(receipt, role, terminalCompletionEligible, add) {
+  const present = TERMINAL_COMPLETION_KEYS.filter((key) => Object.hasOwn(receipt, key));
+  if (!["judge", "pm"].includes(role)) return;
+  const finalClaim = receipt.result === "done"
+    && receipt.decision === "complete"
+    && receipt.full_outcome_complete === true;
+  const terminalIntent = present.length > 0
+    || receipt.decision === "complete"
+    || receipt.full_outcome_complete === true;
+  if (terminalCompletionEligible !== true) {
+    for (const key of present) {
+      add(key, `${key} is allowed only on the mechanically final Judge or PM task`, receipt[key]);
+    }
+    if (finalClaim) {
+      add("full_outcome_complete", "full_outcome_complete true is allowed only on the mechanically final Judge or PM task", receipt.full_outcome_complete);
+    }
+    return;
+  }
+  if (!finalClaim) {
+    for (const key of present) {
+      add(key, `${key} is allowed only on a final Judge or PM completion receipt`, receipt[key]);
+    }
+    if (terminalIntent) {
+      add(
+        "full_outcome_complete",
+        "terminal completion requires result done, decision complete, full_outcome_complete true, and all terminal proof fields",
+        receipt.full_outcome_complete,
+      );
+    }
+    return;
+  }
+  const missing = TERMINAL_COMPLETION_KEYS.filter((key) => !Object.hasOwn(receipt, key));
+  if (missing.length > 0) {
+    add(
+      "completion_disposition",
+      `final completion fields must be supplied together; missing [${missing.join(", ")}]`,
+      receipt.completion_disposition,
+    );
+    return;
+  }
+  for (const key of TERMINAL_BLOCKER_ARRAY_KEYS) {
+    if (Object.hasOwn(receipt, key) && (!Array.isArray(receipt[key]) || receipt[key].length > 0)) {
+      add(key, `${key} must be absent or an empty array on a terminal completion receipt`, receipt[key]);
+    }
+  }
+  for (const key of TERMINAL_BLOCKER_SCALAR_KEYS) {
+    if (Object.hasOwn(receipt, key)) {
+      add(key, `${key} must be absent on a terminal completion receipt`, receipt[key]);
+    }
+  }
+  if (Object.hasOwn(receipt, "worker_package") && receipt.worker_package !== null) {
+    add("worker_package", "worker_package must be absent or null on a terminal completion receipt", receipt.worker_package);
+  }
+  try {
+    validateCompletionFieldShape({
+      completionDisposition: receipt.completion_disposition,
+      acceptedDeviations: receipt.accepted_deviations,
+      deviationAcceptance: receipt.deviation_acceptance,
+      finalReview: receipt.final_review,
+    });
+  } catch (error) {
+    add("completion_disposition", error.message, receipt.completion_disposition);
   }
 }
 

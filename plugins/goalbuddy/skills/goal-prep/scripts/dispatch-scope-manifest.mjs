@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -35,6 +45,62 @@ export function compileDispatchScope(root, allowedFiles) {
     patterns: Object.freeze([...patterns]),
     exactPaths: Object.freeze([...exactPaths]),
     treePrefixes: Object.freeze([...treePrefixes]),
+  });
+}
+
+export function compileScopedIdentityScope(root, patterns) {
+  const canonicalRoot = canonicalAbsolutePath(root);
+  const values = stringArray(patterns);
+  if (values.length === 0) throw new Error("Scoped identity requires at least one path pattern.");
+  const normalized = values.map((value) => {
+    if (value !== value.trim() || value.includes("\\") || isAbsolute(value)) {
+      throw new Error(`Scoped identity paths must be canonical repository-relative paths: ${value}`);
+    }
+    const path = normalizeRepositoryPath(canonicalRoot, value, { allowGlob: true });
+    if (path !== value) {
+      throw new Error(`Scoped identity paths must be canonical repository-relative paths without lexical aliases or symlinked ancestors: ${value}`);
+    }
+    if (!/[*?[\]]/.test(path)) return path;
+    if (path.endsWith("/**")) {
+      const prefix = path.slice(0, -3);
+      if (prefix && !/[*?[\]]/.test(prefix)) {
+        assertSafeTreePrefix(canonicalRoot, prefix);
+        return path;
+      }
+    }
+    throw new Error(`Unsafe scoped identity path ${value}: use an exact path or bounded terminal directory/** tree.`);
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("Scoped identity contains duplicate paths after normalization.");
+  }
+  return Object.freeze({
+    kind: "goalbuddy_review_scope_v1",
+    root: canonicalRoot,
+    patterns: Object.freeze([...normalized]),
+    exactPaths: Object.freeze(normalized.filter((path) => !path.endsWith("/**"))),
+    treePrefixes: Object.freeze(normalized.filter((path) => path.endsWith("/**")).map((path) => path.slice(0, -3))),
+  });
+}
+
+export function captureScopedIdentityManifest(root, { scope }) {
+  const canonicalRoot = canonicalAbsolutePath(root);
+  if (!scope || scope.root !== canonicalRoot) {
+    throw new Error("Scoped identity scope and manifest must use one repository root.");
+  }
+  const paths = new Set(scope.exactPaths.filter((path) => !isGoalBuddyControlPath(path)));
+  for (const prefix of scope.treePrefixes) {
+    if (isGoalBuddyControlPath(prefix)) continue;
+    paths.add(prefix);
+    walkIdentity(resolve(canonicalRoot, prefix), canonicalRoot, paths);
+  }
+  const entries = {};
+  for (const path of [...paths].filter((entry) => !isGoalBuddyControlPath(entry)).sort()) {
+    entries[path] = scopedPathEvidence(canonicalRoot, path);
+  }
+  return Object.freeze({
+    kind: "goalbuddy_scoped_manifest_v1",
+    patterns: Object.freeze([...scope.patterns]),
+    entries: Object.freeze(entries),
   });
 }
 
@@ -252,6 +318,121 @@ function walk(path, root, paths) {
   for (const entry of readdirSync(path)) walk(resolve(path, entry), root, paths);
 }
 
+function walkIdentity(path, root, paths) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  const repositoryPath = relative(root, path).split(sep).join("/");
+  if (isGoalBuddyControlPath(repositoryPath)) return;
+  paths.add(repositoryPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+  for (const entry of readdirSync(path)) walkIdentity(resolve(path, entry), root, paths);
+}
+
+function scopedPathEvidence(root, path) {
+  const absolute = resolve(root, path);
+  assertScopedParent(root, absolute);
+  let stat;
+  try {
+    stat = lstatSync(absolute);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return Object.freeze({ kind: "missing", mode: null, content_sha256: null });
+    }
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    return Object.freeze({
+      kind: "symlink",
+      mode: "120000",
+      content_sha256: createHash("sha256").update(readlinkSync(absolute, { encoding: "buffer" })).digest("hex"),
+    });
+  }
+  if (stat.isFile()) {
+    return Object.freeze({
+      kind: "file",
+      mode: (stat.mode & 0o111) !== 0 ? "100755" : "100644",
+      content_sha256: createHash("sha256").update(readScopedFile(root, absolute, path)).digest("hex"),
+    });
+  }
+  if (stat.isDirectory()) {
+    return Object.freeze({ kind: "directory", mode: "040000", content_sha256: null });
+  }
+  throw new Error(`Scoped identity rejects non-file repository objects: ${path}`);
+}
+
+function assertScopedParent(root, absolute) {
+  const parent = dirname(absolute);
+  let canonicalParent;
+  try {
+    canonicalParent = realpathSync(parent);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  const rel = relative(root, canonicalParent);
+  if (
+    canonicalParent !== parent
+    || rel === ".."
+    || rel.startsWith(`..${sep}`)
+    || isAbsolute(rel)
+  ) {
+    throw new Error(`Scoped identity path has an unsafe or symlinked ancestor: ${relative(root, absolute).split(sep).join("/")}`);
+  }
+}
+
+function readScopedFile(root, absolute, path) {
+  let descriptor;
+  try {
+    descriptor = openSync(
+      absolute,
+      constants.O_RDONLY | (constants.O_NONBLOCK || 0) | (constants.O_NOFOLLOW || 0),
+    );
+    const before = fstatSync(descriptor);
+    const namedBefore = lstatSync(absolute);
+    if (!before.isFile() || !namedBefore.isFile() || namedBefore.isSymbolicLink()) {
+      throw new Error(`Scoped identity requires a regular file: ${path}`);
+    }
+    if (before.dev !== namedBefore.dev || before.ino !== namedBefore.ino) {
+      throw new Error(`Scoped identity file changed while it was opened: ${path}`);
+    }
+    const canonical = realpathSync(absolute);
+    const rel = relative(root, canonical);
+    if (
+      canonical !== absolute
+      || rel === ".."
+      || rel.startsWith(`..${sep}`)
+      || isAbsolute(rel)
+    ) {
+      throw new Error(`Scoped identity file escaped through a symlink: ${path}`);
+    }
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    const namedAfter = lstatSync(absolute);
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs
+      || before.ctimeMs !== after.ctimeMs
+      || bytes.length !== after.size
+      || after.dev !== namedAfter.dev
+      || after.ino !== namedAfter.ino
+      || !namedAfter.isFile()
+      || namedAfter.isSymbolicLink()
+    ) {
+      throw new Error(`Scoped identity file changed while it was hashed: ${path}`);
+    }
+    return bytes;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function pathEvidence(root, path) {
   const absolute = resolve(root, path);
   let stat;
@@ -273,7 +454,7 @@ function pathEvidence(root, path) {
   return { exists: true, type: stat.isDirectory() ? "directory" : "other", executable: false };
 }
 
-function isGoalBuddyControlPath(path) {
+export function isGoalBuddyControlPath(path) {
   return path === "docs/goals" || path.startsWith(CONTROL_PREFIX);
 }
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
 import { receiptExample } from "./receipt-contract.mjs";
+import { completionEligibility } from "./completion-eligibility.mjs";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,15 @@ export function admitCurrentTask(options) {
   const reasoning = normalizeReasoning(task.reasoning_hint, defaults.reasoning);
   const warnings = promptWarnings(board, task);
   const allowedFiles = stringList(task.allowed_files);
+  const completionDocument = board.completionDocument;
+  const completionTask = completionDocument?.tasks?.find((candidate) => candidate?.id === task.id);
+  const terminalCompletionEligible = completionDocument !== null
+    && completionEligibility({
+      goalStatus: completionDocument.goal?.status,
+      activeTaskId: completionDocument.active_task,
+      task: completionTask,
+      tasks: completionDocument.tasks,
+    }).eligible;
 
   const payload = {
       metadata: {
@@ -80,6 +90,7 @@ export function admitCurrentTask(options) {
         slice_policy: board.document.rules?.slice_policy || null,
         changed_files_path_style: changedFilesPathStyle(allowedFiles),
         scope_change_recovery: role === "worker" ? WORKER_SCOPE_CHANGE_RECOVERY : null,
+        terminal_completion_eligible: terminalCompletionEligible,
         warnings,
       },
       task: {
@@ -96,10 +107,10 @@ export function admitCurrentTask(options) {
         reasoning_hint: task.reasoning_hint || null,
         expected_output: stringList(task.expected_output),
       },
-      receipt_schema: taskReceiptExample(role, "done", task, board.path),
+      receipt_schema: taskReceiptExample(role, "done", task, board.path, terminalCompletionEligible),
       receipt_schemas: {
-        done: taskReceiptExample(role, "done", task, board.path),
-        blocked: taskReceiptExample(role, "blocked", task, board.path),
+        done: taskReceiptExample(role, "done", task, board.path, terminalCompletionEligible),
+        blocked: taskReceiptExample(role, "blocked", task, board.path, terminalCompletionEligible),
       },
     };
   return {
@@ -215,11 +226,18 @@ export function loadBoard(boardPath, options = {}) {
   }
 
   const document = parseActiveTaskProjection(stateText, checker.active_task);
+  let completionDocument = null;
+  try {
+    completionDocument = parseGoalStateText(stateText, { allowFallback: false });
+  } catch {
+    // The prompt may still project a valid live task from checker-tolerated history,
+    // but complete cannot admit a board that its full-state parser cannot read.
+  }
   return boardFromDocument(boardPath, stateText, document, {
     mode: "immutable_history_active_task",
     checkerStatus: "immutable_history_compatible",
     immutableHistory: compatibility.proof,
-  });
+  }, completionDocument);
 }
 
 export function loadBoardSnapshot(boardPath, stateText) {
@@ -230,7 +248,7 @@ export function loadBoardSnapshot(boardPath, stateText) {
   });
 }
 
-function boardFromDocument(boardPath, stateText, document, projection) {
+function boardFromDocument(boardPath, stateText, document, projection, completionDocument = document) {
   if (!document || Number(document.version) !== 2) {
     throw new Error(`unsupported GoalBuddy state version in ${boardPath}: expected top-level "version: 2". Start from templates/state.yaml bundled with the goal-prep skill.`);
   }
@@ -243,6 +261,7 @@ function boardFromDocument(boardPath, stateText, document, projection) {
     goal: document.goal || {},
     activeTask: document.active_task || "",
     stateDigest: sha256(stateText),
+    completionDocument,
     projection,
   };
 }
@@ -434,9 +453,13 @@ function changedFilesPathStyle(allowedFiles) {
   return "mirror-each-allowed-file";
 }
 
-function taskReceiptExample(role, result, task, boardPath) {
+function taskReceiptExample(role, result, task, boardPath, terminalCompletionEligible) {
   const example = {
-    ...receiptExample({ role, result }),
+    ...receiptExample({
+      role,
+      result,
+      terminalCompletionEligible: terminalCompletionEligible && result === "done",
+    }),
     task_id: task.id,
     board_path: boardPath,
   };

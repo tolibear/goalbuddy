@@ -75,6 +75,7 @@ const optionsWithValues = new Set([
   "--board",
   "--expected-state-digest",
   "--expected-board-tree-digest",
+  "--origin-artifact",
 ]);
 const pathOptions = new Set(["--board", "--goal"]);
 
@@ -185,6 +186,13 @@ async function main() {
         break;
       }
       receiptCli();
+      break;
+    case "hold":
+      if (wantsHelp()) {
+        usage();
+        break;
+      }
+      goalOperationCli(command);
       break;
     case "wait":
     case "reply":
@@ -349,6 +357,7 @@ Usage:
   ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--allow-immutable-history] [--json]
+  ${canonicalCliName} hold <docs/goals/slug> --task T### --source <file> [--origin-artifact <rejected-dispatch.json>] --expected-state-digest <sha256> [--json]
   ${canonicalCliName} wait <docs/goals/slug> --task T### --receipt <wait.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} reply <docs/goals/slug> --task T### --reply-file <reply.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
   ${canonicalCliName} complete <docs/goals/slug> --task T### --receipt <final.json> --expected-state-digest <sha256> [--allow-immutable-history] [--json]
@@ -1911,6 +1920,16 @@ function initGoal() {
 function receiptCli() {
   const script = join(skillSource, "scripts", "apply-receipt.mjs");
   const result = spawnSync(process.execPath, [script, ...args.slice(1)], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  });
+  process.exit(result.status ?? 1);
+}
+
+function goalOperationCli(mode) {
+  const script = join(skillSource, "scripts", "goal-operation.mjs");
+  const result = spawnSync(process.execPath, [script, mode, ...args.slice(1)], {
     cwd: process.cwd(),
     stdio: "inherit",
     env: process.env,

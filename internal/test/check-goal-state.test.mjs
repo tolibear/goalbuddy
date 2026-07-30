@@ -1,10 +1,17 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  applyReceipt,
+  toYamlLines,
+} from "../../goalbuddy/scripts/apply-receipt.mjs";
+import { holdReceipt } from "../../goalbuddy/scripts/goal-operation.mjs";
+import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { canonicalJsonSha256 } from "../../goalbuddy/scripts/receipt-provenance.mjs";
 
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
 
@@ -19,17 +26,125 @@ function writeState(root, body) {
   writeFileSync(join(root, "state.yaml"), body.trimStart());
 }
 
-function runChecker(root, { snapshot = null } = {}) {
+function runChecker(root, { snapshot = null, candidate = null } = {}) {
   const args = [checker, join(root, "state.yaml")];
   if (snapshot !== null) args.push("--snapshot-stdin");
+  if (candidate !== null) args.push("--candidate-stdin");
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
-    input: snapshot ?? undefined,
+    input: snapshot ?? candidate ?? undefined,
   });
   return {
     status: result.status,
     stdout: JSON.parse(result.stdout),
     stderr: result.stderr,
+  };
+}
+
+function makeGitGoalRoot() {
+  const repository = mkdtempSync(join(tmpdir(), "goal-maker-git-test-"));
+  const initialized = spawnSync("git", ["init", "-q"], { cwd: repository, encoding: "utf8" });
+  assert.equal(initialized.status, 0, initialized.stderr);
+  const root = join(repository, "docs", "goals", "sample");
+  mkdirSync(join(root, "notes"), { recursive: true });
+  mkdirSync(join(repository, "evidence"), { recursive: true });
+  writeFileSync(join(root, "goal.md"), "# Sample Goal\n");
+  return { repository, root };
+}
+
+function workerProvenanceBoard() {
+  return `
+version: 2
+goal:
+  title: "Prove prospective receipt evidence"
+  slug: "prove-prospective-receipt-evidence"
+  kind: specific
+  tranche: "receipt evidence"
+  status: active
+rules:
+  pm_owns_state: true
+  one_active_task: true
+  max_write_workers: 1
+  no_implementation_without_worker_or_pm_task: true
+  no_completion_without_judge_or_pm_audit: true
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: T001
+tasks:
+  - id: T001
+    type: worker
+    assignee: Worker
+    status: active
+    objective: "Implement one bounded change."
+    inputs: []
+    constraints: []
+    allowed_files:
+      - src/widget.mjs
+    verify:
+      - node --check src/widget.mjs
+    stop_if:
+      - "Need files outside scope."
+    expected_output:
+      - "One checked change."
+    receipt: null
+  - id: T002
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Audit the bounded change."
+    inputs:
+      - "T001 receipt"
+    constraints:
+      - "Do not implement."
+    expected_output:
+      - "Decision"
+    receipt: null
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
+`.trimStart();
+}
+
+function directWorkerReceipt(root) {
+  return {
+    result: "done",
+    task_id: "T001",
+    board_path: join(root, "state.yaml"),
+    summary: "Implemented the bounded change.",
+    changed_files: ["src/widget.mjs"],
+    commands: [{ cmd: "node --check src/widget.mjs", status: "pass" }],
+  };
+}
+
+function serializeDocument(document) {
+  return `${toYamlLines(document, 0).join("\n")}\n`;
+}
+
+function appliedProvenanceFixture() {
+  const { repository, root } = makeGitGoalRoot();
+  const original = workerProvenanceBoard();
+  writeState(root, original);
+  const sourcePath = join(repository, "evidence", "T001.json");
+  writeFileSync(sourcePath, `${JSON.stringify(directWorkerReceipt(root), null, 2)}\n`);
+  const report = applyReceipt({
+    goalRoot: root,
+    taskId: "T001",
+    receiptPath: "evidence/T001.json",
+    activate: "T002",
+    expectedStateDigest: createHash("sha256").update(original).digest("hex"),
+  });
+  assert.equal(report.ok, true, JSON.stringify(report));
+  return {
+    repository,
+    root,
+    original,
+    sourcePath,
+    applied: readFileSync(join(root, "state.yaml"), "utf8"),
   };
 }
 
@@ -701,7 +816,7 @@ test("rejects root evidence, units, artifacts, or stray markdown", () => {
   }
 });
 
-test("accepts depth-1 subgoals inside the parent goal root", () => {
+test("validates depth-1 subgoal status against the checked child goal", () => {
   const root = makeRoot();
   try {
     mkdirSync(join(root, "subgoals", "T003-child", "notes"), { recursive: true });
@@ -739,7 +854,7 @@ checks:
     task: null
     commands: []
 `);
-    writeState(root, `
+    const parentBoard = `
 version: 2
 goal:
   title: "Parent board"
@@ -778,10 +893,27 @@ checks:
     result: unknown
     task: null
     commands: []
-`);
+`;
+    writeState(root, parentBoard);
     const result = runChecker(root);
     assert.equal(result.status, 0, result.stderr || JSON.stringify(result.stdout));
     assert.equal(result.stdout.ok, true);
+
+    writeState(root, parentBoard.replace(
+      "      status: active\n      path: subgoals/T003-child/state.yaml",
+      "      status: blocked\n      path: subgoals/T003-child/state.yaml",
+    ));
+    const mismatched = runChecker(root);
+    assert.equal(mismatched.status, 1);
+    assert.match(mismatched.stdout.errors.join("\n"), /subgoal\.status blocked must match child goal\.status active/i);
+
+    writeState(root, parentBoard.replace(
+      '  status: active\nagents:',
+      '  status: done\nagents:',
+    ));
+    const prematurelyDone = runChecker(root);
+    assert.equal(prematurelyDone.status, 1);
+    assert.match(prematurelyDone.stdout.errors.join("\n"), /done goal must not reference non-done child goal for task T003; child goal\.status is active/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1220,7 +1352,7 @@ checks:
   }
 });
 
-test("rejects done goal with unfinished Worker task", () => {
+test("rejects done goal with any unfinished task", () => {
   const root = makeRoot();
   try {
     writeState(root, `
@@ -1265,6 +1397,14 @@ tasks:
     stop_if:
       - "Verification fails twice."
     receipt: null
+  - id: T003
+    type: scout
+    assignee: Scout
+    status: blocked
+    objective: "Resolve a remaining blocked decision."
+    receipt:
+      result: blocked
+      summary: "A decision remains blocked."
   - id: T999
     type: judge
     assignee: Judge
@@ -1285,7 +1425,7 @@ checks:
 `);
     const result = runChecker(root);
     assert.equal(result.status, 1);
-    assert.match(result.stdout.errors.join("\n"), /done goals must not leave queued or active Worker tasks: T002/i);
+    assert.match(result.stdout.errors.join("\n"), /done goals require every task to be done; unfinished tasks: T002, T003/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1799,5 +1939,161 @@ test("validates exact Worker-only brief bindings against current safe repository
     assert.ok(runChecker(root).stdout.errors.some((error) => /keys must be exact/.test(error)));
   } finally {
     rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("validates prospective applied provenance on installed state and candidate stdin", () => {
+  const fixture = appliedProvenanceFixture();
+  try {
+    const installed = runChecker(fixture.root);
+    assert.equal(installed.status, 0, JSON.stringify(installed.stdout.errors));
+
+    writeState(fixture.root, fixture.original);
+    const candidate = runChecker(fixture.root, { candidate: fixture.applied });
+    assert.equal(candidate.status, 0, JSON.stringify(candidate.stdout.errors));
+    assert.equal(
+      candidate.stdout.state_digest,
+      createHash("sha256").update(fixture.applied).digest("hex"),
+    );
+  } finally {
+    rmSync(fixture.repository, { recursive: true, force: true });
+  }
+});
+
+test("rejects malformed provenance, canonical receipt digest drift, and missing retained artifacts", () => {
+  for (const mutation of ["kind", "receipt_digest", "missing_source"]) {
+    const fixture = appliedProvenanceFixture();
+    try {
+      const document = parseGoalStateText(fixture.applied, { allowFallback: false });
+      const task = document.tasks.find((candidate) => candidate.id === "T001");
+      if (mutation === "kind") {
+        task.transition_evidence.receipt_provenance.kind = "goalbuddy_receipt_provenance_v0";
+      } else if (mutation === "receipt_digest") {
+        task.transition_evidence.receipt_provenance.receipt_value_sha256 = "f".repeat(64);
+      } else {
+        rmSync(fixture.sourcePath);
+      }
+      if (mutation !== "missing_source") writeState(fixture.root, serializeDocument(document));
+      const result = runChecker(fixture.root);
+      assert.equal(result.status, 1, `${mutation}: ${JSON.stringify(result.stdout)}`);
+      assert.match(
+        result.stdout.errors.join("\n"),
+        mutation === "kind"
+          ? /Receipt provenance kind is invalid/
+          : mutation === "receipt_digest"
+            ? /receipt_value_sha256 does not match/
+            : /Artifact does not exist/,
+      );
+    } finally {
+      rmSync(fixture.repository, { recursive: true, force: true });
+    }
+  }
+});
+
+test("allows an absent cleanup-eligible applied report while retaining canonical receipt proof", () => {
+  const fixture = appliedProvenanceFixture();
+  try {
+    const document = parseGoalStateText(fixture.applied, { allowFallback: false });
+    const task = document.tasks.find((candidate) => candidate.id === "T001");
+    const provenance = task.transition_evidence.receipt_provenance;
+    provenance.receipt_transport = "git_local_report";
+    provenance.report_transport = "ready";
+    provenance.dispatch_disposition = "accepted";
+    provenance.receipt_artifact.root = "git_common_dir";
+    provenance.receipt_artifact.path = "goalbuddy/dispatch-reports/T001-cleaned/dispatch-report.json";
+    provenance.receipt_artifact.retention_policy = "cleanup_eligible";
+    writeState(fixture.root, serializeDocument(document));
+
+    const result = runChecker(fixture.root);
+    assert.equal(result.status, 0, JSON.stringify(result.stdout.errors));
+  } finally {
+    rmSync(fixture.repository, { recursive: true, force: true });
+  }
+});
+
+test("validates held receipts against current task, unique handles, and unchanged source bytes", () => {
+  const { repository, root } = makeGitGoalRoot();
+  try {
+    const original = workerProvenanceBoard();
+    writeState(root, original);
+    const sourcePath = join(repository, "evidence", "T001.json");
+    writeFileSync(sourcePath, `${JSON.stringify(directWorkerReceipt(root), null, 2)}\n`);
+    const held = holdReceipt({
+      goalRoot: root,
+      taskId: "T001",
+      sourcePath: "evidence/T001.json",
+      expectedStateDigest: createHash("sha256").update(original).digest("hex"),
+    });
+    assert.equal(held.ok, true);
+    assert.equal(runChecker(root).status, 0);
+
+    const validText = readFileSync(join(root, "state.yaml"), "utf8");
+    writeFileSync(sourcePath, `${JSON.stringify({ ...directWorkerReceipt(root), summary: "changed" }, null, 2)}\n`);
+    let result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /sha256 does not match/);
+
+    writeState(root, validText);
+    writeFileSync(sourcePath, `${JSON.stringify(directWorkerReceipt(root), null, 2)}\n`);
+    writeState(root, validText.replace("Implement one bounded change.", "Implement a different bounded change."));
+    result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /task_authority_sha256/);
+
+    writeState(root, validText);
+    let document = parseGoalStateText(validText, { allowFallback: false });
+    const task = document.tasks.find((candidate) => candidate.id === "T001");
+    task.transition_evidence.held_receipts.push(structuredClone(task.transition_evidence.held_receipts[0]));
+    writeState(root, serializeDocument(document));
+    result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /must be unique across the board/);
+
+    document = parseGoalStateText(validText, { allowFallback: false });
+    document.tasks[0].transition_evidence.held_receipts[0].task_id = "T002";
+    writeState(root, serializeDocument(document));
+    result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout.errors.join("\n"), /Held receipt handle does not match|held task_id must identify/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("enforces prospective terminal fields while leaving historical receipts compatible", () => {
+  const fixture = appliedProvenanceFixture();
+  try {
+    const document = parseGoalStateText(fixture.applied, { allowFallback: false });
+    const task = document.tasks.find((candidate) => candidate.id === "T001");
+    task.receipt.completion_disposition = "exact";
+    task.receipt.accepted_deviations = [];
+    task.receipt.deviation_acceptance = null;
+    task.receipt.final_review = {
+      status: "accepted_deviation",
+      requirement_id: "exact-final-review",
+      deviation_set_sha256: "a".repeat(64),
+      observed_artifact: null,
+    };
+    task.transition_evidence.receipt_provenance.receipt_value_sha256 = canonicalJsonSha256(task.receipt);
+    writeState(fixture.root, serializeDocument(document));
+    const prospective = runChecker(fixture.root);
+    assert.equal(prospective.status, 1);
+    assert.match(prospective.stdout.errors.join("\n"), /reserved for another task role|receipt_value_sha256/);
+
+    delete task.transition_evidence.receipt_provenance;
+    writeState(fixture.root, serializeDocument(document));
+    const strippedProvenance = runChecker(fixture.root);
+    assert.equal(strippedProvenance.status, 1);
+    assert.match(strippedProvenance.stdout.errors.join("\n"), /terminal completion fields require.*receipt_provenance/);
+
+    delete task.receipt.completion_disposition;
+    delete task.receipt.accepted_deviations;
+    delete task.receipt.deviation_acceptance;
+    delete task.receipt.final_review;
+    writeState(fixture.root, serializeDocument(document));
+    const historical = runChecker(fixture.root);
+    assert.equal(historical.status, 0, JSON.stringify(historical.stdout.errors));
+  } finally {
+    rmSync(fixture.repository, { recursive: true, force: true });
   }
 });

@@ -1,10 +1,20 @@
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureDispatchManifest, compareDispatchScope, compileDispatchScope } from "../../goalbuddy/scripts/dispatch-scope-manifest.mjs";
+import {
+  captureDispatchManifest,
+  captureScopedIdentityManifest,
+  compareDispatchScope,
+  compileDispatchScope,
+  compileScopedIdentityScope,
+} from "../../goalbuddy/scripts/dispatch-scope-manifest.mjs";
+import {
+  currentArtifactIdentity,
+  scopedContentIdentity,
+} from "../../goalbuddy/scripts/current-artifact-identity.mjs";
 
 function makeRepo() {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-scope-manifest-"));
@@ -187,3 +197,182 @@ test("scope compilation rejects repository-wide and unbounded wildcard inventory
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("closed identity scope accepts only canonical exact paths and terminal trees", () => {
+  const root = makeRepo();
+  try {
+    const scope = compileScopedIdentityScope(root, ["README.md", "src/**"]);
+    assert.deepEqual(scope.patterns, ["README.md", "src/**"]);
+    assert.deepEqual(scope.exactPaths, ["README.md"]);
+    assert.deepEqual(scope.treePrefixes, ["src"]);
+    for (const pattern of [
+      resolve(root, "README.md"),
+      "src\\widget.mjs",
+      "../outside.mjs",
+      "src/*.mjs",
+      "src/**/nested",
+      "**",
+    ]) {
+      assert.throws(() => compileScopedIdentityScope(root, [pattern]), /repository-relative|outside|Unsafe scoped identity/);
+    }
+    assert.throws(() => compileScopedIdentityScope(root, ["./src/widget.mjs"]), /canonical repository-relative/);
+    assert.throws(() => compileScopedIdentityScope(root, []), /at least one path/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closed identity scope rejects a symlinked ancestor instead of silently remapping it", () => {
+  const root = makeRepo();
+  try {
+    symlinkSync("src", join(root, "alias"));
+    assert.throws(
+      () => compileScopedIdentityScope(root, ["alias/**"]),
+      /canonical repository-relative paths without lexical aliases or symlinked ancestors/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scoped identity manifest records sorted path kind, mode, and content evidence", () => {
+  const root = makeRepo();
+  try {
+    symlinkSync("widget.mjs", join(root, "src", "link.mjs"));
+    chmodSync(join(root, "src", "executable.sh"), 0o755);
+    const scope = compileScopedIdentityScope(root, ["missing.json", "src/**"]);
+    const manifest = captureScopedIdentityManifest(root, { scope });
+    assert.deepEqual(Object.keys(manifest.entries), [
+      "missing.json",
+      "src",
+      "src/delete.mjs",
+      "src/executable.sh",
+      "src/link.mjs",
+      "src/rename.mjs",
+      "src/widget.mjs",
+    ]);
+    assert.deepEqual(manifest.entries["missing.json"], {
+      kind: "missing",
+      mode: null,
+      content_sha256: null,
+    });
+    assert.equal(manifest.entries.src.kind, "directory");
+    assert.equal(manifest.entries["src/executable.sh"].mode, "100755");
+    assert.equal(manifest.entries["src/link.mjs"].kind, "symlink");
+    assert.match(manifest.entries["src/widget.mjs"].content_sha256, /^[a-f0-9]{64}$/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("current artifact identity uses HEAD only for an exact scoped match", () => {
+  const root = makeRepo();
+  try {
+    const scope = { kind: "goalbuddy_review_scope_v1", patterns: ["src/**"] };
+    const head = gitOutput(root, ["rev-parse", "HEAD"]);
+    assert.deepEqual(currentArtifactIdentity({ root, scope, reviewedCommit: head }), {
+      kind: "git_commit",
+      value: head,
+    });
+    assert.equal(currentArtifactIdentity({
+      root,
+      scope,
+      reviewedIdentity: { kind: "content_sha256", value: "f".repeat(64) },
+    }).kind, "content_sha256");
+
+    writeFileSync(join(root, "README.md"), "out-of-scope dirty\n");
+    assert.deepEqual(currentArtifactIdentity({ root, scope, reviewedCommit: head }), {
+      kind: "git_commit",
+      value: head,
+    });
+
+    writeFileSync(join(root, "src", "widget.mjs"), "export const widget = 9;\n");
+    const dirty = currentArtifactIdentity({ root, scope, reviewedCommit: head });
+    assert.equal(dirty.kind, "content_sha256");
+    assert.equal(dirty.value, scopedContentIdentity({ root, scope }).value);
+    assert.match(dirty.value, /^[a-f0-9]{64}$/);
+
+    const repeated = currentArtifactIdentity({ root, scope, reviewedCommit: head });
+    assert.deepEqual(repeated, dirty);
+    assert.equal(
+      currentArtifactIdentity({ root, scope, reviewedCommit: "0".repeat(40) }).kind,
+      "content_sha256",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("broad product scopes exclude GoalBuddy control bytes from current identity", () => {
+  const root = makeRepo();
+  try {
+    const scope = ["docs/**"];
+    const clean = currentArtifactIdentity({ root, scope });
+    assert.equal(clean.kind, "git_commit");
+
+    writeFileSync(join(root, "docs", "goals", "one", "state.yaml"), "version: 2\ngoal:\n  status: done\n");
+    writeFileSync(
+      join(root, "docs", "goals", ".one.goalbuddy-state-candidate-123"),
+      "candidate\n",
+    );
+    assert.deepEqual(
+      currentArtifactIdentity({ root, scope }),
+      clean,
+      "board transitions and their same-filesystem candidate are control state, not reviewed product bytes",
+    );
+
+    writeFileSync(join(root, "docs", "product.md"), "real product change\n");
+    assert.equal(currentArtifactIdentity({ root, scope }).kind, "content_sha256");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("untracked scoped bytes and mode changes affect identity while unrelated changes do not", () => {
+  const root = makeRepo();
+  try {
+    const scope = ["src/**"];
+    const clean = currentArtifactIdentity({ root, scope });
+    assert.equal(clean.kind, "git_commit");
+
+    writeFileSync(join(root, "outside.txt"), "unrelated\n");
+    assert.deepEqual(currentArtifactIdentity({ root, scope }), clean);
+
+    writeFileSync(join(root, "src", "new.mjs"), "new\n");
+    const untracked = currentArtifactIdentity({ root, scope });
+    assert.equal(untracked.kind, "content_sha256");
+
+    rmSync(join(root, "src", "new.mjs"));
+    chmodSync(join(root, "src", "executable.sh"), 0o755);
+    const modeChanged = currentArtifactIdentity({ root, scope });
+    assert.equal(modeChanged.kind, "content_sha256");
+    assert.notEqual(modeChanged.value, untracked.value);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("current artifact identity rejects staged bytes hidden behind restored working-tree bytes", () => {
+  const root = makeRepo();
+  try {
+    const scope = ["src/**"];
+    const path = join(root, "src", "widget.mjs");
+    const reviewed = readFileSync(path, "utf8");
+    writeFileSync(path, "export const widget = 'staged-only';\n");
+    git(root, ["add", "src/widget.mjs"]);
+    writeFileSync(path, reviewed);
+
+    assert.throws(
+      () => currentArtifactIdentity({ root, scope }),
+      /staged bytes that differ from the current working tree/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function gitOutput(root, args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return result.stdout.trim();
+}

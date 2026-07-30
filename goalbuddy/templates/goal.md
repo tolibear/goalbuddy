@@ -26,7 +26,7 @@ The oracle for this goal is:
 
 `<specific observable signal>`
 
-The PM must keep comparing task receipts to this oracle. Planning, discovery, a passing tiny slice, or a clean-looking board is not enough. The goal finishes only when a final Judge/PM audit maps receipts and verification back to this oracle and records `full_outcome_complete: true`.
+The PM must keep comparing task receipts to this oracle. Planning, discovery, a passing tiny slice, or a clean-looking board is not enough. The goal finishes only when a final Judge/PM audit maps receipts and verification back to this oracle, records `full_outcome_complete: true`, and supplies exact-current complete review proof. If that review requirement itself cannot be met, the only substitute is whole-set owner acceptance that explicitly includes the missing `exact-final-review` requirement.
 
 ## Goal Kind
 
@@ -89,7 +89,7 @@ If the local board is running, Keeper compares `state.yaml` to the live board AP
 
 ## Board Mutation Delegation
 
-During `/goal` execution, the PM owns meaning. Apply complete canonical typed decisions directly through GoalBuddy's digest-bound atomic CLI: receipt closeout/successor activation, amendment with exact task cards, placeholder hydration, exact-human wait/reply, and final completion. The CLI owns locking, identity/scope validation, checker-before-install, atomic write, rollback, and before/after digests. The PM may also directly apply one already-known, one-location scalar or one-line annotation only when the compact projection or latest validated receipt supplies the exact old and new values and no board read is needed; use the current digest, an exact-context edit, and the bundled checker. If the PM must or may need to read, search, query, or inspect the board, the state is ambiguous, runtime rebinding or repair is required, or no typed transition represents the complete decision, use `goal_keeper` in Codex or `goal-keeper` in Claude Code. Full-board PM review remains reserved for the execution contract's explicit recovery escalation.
+During `/goal` execution, the PM owns meaning. Apply complete canonical typed decisions directly through GoalBuddy's digest-bound atomic CLI: receipt closeout/successor activation, amendment with exact task cards, placeholder hydration, exact-human wait/reply, optional held-receipt preservation, and final completion. Holding preserves one exact unapplied candidate across interruption; it does not accept it or change task status. The CLI owns locking, identity/scope validation, checker-before-install, atomic write, rollback, and before/after digests. The PM may also directly apply one already-known, one-location scalar or one-line annotation only when the compact projection or latest validated receipt supplies the exact old and new values and no board read is needed; use the current digest, an exact-context edit, and the bundled checker. If the PM must or may need to read, search, query, or inspect the board, the state is ambiguous, runtime rebinding or repair is required, or no typed transition represents the complete decision, use `goal_keeper` in Codex or `goal-keeper` in Claude Code. Full-board PM review remains reserved for the execution contract's explicit recovery escalation.
 
 ## Canonical Board
 
@@ -122,6 +122,6 @@ On every `/goal` continuation:
 11. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
 12. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
 13. Apply the Execution Strategy at each seam: independent implementation review for material slices, Judge gates only at phase, risk, rejected-verification, ambiguity, or final-completion boundaries. Do not add a Judge after every Worker by habit, and do not skip independent review on a material slice on confidence alone.
-14. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
+14. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome, records `full_outcome_complete: true`, and supplies all terminal proof fields. Exact completion needs an externally covered, exact-current complete final review. Any accepted deviations require one exact persisted owner reply binding the complete ordered set; a missing exact final review must be named as the stable `exact-final-review` requirement and is never treated as `not_required`.
 
 Issue and PR handoffs are supporting artifacts. `state.yaml` remains authoritative, and every external artifact decision must be recorded in a task receipt.

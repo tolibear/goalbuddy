@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { receiptExample, validateTaskReceipt } from "../../goalbuddy/scripts/receipt-contract.mjs";
+import { projectTransitionEvidence } from "../../goalbuddy/scripts/resume-board.mjs";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
 const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
@@ -1060,6 +1061,7 @@ checks:
           taskId: "T001",
           boardPath: report.metadata.board_path,
           verify: report.task.verify,
+          terminalCompletionEligible: report.metadata.terminal_completion_eligible,
         });
         assert.deepEqual(findings, [], `${item.agent}:${resultName}`);
       }
@@ -1718,6 +1720,10 @@ test("--help on mutating commands prints help without installing", () => {
     assert.match(updateHelp.stdout, /goalbuddy update/);
     assert.equal(existsSync(codexHome), false);
     assert.equal(existsSync(claudeHome), false);
+
+    const holdHelp = runGoalMaker(["hold", "--help", "--origin-artifact", "receipts/origin.json"]);
+    assert.equal(holdHelp.status, 0, holdHelp.stderr || holdHelp.stdout);
+    assert.match(holdHelp.stdout, /goalbuddy hold .*--origin-artifact/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2461,17 +2467,154 @@ test("wait and reply expose the digest-bound exact-human lifecycle and compact r
   }
 });
 
+test("resume transition evidence preserves checker-admitted provenance and held receipts without losing identity fields", () => {
+  const provenance = {
+    kind: "goalbuddy_receipt_provenance_v1",
+    receipt_transport: "explicit_file",
+    report_transport: "not_applicable",
+    dispatch_disposition: "not_applicable",
+    closeout_authority: "original_role",
+    application_state: "applied",
+    receipt_artifact: {
+      root: "repository",
+      path: "receipts/applied.json",
+      sha256: "a".repeat(64),
+      retention_policy: "retained",
+    },
+    origin_artifact: null,
+    receipt_value_sha256: "b".repeat(64),
+  };
+  const held = [{
+    kind: "goalbuddy_held_receipt_v1",
+    task_id: "T002",
+    application_state: "held",
+    receipt_transport: "git_local_report",
+    report_transport: "ready",
+    dispatch_disposition: "accepted",
+    source_artifact: {
+      root: "git_common_dir",
+      path: "worktrees/fixture/goalbuddy/dispatch-reports/T002-run/dispatch-report.json",
+      sha256: "c".repeat(64),
+    },
+    origin_artifact: {
+      root: "repository",
+      path: "receipts/origin.json",
+      sha256: "d".repeat(64),
+    },
+    receipt_value_sha256: "e".repeat(64),
+    handle: "f".repeat(64),
+  }];
+
+  const projection = projectTransitionEvidence({
+    receipt_provenance: provenance,
+    held_receipts: held,
+  });
+
+  assert.deepEqual(projection.receipt_provenance, provenance);
+  assert.deepEqual(projection.held_receipts, held);
+  assert.notEqual(projection.receipt_provenance, provenance);
+  assert.notEqual(projection.held_receipts, held);
+  assert.equal(projectTransitionEvidence({}), null);
+});
+
+test("hold is exposed through the public CLI and resume returns the exact held-receipt identity", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-hold-cli-"));
+  try {
+    const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    mkdirSync(join(root, "receipts"), { recursive: true });
+    const sourcePath = join(root, "receipts", "source.json");
+    writeFileSync(sourcePath, JSON.stringify({
+      result: "done",
+      task_id: "T002",
+      board_path: statePath,
+      harness: "codex",
+      changed_files: ["src/widget.mjs"],
+      commands: [{ cmd: "npm test", status: "pass" }],
+      summary: "Implemented and verified the authorized task.",
+      deviations: [],
+    }));
+    const before = readFileSync(statePath, "utf8");
+    const digest = createHash("sha256").update(before).digest("hex");
+
+    const held = runGoalMaker([
+      "hold",
+      goalDir,
+      "--task",
+      "T002",
+      "--source",
+      "receipts/source.json",
+      "--expected-state-digest",
+      digest,
+      "--json",
+    ], { cwd: root });
+    assert.equal(held.status, 0, held.stderr || held.stdout);
+    const holdReport = JSON.parse(held.stdout);
+
+    const resumed = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(resumed.status, 0, resumed.stderr || resumed.stdout);
+    const projectedHeld = JSON.parse(resumed.stdout).board.active_task.transition_evidence.held_receipts;
+    assert.equal(projectedHeld.length, 1);
+    assert.equal(projectedHeld[0].handle, holdReport.handle);
+    assert.equal(projectedHeld[0].source_artifact.path, "receipts/source.json");
+    assert.equal(projectedHeld[0].source_artifact.sha256, createHash("sha256").update(readFileSync(sourcePath)).digest("hex"));
+    assert.equal(projectedHeld[0].receipt_value_sha256.length, 64);
+    assert.equal(projectedHeld[0].origin_artifact, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("complete is exposed through the public CLI and closes an audit-only tail", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-complete-cli-"));
   try {
+    const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
     const goalDir = writeResumeGoal(root, "one", { active: false });
     const statePath = join(goalDir, "state.yaml");
+    mkdirSync(join(root, "src"), { recursive: true });
+    mkdirSync(join(root, "reviews"), { recursive: true });
+    writeFileSync(join(root, "src", "widget.mjs"), "export const widget = true;\n");
     let state = readFileSync(statePath, "utf8")
       .replace("  status: done\n  oracle:", "  status: active\n  oracle:")
       .replace("active_task: null", "active_task: T999")
       .replace("  - id: T999\n    type: judge\n    assignee: Judge\n    status: done", "  - id: T999\n    type: judge\n    assignee: Judge\n    status: active")
       .replace(/    receipt:\n      result: done\n      decision: complete\n      full_outcome_complete: true\n      rationale: "The widget is complete and npm test passed\."\n      evidence:\n        - src\/widget\.mjs\n/, "    receipt: null\n");
     writeFileSync(statePath, state);
+    const committed = spawnSync("git", [
+      "-c", "user.name=GoalBuddy Test",
+      "-c", "user.email=goalbuddy@example.invalid",
+      "-c", "commit.gpgsign=false",
+      "add", ".",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(committed.status, 0, committed.stderr);
+    const commit = spawnSync("git", [
+      "-c", "user.name=GoalBuddy Test",
+      "-c", "user.email=goalbuddy@example.invalid",
+      "-c", "commit.gpgsign=false",
+      "commit", "-qm", "completion fixture",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(commit.status, 0, commit.stderr);
+    const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
+    assert.equal(head.status, 0, head.stderr);
+    const identity = { kind: "git_commit", value: head.stdout.trim() };
+    const review = {
+      kind: "goalbuddy_final_review_v1",
+      workflow_version: "goalbuddy-cli-test-review@1",
+      scope: {
+        kind: "goalbuddy_review_scope_v1",
+        patterns: ["src/**"],
+      },
+      base_identity: identity,
+      reviewed_identity: identity,
+      completeness_status: "complete",
+      decision: "complete",
+      unresolved_blocking_findings: [],
+    };
+    const reviewBytes = `${JSON.stringify(review, null, 2)}\n`;
+    writeFileSync(join(root, "reviews", "final-review.json"), reviewBytes);
     const digest = createHash("sha256").update(state).digest("hex");
     const receiptPath = join(root, "final.json");
     writeFileSync(receiptPath, JSON.stringify({
@@ -2483,6 +2626,21 @@ test("complete is exposed through the public CLI and closes an audit-only tail",
       rationale: "The current receipts and verification prove the final outcome.",
       evidence: ["src/widget.mjs", "npm test"],
       summary: "The public CLI proved the final outcome.",
+      completion_disposition: "exact",
+      accepted_deviations: [],
+      deviation_acceptance: null,
+      final_review: {
+        status: "complete",
+        artifact: {
+          path: "reviews/final-review.json",
+          sha256: createHash("sha256").update(reviewBytes).digest("hex"),
+        },
+        workflow_version: review.workflow_version,
+        scope: review.scope,
+        base_identity: review.base_identity,
+        reviewed_identity: review.reviewed_identity,
+        completeness_status: review.completeness_status,
+      },
     }));
 
     const result = runGoalMaker(["complete", goalDir, "--task", "T999", "--receipt", receiptPath, "--expected-state-digest", digest, "--json"], { cwd: root });
@@ -2724,18 +2882,49 @@ test("resume projects complete_goal only for eligible Judge and PM tails in norm
   }
 });
 
-test("resume preserves blocked-sibling completion parity and suppresses illegal completion", () => {
+test("resume suppresses completion for every unfinished sibling and non-audit active task", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-complete-parity-"));
   try {
     const blockedGoal = writeCompletionProjectionGoal(root, "blocked-sibling", { blockedSibling: true });
     const blocked = runGoalMaker(["resume", blockedGoal, "--json"], { cwd: root });
     assert.equal(blocked.status, 0, blocked.stderr || blocked.stdout);
-    assert.equal(JSON.parse(blocked.stdout).commands.complete_goal.operation, "complete_goal");
+    assert.equal(JSON.parse(blocked.stdout).commands.complete_goal, null);
 
     const queuedGoal = writeCompletionProjectionGoal(root, "queued-sibling", { queuedSibling: true });
     const queued = runGoalMaker(["resume", queuedGoal, "--json"], { cwd: root });
     assert.equal(queued.status, 0, queued.stderr || queued.stdout);
     assert.equal(JSON.parse(queued.stdout).commands.complete_goal, null);
+
+    const childGoal = writeCompletionProjectionGoal(root, "unfinished-child");
+    writeResumeChildBoard(childGoal);
+    const childStatePath = join(childGoal, "state.yaml");
+    const childState = readFileSync(childStatePath, "utf8");
+    const childBoundState = childState.replace(
+      [
+        "    stop_if:",
+        '      - "Need files outside allowed_files."',
+        "    receipt: ",
+        "      result: done",
+      ].join("\n"),
+      [
+        "    stop_if:",
+        '      - "Need files outside allowed_files."',
+        "    subgoal:",
+        "      status: active",
+        "      path: subgoals/T002-child/state.yaml",
+        "      owner: Worker",
+        "      created_from: T002",
+        "      depth: 1",
+        "      rollup_receipt: null",
+        "    receipt: ",
+        "      result: done",
+      ].join("\n"),
+    );
+    assert.notEqual(childBoundState, childState);
+    writeFileSync(childStatePath, childBoundState);
+    const unfinishedChild = runGoalMaker(["resume", childGoal, "--json"], { cwd: root });
+    assert.equal(unfinishedChild.status, 0, unfinishedChild.stderr || unfinishedChild.stdout);
+    assert.equal(JSON.parse(unfinishedChild.stdout).commands.complete_goal, null);
 
     const workerGoal = writeResumeGoal(root, "active-worker", { active: true });
     const worker = runGoalMaker(["resume", workerGoal, "--json"], { cwd: root });

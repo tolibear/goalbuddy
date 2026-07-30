@@ -213,10 +213,15 @@ export function runResumeChecker(goalDir) {
   };
 }
 
-export function captureBoardTreeSnapshots(goalDir, rootReport, rootStateText, { checkerScript = join(skillRoot, "scripts", "check-goal-state.mjs") } = {}) {
+export function captureBoardTreeSnapshots(goalDir, rootReport, rootStateText, {
+  checkerScript = join(skillRoot, "scripts", "check-goal-state.mjs"),
+  allowRootCheckerErrors = false,
+} = {}) {
   const root = resolve(goalDir);
   const rootDigest = sha256(rootStateText);
-  if (rootReport?.ok !== true || rootReport?.version !== 2 || rootReport?.state_digest !== rootDigest) {
+  if ((!allowRootCheckerErrors && rootReport?.ok !== true)
+      || rootReport?.version !== 2
+      || rootReport?.state_digest !== rootDigest) {
     throw new Error("GoalBuddy board tree requires the exact checker-valid root state snapshot.");
   }
 
@@ -581,12 +586,17 @@ function projectResumeTask(raw, normalized) {
   };
 }
 
-function projectTransitionEvidence(evidence) {
-  const replies = evidence && typeof evidence === "object" && !Array.isArray(evidence) && Array.isArray(evidence.exact_human_replies)
-    ? evidence.exact_human_replies
+export function projectTransitionEvidence(evidence) {
+  const record = evidence && typeof evidence === "object" && !Array.isArray(evidence)
+    ? evidence
+    : null;
+  const replies = record && Array.isArray(record.exact_human_replies)
+    ? record.exact_human_replies
     : [];
-  const session = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence.codex_worker_session : null;
-  if (replies.length === 0 && !session) return null;
+  const session = record?.codex_worker_session ?? null;
+  const hasReceiptProvenance = record ? Object.hasOwn(record, "receipt_provenance") : false;
+  const hasHeldReceipts = record ? Object.hasOwn(record, "held_receipts") : false;
+  if (replies.length === 0 && !session && !hasReceiptProvenance && !hasHeldReceipts) return null;
   const latest = replies[replies.length - 1] || {};
   return {
     exact_human_reply_count: replies.length || undefined,
@@ -605,6 +615,12 @@ function projectTransitionEvidence(evidence) {
       brief_sha256: session.brief_sha256 === null ? null : resumeText(session.brief_sha256),
       recovery_warning: "Session identity is durable, but liveness is not. Confirm the original Worker is terminal or lost before exact-ID resume.",
     } : undefined,
+    receipt_provenance: hasReceiptProvenance
+      ? structuredClone(record.receipt_provenance)
+      : undefined,
+    held_receipts: hasHeldReceipts
+      ? structuredClone(record.held_receipts)
+      : undefined,
   };
 }
 

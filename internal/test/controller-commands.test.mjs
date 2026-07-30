@@ -34,8 +34,18 @@ test("completion eligibility exactly matches the mechanical complete preconditio
         { id: "T999", type: "judge", status: "active", receipt: null },
       ],
     })),
+    false,
+    "blocked siblings prevent completion",
+  );
+  assert.equal(
+    isCompletionEligible(eligibilityInput({
+      tasks: [
+        { id: "T998", type: "worker", status: "done", receipt: { result: "done" } },
+        { id: "T999", type: "judge", status: "active", receipt: null },
+      ],
+    })),
     true,
-    "blocked siblings do not prevent completion",
+    "done siblings permit completion",
   );
 
   const negatives = [
