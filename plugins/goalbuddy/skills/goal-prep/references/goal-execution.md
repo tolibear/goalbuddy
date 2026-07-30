@@ -66,7 +66,7 @@ Claude resolves semantic capabilities to its native workflow planning, review, s
 
 Important claims require independent verification. A completion claim alone is not proof. Bind reviews to the artifact/diff, workflow version, base/current commit or content-addressed snapshot, and completeness status. If the reviewed input changes, the old review is stale. Decisive verification gates rerun against exact current bytes; in dirty or shared worktrees, bypass stale caches when the gate supports it.
 
-Downward deviations from the charter's material-slice ladder are PM-owned evidence. Record the reason in the next phase-gate or final-audit receipt's existing `deviations` field. Do not create diary cards or Worker-owned skip notes.
+PM owns any downward ladder deviation. Put its reason in the next phase-gate or final-audit Judge/PM receipt's `evidence`, never Worker `deviations`. If an outcome requirement remains unmet, terminal `accepted_deviations` and exact owner acceptance are required. Do not create diary cards or Worker skip notes.
 
 ## Dispatch and exact-session continuation
 

@@ -500,6 +500,9 @@ test("adaptive execution strategy governs quality routing in contract and charte
     assert.match(text, /bounded file, directory, or analyzable glob scope/);
     assert.match(text, /Do not widen an already-active task after writes exist/);
     assert.doesNotMatch(text, /review only at risk or phase boundaries/);
+    assert.match(text, /Judge\/PM receipt's `evidence`/);
+    assert.match(text, /terminal `accepted_deviations` and exact owner acceptance/);
+    assert.doesNotMatch(text, /receipt's existing `deviations` field/);
   }
   for (const text of [canonicalGoalTemplate, pluginGoalTemplate]) {
     assert.match(text, /## Execution Strategy/);
