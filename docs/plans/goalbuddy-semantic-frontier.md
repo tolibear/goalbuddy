@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This plan must be maintained in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`. It builds on the completed interface work recorded in `docs/plans/goalbuddy-interface-simplification.md` and the Worker-continuity work recorded in `docs/plans/goalbuddy-fable-efficiency-stabilization.md`, but it is self-contained: an implementer should be able to execute it without reading those earlier plans.
 
-Status: **Canonical active GoalBuddy ExecPlan — reconciled, independently approved, and owner-authorized for the durability commit, isolated worktree, and Milestone 0 implementation. Milestones 1-5 and activation remain separately gated.**
+Status: **Canonical active GoalBuddy ExecPlan — reconciled and independently approved; Milestone 0 is implemented and verified on the isolated branch. Milestones 1-5 and activation remain separately gated.**
 
 ## Purpose / Big Picture
 
@@ -28,7 +28,7 @@ The observable success case is a material slice in which Fable needs one healthy
 - [x] (2026-07-30) Obtained explicit owner approval for the reviewed-plan durability commit, isolated implementation worktree, and Milestone 0 implementation; Milestones 1-5 and activation remain separately gated.
 - [x] (2026-07-30) Completed a ChatGPT Pro Milestone 0 collaboration review and local source adjudication; accepted the full bounded JSON-safe inverse, complete reserialized-receipt expectation coverage, shared completion eligibility, blocked-sibling parity, exact task-ID scanning, and positional-help wording corrections without changing the milestone architecture.
 - [x] (2026-07-30) Committed the reviewed plan at `ab867f1`, created clean isolated branch `codex/goalbuddy-semantic-frontier-m0`, and established the isolated baseline: 250 Node tests and 49 Python tests passed; `npm pack --dry-run` produced a 147-file, 12.8 MB package preview.
-- [ ] Implement Milestone 0: strict candidate projectability, exact receipt round-trip, exact completion projection, next-free task ID, and positional help. (In progress: durability gate and isolated baseline complete; red public fixtures and implementation remain.)
+- [x] (2026-07-30) Implemented Milestone 0: every candidate now passes strict parse, resume normalization, and exact reserialized-receipt checks before install; completion projection shares mutation eligibility; task IDs scan `T000` through `T999`; and direct help lists all five positional modes. After three independent read-only reviews and targeted fixes, `npm run check` passed 259 Node tests and 49 Python tests, and `npm run pack:dry-run` previewed 149 files at 12.8 MB.
 - [ ] Implement Milestone 1: automatic task-level JIT brief binding and early closed-object validation for `worker_package`.
 - [ ] Implement Milestone 2: durable applied provenance and held-receipt evidence, deviation-set acceptance, and exact-final-review contracts.
 - [ ] Implement Milestone 3: a provenance-aware semantic frontier in shadow mode and repair every decision-relevant omission.
@@ -78,6 +78,15 @@ The observable success case is a material slice in which Fable needs one healthy
 - Observation: The owner-authorized implementation baseline is green in the isolated worktree.
   Evidence: on branch `codex/goalbuddy-semantic-frontier-m0` at `ab867f1`, `npm run check` passed 250 Node tests and 49 Python tests, while `npm run pack:dry-run` previewed 147 files, 12.8 MB packed and 14.2 MB unpacked, without changing the worktree.
 
+- Observation: Strict parser work can fail outside the narrow red fixture even when focused tests are green.
+  Evidence: the first integrated run exposed an undefined variable in ordinary YAML comment stripping, and independent review found that unrestricted inline-colon detection changed path and URL scalars into mappings. The fixes preserve no-space object mappings, require YAML separation only for inline sequence mappings, and cover ordinary comments plus colon-bearing path and URL values.
+
+- Observation: Resume normalization is part of candidate projectability and must tolerate the entire admitted receipt domain.
+  Evidence: a JSON-safe evidence object may legally own non-callable `toString` or `valueOf` keys. Direct `String(object)` then throws even though parsing and receipt validation succeed. Object-valued display text now uses guarded JSON serialization, and the exact receipt fixture proves those keys remain data.
+
+- Observation: The completed Milestone 0 release candidate is green and package-complete without touching the live installation.
+  Evidence: the final isolated `npm run check` passed 259 Node tests and 49 Python tests; the synchronized canonical/plugin trees include `completion-eligibility.mjs`; `npm run pack:dry-run` previewed 149 files, 12.8 MB packed and 14.2 MB unpacked. No live Codex or Claude home, active board, product repository, or user configuration was changed.
+
 ## Decision Log
 
 - Decision: Preserve board version 2, task roles, historical receipts, exact session binding, scope enforcement, and the existing atomic transition boundary; permit only the narrow additive receipt fields required for honest completion proof.
@@ -124,6 +133,10 @@ The observable success case is a material slice in which Fable needs one healthy
   Rationale: Checking only two fixtures or only the newly supplied source receipt would leave silent type changes, nested-array failures, unsafe-key corruption, prior copied wait-receipt corruption, and required null receipt slots outside the proof. The installer remains semantics-blind: callers identify stable task-relative receipt paths and expected values, while the shared gate strictly parses, normalizes, and deep-compares them before rename.
   Date/Author: 2026-07-30 / Codex
 
+- Decision: Use one pure mechanical completion-eligibility result for both mutation and projection while leaving receipt semantics at the mutation boundary.
+  Rationale: The checked projection must not advertise a command the mutator rejects, and blocked siblings must retain the existing legal parity. Judge/PM receipt schema, `result: done`, `decision: complete`, and `full_outcome_complete: true` remain authoritative apply-time checks because they cannot be known before the receipt exists.
+  Date/Author: 2026-07-30 / Codex
+
 - Decision: Keep full evidence available through explicit drill-down references and never replace the full diff or decisive screenshots with summaries.
   Rationale: Compression can save context but can also suppress evidence. The frontier is a navigation and decision packet, not the sole evidence store.
   Date/Author: 2026-07-21 / Codex
@@ -142,7 +155,11 @@ The observable success case is a material slice in which Fable needs one healthy
 
 ## Outcomes & Retrospective
 
-No runtime implementation exists yet. Plan reconciliation is complete: this is the only surviving GoalBuddy implementation plan; the useful task-level brief-binding and runtime-correctness work has been absorbed; the receipt index, owner profile/evaluation program, and monitor have been retired; and the closeout design now matches actual run provenance. At the end of Milestone 3, record whether the shadow frontier preserved every fact that changed Fable's judgment. At the end of Milestone 5, record the change in Fable-visible GoalBuddy calls and input volume together with plan, prompt, review, screenshot, scope, deviation, and completion decisions. Final completion requires reduced mechanical burden, truthful terminal semantics, exact-current-review proof when required, and no evidence of reduced product quality.
+Milestone 0 is complete on the isolated branch. Candidate installation now fails closed unless the exact bytes strictly parse, normalize through the resume path, and preserve every receipt-semantic subtree reserialized by that transition. The bounded serializer/parser inverse covers ambiguous strings, finite exponent numbers, negative zero, nested and empty arrays, unsafe or empty mapping keys, prototype-shaped keys, legacy indentationless sequences, ordinary comments, colon-bearing plain sequence scalars, and JSON-safe evidence objects with shadowing own keys. Projection now reports the lowest free root task ID and an exact `complete_goal` command only when the same pure mechanical predicate used by mutation says completion is legal; `apply_receipt` remains available.
+
+The milestone added nine Node tests over the isolated baseline and no dependencies. Independent review found two high-severity edge cases before commit; both were fixed and the targeted re-reviews returned no findings. Final verification is 259 Node tests plus 49 Python tests, a byte-exact plugin mirror, and a 149-file package preview. No live installation or activation occurred.
+
+Plan reconciliation remains complete: this is the only surviving GoalBuddy implementation plan; the useful task-level brief-binding and runtime-correctness work has been absorbed; the receipt index, owner profile/evaluation program, and monitor have been retired; and the closeout design now matches actual run provenance. At the end of Milestone 3, record whether the shadow frontier preserved every fact that changed Fable's judgment. At the end of Milestone 5, record the change in Fable-visible GoalBuddy calls and input volume together with plan, prompt, review, screenshot, scope, deviation, and completion decisions. Final completion requires reduced mechanical burden, truthful terminal semantics, exact-current-review proof when required, and no evidence of reduced product quality.
 
 ## Context and Orientation
 
@@ -508,3 +525,5 @@ It does not remove Fable from material planning, Codex prompt authoring or appro
 2026-07-30: Hardened the reconciled plan after independent Goal Judge review. The applied-provenance fields are now orthogonal and a digest-bound `hold` transition is the only durable source of recoverable held receipts; transport-unavailable dispatch output is consumed directly without a Fable-authored receipt copy; final review is a closed union that distinguishes exact current proof from an owner-accepted missing requirement; evidence schemas precede the shadow frontier; and a pre-worktree Git durability gate prevents implementation from starting from an untracked plan.
 
 2026-07-30: Recorded owner authorization for the durability commit, isolated worktree, and Milestone 0 only, together with the adjudicated ChatGPT Pro findings. The architecture is unchanged, but the Milestone 0 oracle now explicitly covers the complete bounded JSON-safe serializer/parser inverse, every reserialized receipt-semantic subtree, shared completion eligibility including blocked-sibling parity, exact `T000` through `T999` allocation, and accurate positional-help wording. Milestones 1-5 and activation still require separate authorization.
+
+2026-07-30: Completed Milestone 0 on the isolated branch. Root verification and independent review repaired ordinary-comment handling, colon-bearing plain sequence scalars, and object display normalization for shadowing own keys before the final green run. The canonical/plugin runtime trees are synchronized, the package contains the new shared eligibility module, and Milestones 1-5 plus activation remain untouched and separately gated.

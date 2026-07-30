@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { bindCodexWorkerSession } from "../../goalbuddy/scripts/apply-receipt.mjs";
 
 const script = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const checker = resolve("goalbuddy/scripts/check-goal-state.mjs");
@@ -409,8 +410,17 @@ test("apply-receipt help is read-only while malformed ordinary calls still fail 
     for (const flag of ["--help", "-h"]) {
       const help = spawnSync(process.execPath, [script, flag], { cwd: root, encoding: "utf8" });
       assert.equal(help.status, 0, help.stderr || help.stdout);
-      assert.match(help.stdout, /^Usage: node apply-receipt\.mjs /);
-      for (const option of ["--add-tasks", "--hydrate-task", "--task-card", "--task-card-sha256"]) {
+      assert.match(help.stdout, /^Usage:\n/);
+      for (const usage of [
+        "[receipt] <goal-root> --task T### --receipt <file>",
+        "wait <goal-root> --task T### --receipt <file>",
+        "reply <goal-root> --task T### --reply-file <file>",
+        "complete <goal-root> --task T### --receipt <file>",
+        "rebind <goal-root> --binding <binding.json> --installed-checker <path>",
+      ]) {
+        assert.equal(help.stdout.includes(usage), true, `${flag} help includes ${usage}`);
+      }
+      for (const option of ["--add-tasks", "--hydrate-task", "--task-card", "--task-card-sha256", "--expected-state-digest"]) {
         assert.match(help.stdout, new RegExp(option), `${flag} help includes ${option}`);
       }
       assert.equal(readFileSync(statePath, "utf8"), before);
@@ -460,6 +470,71 @@ test("apply-receipt preserves receipt task and board identity losslessly", () =>
     assert.equal(storedReceipt.task_id, "T001");
     assert.equal(storedReceipt.board_path, boardPath);
     assert.deepEqual(storedReceipt.evidence, receipt.evidence);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt round-trips the complete admitted JSON-safe receipt value domain", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const payload = JSON.parse(`{
+      "ambiguous_strings": ["0", "-0", "1e3", "true", "false", "null", "~", ""],
+      "finite_numbers": [1e+21, 1e-7, -0, 42.5],
+      "nested_arrays": [[["deep"], []], [1, [2, [3]]]],
+      "first_nested_sequence_value": [{"first": [["nested"]], "after": "retained"}],
+      "unsafe_keys": {
+        "": "empty",
+        "colon:key": "colon",
+        "space key": "space",
+        "__proto__": {"polluted": false}
+      }
+    }`);
+    payload.ambiguous_strings.push("hash # retained", 'escaped \\" quote # retained', "line\nbreak", "trailing\\");
+    Object.defineProperty(payload.unsafe_keys, "line\nbreak: # key", {
+      value: "quoted key retained",
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    payload.finite_numbers[2] = -0;
+    const receipt = {
+      ...DONE_RECEIPT,
+      board_path: boardPath,
+      evidence: [{
+        kind: "json-safe-inverse",
+        toString: "shadowed own toString remains data",
+        valueOf: "shadowed own valueOf remains data",
+        payload,
+      }],
+    };
+    const receiptText = JSON.stringify(receipt).replace(
+      '"finite_numbers":[1e+21,1e-7,0,42.5]',
+      '"finite_numbers":[1e+21,1e-7,-0,42.5]',
+    );
+    const expectedReceipt = JSON.parse(receiptText);
+    const receiptPath = join(root, "receipt.json");
+    writeFileSync(receiptPath, receiptText);
+    const digest = createHash("sha256").update(readFileSync(boardPath)).digest("hex");
+
+    const result = spawnSync(process.execPath, [
+      script,
+      "docs/goals/one",
+      "--task", "T001",
+      "--receipt", receiptPath,
+      "--expected-state-digest", digest,
+      "--activate", "T999",
+      "--json",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const board = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    const storedReceipt = board.tasks.find((task) => task.id === "T001").receipt;
+    assert.deepEqual(storedReceipt, expectedReceipt);
+    assert.equal(Object.is(storedReceipt.evidence[0].payload.finite_numbers[2], -0), true);
+    assert.equal(Object.hasOwn(storedReceipt.evidence[0].payload.unsafe_keys, "__proto__"), true);
+    assert.equal(Object.getPrototypeOf(storedReceipt.evidence[0].payload.unsafe_keys), Object.prototype);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -630,6 +705,9 @@ test("apply-receipt adds exact amendment tasks, closes the current task, and act
     assert.match(state, /- id: T047[\s\S]*status: queued/);
     assert.match(state, /allowed_files:\n      - src\/widget\.mjs\n      - test\/widget\.test\.mjs/);
     assert.match(state, /objective: "Implement the exact amended slice without truncating this deliberately long task payload\."/);
+    const board = parseGoalStateText(state, { allowFallback: false });
+    assert.equal(board.tasks.find((task) => task.id === "T046").receipt, null);
+    assert.equal(board.tasks.find((task) => task.id === "T047").receipt, null);
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(JSON.parse(check.stdout).ok, true, check.stdout);
@@ -658,6 +736,7 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
     assert.doesNotMatch(state, /approval_phrase|approval_phrases|boundary_classification/);
     assert.doesNotMatch(state, /Provisional worker/);
     assert.doesNotMatch(state, /provisional card has not been replaced/);
+    assert.equal(parseGoalStateText(state, { allowFallback: false }).tasks.find((task) => task.id === "T042").receipt, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1037,12 +1116,56 @@ test("exact-human wait and reply are atomic, strict, durable, and final-receipt 
     assert.equal(replay.status, 1, replay.stdout);
     assert.equal(readFileSync(boardPath, "utf8"), resumedState);
 
+    const secondWaitReceipt = {
+      ...waitReceipt,
+      required_reply: "Approve T001 again exactly",
+      summary: "A second exact wait proves prior copied receipts survive another evidence rewrite.",
+    };
+    const secondWait = runWait(root, ["--task", "T001", "--expected-state-digest", exactReport.after_digest], secondWaitReceipt);
+    assert.equal(secondWait.status, 0, secondWait.stderr || secondWait.stdout);
+    const secondWaitReport = JSON.parse(secondWait.stdout);
+    const secondReply = runReply(root, ["--task", "T001", "--expected-state-digest", secondWaitReport.after_digest], { reply: secondWaitReceipt.required_reply });
+    assert.equal(secondReply.status, 0, secondReply.stderr || secondReply.stdout);
+    const secondReplyReport = JSON.parse(secondReply.stdout);
+    const resumedAgain = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    const copiedReplies = resumedAgain.tasks.find((task) => task.id === "T001").transition_evidence.exact_human_replies;
+    assert.equal(copiedReplies.length, 2);
+    assert.deepEqual(copiedReplies[0], evidence);
+    assert.deepEqual(copiedReplies[1].wait_receipt, secondWaitReceipt);
+
+    const bindingReport = bindCodexWorkerSession({
+      goalRoot: goalDir,
+      taskId: "T001",
+      expectedStateDigest: secondReplyReport.after_digest,
+      allowImmutableHistory: false,
+    }, {
+      harness: "codex",
+      session_id: "019f6dab-7b25-7620-9da6-4f79a0648146",
+      task_id: "T001",
+      board_path_sha256: "1".repeat(64),
+      workspace_root_sha256: "2".repeat(64),
+      codex_home_sha256: "3".repeat(64),
+      dispatch_contract_sha256: "4".repeat(64),
+      model: "gpt-5.6-sol",
+      reasoning_effort: "medium",
+      service_tier: "fast",
+      sandbox: "danger-full-access",
+      brief_path: null,
+      brief_sha256: null,
+      launch_state_digest: secondReplyReport.after_digest,
+    });
+    assert.equal(bindingReport.ok, true, JSON.stringify(bindingReport));
+    const boundBoard = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
+    const boundEvidence = boundBoard.tasks.find((task) => task.id === "T001").transition_evidence;
+    assert.deepEqual(boundEvidence.exact_human_replies, copiedReplies);
+    assert.equal(boundEvidence.codex_worker_session.session_id, "019f6dab-7b25-7620-9da6-4f79a0648146");
+
     const final = runApply(root, ["--task", "T001", "--activate", "T999"], DONE_RECEIPT);
     assert.equal(final.status, 0, final.stderr || final.stdout);
     const finalBoard = parseGoalStateText(readFileSync(boardPath, "utf8"), { allowFallback: false });
     const finalTask = finalBoard.tasks.find((task) => task.id === "T001");
     assert.equal(finalTask.receipt.result, "done");
-    assert.deepEqual(finalTask.transition_evidence.exact_human_replies[0], evidence);
+    assert.deepEqual(finalTask.transition_evidence.exact_human_replies, copiedReplies);
 
     const check = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
     assert.equal(check.status, 0, check.stdout);
@@ -1192,7 +1315,7 @@ test("receipt transition works on a checker-tolerated legacy dialect without str
   try {
     const boardPath = join(goalDir, "state.yaml");
     const before = readFileSync(boardPath, "utf8");
-    assert.throws(() => parseGoalStateText(before, { allowFallback: false }));
+    assert.doesNotThrow(() => parseGoalStateText(before, { allowFallback: false }));
     const historicalBefore = before.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0];
     const digest = createHash("sha256").update(before).digest("hex");
     const result = runApply(root, ["--task", "T999", "--activate", "T998", "--expected-state-digest", digest, "--allow-immutable-history"], {
@@ -1211,6 +1334,50 @@ test("receipt transition works on a checker-tolerated legacy dialect without str
     const after = readFileSync(boardPath, "utf8");
     assert.equal(after.match(/  - id: T007[\s\S]*?(?=  - id: T999)/)?.[0], historicalBefore);
     assert.match(after, /active_task: T998/);
+    assert.doesNotThrow(() => parseGoalStateText(after, { allowFallback: false }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("strict candidate projection rejects checker-admitted unsupported YAML without changing bytes or digest", () => {
+  const { root, goalDir } = makeCompletionBoard({ legacyDecision: true, legacyDialect: true, extraQueued: true });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const unsupported = readFileSync(boardPath, "utf8").replace(
+      "      evidence:\n      - kind: legacy-indentation\n",
+      "      evidence:\n       - kind: legacy-indentation\n",
+    );
+    writeFileSync(boardPath, unsupported);
+    const before = readFileSync(boardPath, "utf8");
+    const beforeDigest = createHash("sha256").update(before).digest("hex");
+    const baselineCheck = spawnSync(process.execPath, [checker, goalDir], { encoding: "utf8" });
+    assert.equal(JSON.parse(baselineCheck.stdout).errors.length, 1, baselineCheck.stdout);
+    assert.throws(() => parseGoalStateText(before, { allowFallback: false }), /odd indentation/);
+
+    const result = runApply(root, [
+      "--task", "T999",
+      "--activate", "T998",
+      "--expected-state-digest", beforeDigest,
+      "--allow-immutable-history",
+    ], {
+      result: "done",
+      task_id: "T999",
+      board_path: boardPath,
+      decision: "approved",
+      rationale: "The current audit supports the declared successor.",
+      evidence: ["Current audit evidence."],
+      summary: "The current audit closed and selected the already-declared successor.",
+    });
+
+    const report = failureReport(result);
+    assert.match(report.error, /strict(?:ly)? (?:parse|resum)/i);
+    assert.equal(report.before_digest, beforeDigest);
+    assert.equal(report.after_digest, beforeDigest);
+    assert.equal(report.mutation.board, "unchanged");
+    assert.equal(readFileSync(boardPath, "utf8"), before);
+    assert.equal(createHash("sha256").update(readFileSync(boardPath)).digest("hex"), beforeDigest);
+    assert.equal(existsSync(join(root, "receipt.json")), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

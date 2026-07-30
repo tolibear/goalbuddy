@@ -5,10 +5,12 @@ import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { immutableHistoryCompatibility, rawTaskBlock, sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue } from "./public-error.mjs";
-import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { normalizeGoalBoard, parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
+import { completionEligibility } from "./completion-eligibility.mjs";
 import { assertTaskReceipt } from "./receipt-contract.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -68,8 +70,13 @@ function runApplyCli(args) {
 }
 
 function printApplyHelp() {
-  console.log("Usage: node apply-receipt.mjs <goal-root> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <sha256>]] [--json]");
-  console.log("Applies one validated task receipt and activates one explicit queued successor atomically.");
+  console.log("Usage:");
+  console.log("  node apply-receipt.mjs [receipt] <goal-root> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <sha256>]] [--json]");
+  console.log("  node apply-receipt.mjs wait <goal-root> --task T### --receipt <file> --expected-state-digest <sha256> [--json]");
+  console.log("  node apply-receipt.mjs reply <goal-root> --task T### --reply-file <file> --expected-state-digest <sha256> [--json]");
+  console.log("  node apply-receipt.mjs complete <goal-root> --task T### --receipt <file> --expected-state-digest <sha256> [--allow-immutable-history] [--json]");
+  console.log("  node apply-receipt.mjs rebind <goal-root> --binding <binding.json> --installed-checker <path> [--installed-checker <path> ...] --expected-state-digest <sha256> [--allow-immutable-history] [--json]");
+  console.log("The positional receipt mode token is optional; --receipt <file> is required for receipt, wait, and complete.");
 }
 
 function isDirectRun() {
@@ -184,7 +191,7 @@ export function bindCodexWorkerSession(options, sessionEvidence) {
       task_id: options.taskId,
       active_task: options.taskId,
       session_id: sessionEvidence.session_id,
-    });
+    }, waitReceiptExpectations(options.taskId, transitionEvidence));
   });
 }
 
@@ -239,7 +246,11 @@ function applyReceiptUnderLock(options, statePath) {
     hydration_sha256: hydration?.sha256 ?? null,
     status,
     active_task: nextActive,
-  });
+  }, [
+    receiptExpectation(options.taskId, ["receipt"], receipt),
+    ...taskCards.map((task) => receiptExpectation(task.id, ["receipt"], null)),
+    ...(hydration ? [receiptExpectation(options.hydrateTaskId, ["receipt"], null)] : []),
+  ]);
 }
 
 export function enterExactHumanWait(options) {
@@ -273,7 +284,7 @@ function enterExactHumanWaitUnderLock(options, statePath) {
     status: "blocked",
     active_task: null,
     no_change: false,
-  });
+  }, [receiptExpectation(options.taskId, ["receipt"], receipt)]);
 }
 
 export function resumeExactHumanReply(options) {
@@ -346,7 +357,10 @@ function resumeExactHumanReplyUnderLock(options, statePath) {
     wait_board_digest: context.originalDigest,
     required_reply_sha256: sha256(task.receipt.required_reply),
     reply_sha256: sha256(reply),
-  });
+  }, [
+    receiptExpectation(options.taskId, ["receipt"], null),
+    ...waitReceiptExpectations(options.taskId, transitionEvidence),
+  ]);
 }
 
 export function completeGoal(options) {
@@ -361,12 +375,14 @@ function completeGoalUnderLock(options, statePath) {
     throw new Error("complete requires receipt task_id and board_path identity.");
   }
   validateReceiptIdentity(receipt, options.taskId, context.statePath);
-  if (context.document.goal?.status !== "active") throw new Error("complete requires goal.status active.");
-  if (context.document.active_task !== options.taskId) throw new Error(`complete requires active_task ${options.taskId}.`);
   const task = selectedTask(context.document, options.taskId);
-  if (task.status !== "active") throw new Error(`complete requires task ${options.taskId} to be active.`);
-  if (!["judge", "pm"].includes(task.type)) throw new Error("complete requires a Judge or PM audit task.");
-  if (!isReceiptFree(task)) throw new Error(`complete requires task ${options.taskId} to be receipt-free.`);
+  const eligibility = completionEligibility({
+    goalStatus: context.document.goal?.status,
+    activeTaskId: context.document.active_task,
+    task,
+    tasks: context.document.tasks || [],
+  });
+  if (!eligibility.eligible) throw new Error(eligibility.message);
   try {
     assertTaskReceipt(receipt, {
       role: task.type,
@@ -382,12 +398,6 @@ function completeGoalUnderLock(options, statePath) {
   if (receipt.result !== "done" || receipt.decision !== "complete" || receipt.full_outcome_complete !== true) {
     throw new Error("complete requires result done, decision complete, and full_outcome_complete true.");
   }
-  const unfinishedOtherTasks = (context.document.tasks || [])
-    .filter((candidate) => candidate.id !== options.taskId && ["queued", "active"].includes(candidate.status))
-    .map((candidate) => candidate.id);
-  if (unfinishedOtherTasks.length > 0) {
-    throw new Error(`complete requires no other queued or active tasks; found ${unfinishedOtherTasks.join(", ")}.`);
-  }
 
   let lines = context.original.replace(/\r\n/g, "\n").split("\n");
   lines = setTaskField(lines, options.taskId, "status", "done");
@@ -401,7 +411,7 @@ function completeGoalUnderLock(options, statePath) {
     status: "done",
     active_task: null,
     no_change: false,
-  });
+  }, [receiptExpectation(options.taskId, ["receipt"], receipt)]);
 }
 
 export function rebindGoalbuddy(options) {
@@ -663,7 +673,7 @@ function loadGoalbuddyBinding(bindingPath, installedCheckerPaths) {
   return binding;
 }
 
-function installValidatedCandidate(context, candidate, report) {
+function installValidatedCandidate(context, candidate, report, receiptExpectations = []) {
   const checkerReport = runChecker(context.statePath, candidate);
   const baselineReport = checkerReport.ok ? null : runChecker(context.statePath, context.original);
   const compatibility = checkerReport.ok
@@ -691,6 +701,23 @@ function installValidatedCandidate(context, candidate, report) {
       baseline_checker_ok: baselineReport?.ok === true,
       recovery_guidance: checkerRecoveryGuidance(checkerErrors, report.active_task || null),
       immutable_history_rejection: compatibility.reason,
+    };
+  }
+  try {
+    validateCandidateProjectability(context, candidate, receiptExpectations);
+  } catch (error) {
+    return {
+      ...report,
+      ok: false,
+      reverted: true,
+      before_digest: context.originalDigest,
+      after_digest: context.originalDigest,
+      digest_kind: "state_yaml_sha256",
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
+      commands: transitionCommands(context.statePath, context.originalDigest, context.document?.active_task || stateTopScalar(context.original, "active_task") || null),
+      checker_errors: checkerReport.errors || [],
+      recovery_guidance: [`Candidate is not strictly resumable: ${error.message}`],
+      immutable_history_rejection: compatibility.used ? null : compatibility.reason,
     };
   }
   if (sha256(readFileSync(context.statePath)) !== context.originalDigest) {
@@ -721,6 +748,37 @@ function installValidatedCandidate(context, candidate, report) {
     checker_warnings: checkerReport.warnings || [],
     immutable_history: compatibility.used ? compatibility.proof : null,
   };
+}
+
+function validateCandidateProjectability(context, candidate, receiptExpectations) {
+  const document = parseGoalStateText(candidate, { allowFallback: false });
+  normalizeGoalBoard(document, dirname(context.statePath));
+  for (const expectation of receiptExpectations) {
+    const task = selectedTask(document, expectation.taskId);
+    let actual = task;
+    for (const segment of expectation.path) {
+      if (!actual || typeof actual !== "object" || !Object.hasOwn(actual, segment)) {
+        throw new Error(`task ${expectation.taskId} is missing ${expectation.path.join(".")}.`);
+      }
+      actual = actual[segment];
+    }
+    if (!isDeepStrictEqual(actual, expectation.expected)) {
+      throw new Error(`task ${expectation.taskId} changed receipt meaning at ${expectation.path.join(".")}.`);
+    }
+  }
+}
+
+function receiptExpectation(taskId, path, expected) {
+  return { taskId, path, expected };
+}
+
+function waitReceiptExpectations(taskId, transitionEvidence) {
+  if (!Array.isArray(transitionEvidence?.exact_human_replies)) return [];
+  return transitionEvidence.exact_human_replies.flatMap((reply, index) => (
+    reply && typeof reply === "object" && !Array.isArray(reply) && Object.hasOwn(reply, "wait_receipt")
+      ? [receiptExpectation(taskId, ["transition_evidence", "exact_human_replies", index, "wait_receipt"], reply.wait_receipt)]
+      : []
+  ));
 }
 
 function mutationTruth({ board, product, receiptApplied, beforeDigest, afterDigest, sessionBindingPreserved = null }) {
@@ -1117,10 +1175,11 @@ function serializeMapping(value, indent) {
 
 function serializeMappingEntry(key, value, indent) {
   const pad = " ".repeat(indent);
-  if (isScalar(value)) return [`${pad}${key}: ${scalar(value)}`];
-  if (Array.isArray(value) && value.length === 0) return [`${pad}${key}: []`];
-  if (!Array.isArray(value) && Object.keys(value).length === 0) return [`${pad}${key}: {}`];
-  return [`${pad}${key}:`, ...serializeNode(value, indent + 2)];
+  const serializedKey = mappingKey(key);
+  if (isScalar(value)) return [`${pad}${serializedKey}: ${scalar(value)}`];
+  if (Array.isArray(value) && value.length === 0) return [`${pad}${serializedKey}: []`];
+  if (!Array.isArray(value) && Object.keys(value).length === 0) return [`${pad}${serializedKey}: {}`];
+  return [`${pad}${serializedKey}:`, ...serializeNode(value, indent + 2)];
 }
 
 function serializeNode(value, indent) {
@@ -1137,6 +1196,10 @@ function serializeSequence(values, indent) {
       continue;
     }
     if (Array.isArray(value)) {
+      if (value.length === 0) {
+        lines.push(`${pad}- []`);
+        continue;
+      }
       lines.push(`${pad}-`);
       lines.push(...serializeSequence(value, indent + 2));
       continue;
@@ -1147,14 +1210,15 @@ function serializeSequence(values, indent) {
       continue;
     }
     const [[firstKey, firstValue], ...rest] = entries;
+    const serializedFirstKey = mappingKey(firstKey);
     if (isScalar(firstValue)) {
-      lines.push(`${pad}- ${firstKey}: ${scalar(firstValue)}`);
+      lines.push(`${pad}- ${serializedFirstKey}: ${scalar(firstValue)}`);
     } else if (Array.isArray(firstValue) && firstValue.length === 0) {
-      lines.push(`${pad}- ${firstKey}: []`);
+      lines.push(`${pad}- ${serializedFirstKey}: []`);
     } else if (!Array.isArray(firstValue) && Object.keys(firstValue).length === 0) {
-      lines.push(`${pad}- ${firstKey}: {}`);
+      lines.push(`${pad}- ${serializedFirstKey}: {}`);
     } else {
-      lines.push(`${pad}- ${firstKey}:`);
+      lines.push(`${pad}- ${serializedFirstKey}:`);
       lines.push(...serializeNode(firstValue, indent + 4));
     }
     for (const [key, entry] of rest) lines.push(...serializeMappingEntry(key, entry, indent + 2));
@@ -1168,9 +1232,23 @@ function isScalar(value) {
 
 function scalar(value) {
   if (value === null) return "null";
-  if (typeof value === "boolean" || typeof value === "number") return String(value);
-  if (/^[A-Za-z0-9_.\/-]+$/.test(String(value)) && !["null", "true", "false"].includes(String(value))) return String(value);
-  return JSON.stringify(String(value));
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("YAML serialization requires finite numbers.");
+    return Object.is(value, -0) ? "-0" : String(value);
+  }
+  const text = String(value);
+  if (
+    /^[A-Za-z0-9_.\/-]+$/.test(text)
+    && !["null", "true", "false", "~"].includes(text)
+    && !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(text)
+  ) return text;
+  return JSON.stringify(text);
+}
+
+function mappingKey(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9_.-]+$/.test(text) && text.length > 0 ? text : JSON.stringify(text);
 }
 
 function writeAtomic(path, content) {

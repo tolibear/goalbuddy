@@ -50,6 +50,59 @@ tasks:
   assert.equal(parsed.__parseWarning, undefined);
 });
 
+test("strict parser preserves indentationless sequences and JSON-safe scalar identity", () => {
+  const state = `version: 2
+goal:
+  title:Parser inverse # ordinary comments remain supported
+  slug: parser-inverse
+  kind: specific
+  tranche: test
+  status: done
+active_task: null
+tasks:
+  - id: T001
+    type: judge
+    assignee: Judge
+    status: done
+    objective: Audit the exact boundary.
+    receipt:
+      result: done
+      evidence:
+      - kind: retained-indentationless-sequence
+        plain_colon_values:
+          - /tmp/artifact:sha256
+          - https://example.com/review:detail
+        values:
+          -
+            - 1e+21
+            - -0
+          -
+            "first:nested":
+              - "0"
+              - "true"
+        "colon:key": "value"
+        "": "empty"
+        "__proto__":
+          safe: true
+`;
+  const parsed = parseGoalStateText(state, { allowFallback: false });
+  assert.equal(parsed.goal.title, "Parser inverse");
+  const receipt = parsed.tasks[0].receipt;
+  assert.equal(receipt.evidence[0].kind, "retained-indentationless-sequence");
+  assert.deepEqual(receipt.evidence[0].plain_colon_values, [
+    "/tmp/artifact:sha256",
+    "https://example.com/review:detail",
+  ]);
+  assert.equal(receipt.evidence[0].values[0][0], 1e21);
+  assert.equal(Object.is(receipt.evidence[0].values[0][1], -0), true);
+  assert.deepEqual(receipt.evidence[0].values[1]["first:nested"], ["0", "true"]);
+  const evidence = receipt.evidence[0];
+  assert.equal(evidence["colon:key"], "value");
+  assert.equal(evidence[""], "empty");
+  assert.equal(Object.hasOwn(evidence, "__proto__"), true);
+  assert.equal(Object.getPrototypeOf(evidence), Object.prototype);
+});
+
 test("orders completed cards newest first while preserving queued order", () => {
   const columns = buildColumns([
     { id: "T001", column: "completed", status: "done" },

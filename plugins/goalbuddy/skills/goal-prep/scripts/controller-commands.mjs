@@ -46,3 +46,17 @@ export function buildApplyHydrationCommand({ boardPath, taskId, stateDigest, hyd
     command_template: `${prefix} --hydrate-task ${hydrateTaskId} --task-card "<task-card-path>" --task-card-sha256 <sha256> --activate ${hydrateTaskId} --json`,
   };
 }
+
+export function buildCompleteGoalCommand({ boardPath, taskId, stateDigest, receiptPath = null }) {
+  const receiptArgument = JSON.stringify(receiptPath === null ? "<receipt-path>" : receiptPath);
+  return {
+    operation: "complete_goal",
+    board_path: boardPath,
+    task_id: taskId,
+    expected_state_digest: stateDigest,
+    digest_kind: "state_yaml_sha256",
+    receipt_path: receiptPath,
+    unresolved: receiptPath === null ? ["receipt_path"] : [],
+    command_template: `node ${JSON.stringify(applyReceiptScript)} complete ${JSON.stringify(dirname(boardPath))} --task ${taskId} --receipt ${receiptArgument} --expected-state-digest ${stateDigest} --json`,
+  };
+}

@@ -328,7 +328,15 @@ function normalizeStringList(value) {
 }
 
 function cleanText(value) {
-  return String(value ?? "").trim();
+  const candidate = value ?? "";
+  if (typeof candidate === "object") {
+    try {
+      return String(JSON.stringify(candidate) ?? "").trim();
+    } catch {
+      return "";
+    }
+  }
+  return String(candidate).trim();
 }
 
 function normalizeTaskStatus(value) {
@@ -656,12 +664,11 @@ function stripComment(line) {
   let quote = null;
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
-    const previous = line[index - 1];
-    if ((char === "\"" || char === "'") && previous !== "\\") {
+    if ((char === "\"" || char === "'") && !isEscaped(line, index)) {
       quote = quote === char ? null : quote || char;
       continue;
     }
-    if (char === "#" && !quote && (index === 0 || /\s/.test(previous))) {
+    if (char === "#" && !quote && (index === 0 || /\s/.test(line[index - 1]))) {
       return line.slice(0, index);
     }
   }
@@ -671,7 +678,7 @@ function stripComment(line) {
 function parseBlock(lines, index, indent) {
   if (index >= lines.length) return [{}, index];
   if (lines[index].indent < indent) return [{}, index];
-  if (lines[index].text.startsWith("- ")) return parseArray(lines, index, indent);
+  if (isSequenceLine(lines[index].text)) return parseArray(lines, index, indent);
   return parseObject(lines, index, indent);
 }
 
@@ -680,7 +687,7 @@ function parseObject(lines, index, indent) {
   while (index < lines.length) {
     const line = lines[index];
     if (line.indent < indent) break;
-    if (line.indent !== indent || line.text.startsWith("- ")) break;
+    if (line.indent !== indent || isSequenceLine(line.text)) break;
 
     const { key, valueText } = splitKeyValue(line);
     if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -691,20 +698,24 @@ function parseObject(lines, index, indent) {
     if (valueText === "") {
       if (index < lines.length && lines[index].indent > indent) {
         const [child, nextIndex] = parseBlock(lines, index, lines[index].indent);
-        object[key] = child;
+        defineOwn(object, key, child);
+        index = nextIndex;
+      } else if (index < lines.length && lines[index].indent === indent && isSequenceLine(lines[index].text)) {
+        const [child, nextIndex] = parseArray(lines, index, indent);
+        defineOwn(object, key, child);
         index = nextIndex;
       } else {
-        object[key] = {};
+        defineOwn(object, key, {});
       }
     } else if (valueText === "|" || valueText === ">") {
-      object[key] = parseScalar(valueText);
+      defineOwn(object, key, parseScalar(valueText));
     } else {
       const scalarLines = [valueText];
-      while (index < lines.length && lines[index].indent > indent && !lines[index].text.startsWith("- ") && !isInlineMapping(lines[index].text)) {
+      while (index < lines.length && lines[index].indent > indent && !isSequenceLine(lines[index].text) && !isInlineMapping(lines[index].text)) {
         scalarLines.push(lines[index].text);
         index += 1;
       }
-      object[key] = parseScalar(scalarLines.join(" "));
+      defineOwn(object, key, parseScalar(scalarLines.join(" ")));
     }
   }
   return [object, index];
@@ -714,9 +725,9 @@ function parseArray(lines, index, indent) {
   const array = [];
   while (index < lines.length) {
     const line = lines[index];
-    if (line.indent !== indent || !line.text.startsWith("- ")) break;
+    if (line.indent !== indent || !isSequenceLine(line.text)) break;
 
-    const content = line.text.slice(2).trim();
+    const content = line.text === "-" ? "" : line.text.slice(2).trim();
     index += 1;
 
     if (content === "") {
@@ -733,7 +744,13 @@ function parseArray(lines, index, indent) {
     if (isInlineMapping(content)) {
       const object = {};
       const { key, valueText } = splitKeyValue({ text: content, number: line.number });
-      object[key] = valueText === "" ? {} : parseScalar(valueText);
+      if (valueText === "" && index < lines.length && lines[index].indent > indent) {
+        const [firstValue, nextIndex] = parseBlock(lines, index, lines[index].indent);
+        defineOwn(object, key, firstValue);
+        index = nextIndex;
+      } else {
+        defineOwn(object, key, valueText === "" ? {} : parseScalar(valueText));
+      }
       if (index < lines.length && lines[index].indent > indent) {
         const [child, nextIndex] = parseBlock(lines, index, lines[index].indent);
         if (child && typeof child === "object" && !Array.isArray(child)) {
@@ -741,7 +758,7 @@ function parseArray(lines, index, indent) {
             if (Object.prototype.hasOwnProperty.call(object, key)) {
               throw new GoalBoardError(`Duplicate mapping key "${key}" below line ${line.number}.`);
             }
-            object[key] = value;
+            defineOwn(object, key, value);
           }
         } else {
           throw new GoalBoardError(`Expected mapping below line ${line.number}.`);
@@ -757,18 +774,52 @@ function parseArray(lines, index, indent) {
 }
 
 function splitKeyValue(line) {
-  const separator = line.text.indexOf(":");
+  const separator = mappingSeparatorIndex(line.text);
   if (separator <= 0) {
     throw new GoalBoardError(`Expected key/value pair at line ${line.number}.`);
   }
+  const rawKey = line.text.slice(0, separator).trim();
   return {
-    key: line.text.slice(0, separator).trim(),
+    key: (
+      (rawKey.startsWith("\"") && rawKey.endsWith("\""))
+      || (rawKey.startsWith("'") && rawKey.endsWith("'"))
+    ) ? unquote(rawKey) : rawKey,
     valueText: line.text.slice(separator + 1).trim(),
   };
 }
 
 function isInlineMapping(text) {
-  return /^[A-Za-z0-9_.-]+:\s*/.test(text);
+  return mappingSeparatorIndex(text, { requireSeparation: true }) > 0;
+}
+
+function mappingSeparatorIndex(text, { requireSeparation = false } = {}) {
+  let quote = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if ((char === "\"" || char === "'") && !isEscaped(text, index)) {
+      quote = quote === char ? null : quote || char;
+      continue;
+    }
+    if (
+      char === ":"
+      && !quote
+      && (!requireSeparation || index === text.length - 1 || /\s/.test(text[index + 1]))
+    ) return index;
+  }
+  return -1;
+}
+
+function isSequenceLine(text) {
+  return text === "-" || text.startsWith("- ");
+}
+
+function defineOwn(object, key, value) {
+  Object.defineProperty(object, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function parseScalar(text) {
@@ -777,7 +828,7 @@ function parseScalar(text) {
   if (text === "null" || text === "~") return null;
   if (text === "true") return true;
   if (text === "false") return false;
-  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(text)) return Number(text);
   if (text.startsWith("[") && text.endsWith("]")) {
     const inner = text.slice(1, -1).trim();
     if (!inner) return [];
@@ -814,8 +865,7 @@ function splitInlineArray(text) {
   let start = 0;
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
-    const previous = text[index - 1];
-    if ((char === "\"" || char === "'") && previous !== "\\") {
+    if ((char === "\"" || char === "'") && !isEscaped(text, index)) {
       quote = quote === char ? null : quote || char;
       continue;
     }
@@ -826,6 +876,12 @@ function splitInlineArray(text) {
   }
   values.push(text.slice(start).trim());
   return values;
+}
+
+function isEscaped(text, index) {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) backslashes += 1;
+  return backslashes % 2 === 1;
 }
 
 function boardHtml() {

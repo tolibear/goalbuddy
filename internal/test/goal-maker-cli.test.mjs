@@ -2211,6 +2211,108 @@ ${active ? "" : `  - id: T999
   return goalDir;
 }
 
+function writeCompletionProjectionGoal(repoRoot, slug, { role = "judge", blockedSibling = false, queuedSibling = false } = {}) {
+  const goalDir = writeResumeGoal(repoRoot, slug, { active: false });
+  const statePath = join(goalDir, "state.yaml");
+  const assignee = role === "judge" ? "Judge" : role === "pm" ? "PM" : "Scout";
+  let state = readFileSync(statePath, "utf8")
+    .replace("  status: done\n  oracle:", "  status: active\n  oracle:")
+    .replace("active_task: null", "active_task: T999")
+    .replace(
+      /  - id: T999\n    type: judge\n    assignee: Judge\n    status: done\n    objective: "Audit the completed widget outcome\."\n    receipt:\n      result: done\n      decision: complete\n      full_outcome_complete: true\n      rationale: "The widget is complete and npm test passed\."\n      evidence:\n        - src\/widget\.mjs\n/,
+      `  - id: T999
+    type: ${role}
+    assignee: ${assignee}
+    status: active
+    objective: "Audit the completed widget outcome."
+    receipt: null
+`,
+    );
+  const siblings = [
+    blockedSibling
+      ? `  - id: T998
+    type: pm
+    assignee: PM
+    status: blocked
+    objective: "Preserve a non-terminal blocked sibling."
+    receipt:
+      result: blocked
+      blocked_reason: "This sibling is intentionally blocked."
+      summary: "The blocked sibling remains unresolved."
+`
+      : "",
+    queuedSibling
+      ? `  - id: T003
+    type: pm
+    assignee: PM
+    status: queued
+    objective: "A queued sibling prevents completion."
+    receipt: null
+`
+      : "",
+  ].join("");
+  state = state.replace("  - id: T999\n", `${siblings}  - id: T999\n`);
+  writeFileSync(statePath, state);
+  return goalDir;
+}
+
+function writeExhaustedTaskNamespaceGoal(repoRoot, slug) {
+  const goalDir = join(repoRoot, "docs", "goals", slug);
+  mkdirSync(goalDir, { recursive: true });
+  writeFileSync(join(goalDir, "goal.md"), `# ${slug}\n`);
+  const tasks = Array.from({ length: 1000 }, (_, index) => {
+    const id = `T${String(index).padStart(3, "0")}`;
+    if (id === "T999") {
+      return `  - id: T999
+    type: judge
+    assignee: Judge
+    status: active
+    objective: "Audit the exhausted namespace."
+    receipt: null`;
+    }
+    return `  - id: ${id}
+    type: pm
+    assignee: PM
+    status: done
+    objective: "Completed namespace fixture ${id}."
+    receipt:
+      result: done
+      summary: "Completed ${id}."`;
+  }).join("\n");
+  writeFileSync(join(goalDir, "state.yaml"), `version: 2
+goal:
+  title: "${slug} goal"
+  slug: "${slug}"
+  kind: specific
+  tranche: "test"
+  status: active
+  oracle:
+    signal: "The namespace behavior is verified."
+    final_proof: "The resume projection fails closed on exhaustion."
+  intake:
+    original_request: "Prove task ID exhaustion."
+    interpreted_outcome: "No invalid task ID is projected."
+    authority: approved
+    proof_type: test
+    completion_proof: "The projection explicitly names exhaustion."
+    likely_misfire: "Suggesting T1000."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: T999
+tasks:
+${tasks}
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: pass
+    task: T999
+    commands: []
+`);
+  return goalDir;
+}
+
 function writeResumeChildBoard(goalDir, { objective = "Implement the child lane." } = {}) {
   const childDir = join(goalDir, "subgoals", "T002-child");
   writeGoalSupport(childDir, "Child lane");
@@ -2578,6 +2680,114 @@ test("resume scoped to one goal dir returns a validated continuation projection"
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume projects complete_goal only for eligible Judge and PM tails in normal and planning routes", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-complete-projection-"));
+  try {
+    for (const [role, planning] of [
+      ["judge", false],
+      ["pm", false],
+      ["judge", true],
+      ["pm", true],
+    ]) {
+      const slug = `${role}-${planning ? "planning" : "normal"}`;
+      const goalDir = writeCompletionProjectionGoal(root, slug, { role });
+      const args = ["resume", goalDir, ...(planning ? ["--planning"] : []), "--json"];
+      const result = runGoalMaker(args, { cwd: root });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const report = JSON.parse(result.stdout);
+      assert.equal(report.board.next_free_task_id, "T003");
+      assert.equal(report.commands.apply_receipt.operation, "apply_receipt");
+      assert.deepEqual(report.commands.apply_receipt.unresolved, ["receipt_path", "activate_task_id"]);
+      assert.deepEqual(report.commands.complete_goal, {
+        operation: "complete_goal",
+        board_path: report.board.state_path,
+        task_id: "T999",
+        expected_state_digest: report.board.state_digest,
+        digest_kind: "state_yaml_sha256",
+        receipt_path: null,
+        unresolved: ["receipt_path"],
+        command_template: report.commands.complete_goal.command_template,
+      });
+      assert.match(
+        report.commands.complete_goal.command_template,
+        new RegExp(`apply-receipt\\.mjs" complete .* --task T999 --receipt "<receipt-path>" --expected-state-digest ${report.board.state_digest} --json$`),
+      );
+      assert.doesNotMatch(report.commands.complete_goal.command_template, /--activate/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume preserves blocked-sibling completion parity and suppresses illegal completion", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-complete-parity-"));
+  try {
+    const blockedGoal = writeCompletionProjectionGoal(root, "blocked-sibling", { blockedSibling: true });
+    const blocked = runGoalMaker(["resume", blockedGoal, "--json"], { cwd: root });
+    assert.equal(blocked.status, 0, blocked.stderr || blocked.stdout);
+    assert.equal(JSON.parse(blocked.stdout).commands.complete_goal.operation, "complete_goal");
+
+    const queuedGoal = writeCompletionProjectionGoal(root, "queued-sibling", { queuedSibling: true });
+    const queued = runGoalMaker(["resume", queuedGoal, "--json"], { cwd: root });
+    assert.equal(queued.status, 0, queued.stderr || queued.stdout);
+    assert.equal(JSON.parse(queued.stdout).commands.complete_goal, null);
+
+    const workerGoal = writeResumeGoal(root, "active-worker", { active: true });
+    const worker = runGoalMaker(["resume", workerGoal, "--json"], { cwd: root });
+    assert.equal(worker.status, 0, worker.stderr || worker.stdout);
+    const workerReport = JSON.parse(worker.stdout);
+    assert.equal(workerReport.commands.complete_goal, null);
+    assert.equal(workerReport.board.next_free_task_id, "T005");
+    assert.equal(workerReport.commands.apply_receipt.operation, "apply_receipt");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume scans T000 through T999 for the lowest unused root task ID", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-next-task-id-"));
+  try {
+    const goalDir = writeCompletionProjectionGoal(root, "t999-occupied");
+    const statePath = join(goalDir, "state.yaml");
+    writeFileSync(
+      statePath,
+      readFileSync(statePath, "utf8").replace(
+        `  - id: T000
+    type: pm`,
+        `  - id: T005
+    type: pm`,
+      ),
+    );
+
+    const result = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.board.active_task.id, "T999");
+    assert.equal(report.board.next_free_task_id, "T000");
+    assert.doesNotMatch(result.stdout, /T1000/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume fails closed and names root task-ID namespace exhaustion", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-resume-task-id-exhaustion-"));
+  try {
+    const goalDir = writeExhaustedTaskNamespaceGoal(root, "exhausted");
+    const result = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ok, false);
+    assert.equal(report.checker.ok, true);
+    assert.equal(report.recovery.mode, "full_board_review");
+    assert.equal(report.recovery.continuation_allowed, false);
+    assert.match(report.errors.join("\n"), /task ID namespace exhausted.*T000.*T999/i);
+    assert.doesNotMatch(result.stdout, /T1000/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -15,7 +15,8 @@ import {
   normalizeGoalBoard,
   parseGoalStateText,
 } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
-import { buildApplyHydrationCommand, buildApplyReceiptCommand } from "./controller-commands.mjs";
+import { isCompletionEligible } from "./completion-eligibility.mjs";
+import { buildApplyHydrationCommand, buildApplyReceiptCommand, buildCompleteGoalCommand } from "./controller-commands.mjs";
 
 const skillRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -396,6 +397,13 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
   const activeTask = activeRaw
     ? projectResumeTask(activeRaw, normalizedTasks.get(resumeText(activeRaw.id)))
     : null;
+  const nextFreeTaskId = findNextFreeTaskId(rawTasks);
+  const completionEligible = isCompletionEligible({
+    goalStatus: resumeText(document.goal?.status),
+    activeTaskId: resumeText(document.active_task),
+    task: activeRaw,
+    tasks: rawTasks,
+  });
   const recentReceiptTask = findRecentReceiptTask(rawTasks, activeRaw);
   const approvalGates = rawTasks
     .filter((task) => resumeText(task?.status) === "blocked" && isApprovalGate(task?.receipt))
@@ -468,6 +476,7 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
         blocked: board.tasks.filter((task) => task.status === "blocked").length,
         completed: board.tasks.filter((task) => task.status === "done").length,
       },
+      next_free_task_id: nextFreeTaskId,
       active_task: activeTask,
       active_lanes: activeLanes,
       recent_receipt: recentReceiptTask ? projectRecentReceipt(recentReceiptTask) : null,
@@ -516,8 +525,20 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
       apply_receipt: activeTask
         ? buildApplyReceiptCommand({ boardPath: statePath, taskId: activeTask.id, stateDigest })
         : null,
+      complete_goal: completionEligible
+        ? buildCompleteGoalCommand({ boardPath: statePath, taskId: activeRaw.id, stateDigest })
+        : null,
     },
   };
+}
+
+function findNextFreeTaskId(tasks) {
+  const used = new Set(tasks.map((task) => resumeText(task?.id)));
+  for (let index = 0; index <= 999; index += 1) {
+    const candidate = `T${String(index).padStart(3, "0")}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error("Root task ID namespace exhausted: every ID from T000 through T999 is already in use.");
 }
 
 function projectActiveLane(snapshot) {
