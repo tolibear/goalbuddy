@@ -1760,3 +1760,44 @@ test("validates the closed task-bound Codex Worker session evidence shape", () =
     }
   }
 });
+
+test("validates exact Worker-only brief bindings against current safe repository bytes", () => {
+  const repository = mkdtempSync(join(tmpdir(), "goal-maker-brief-test-"));
+  const root = join(repository, "docs", "goals", "one");
+  try {
+    mkdirSync(join(root, "notes"), { recursive: true });
+    writeFileSync(join(root, "goal.md"), "# Sample Goal\n");
+    spawnSync("git", ["init", "-q"], { cwd: repository });
+    writeFileSync(join(root, "notes", "T001.md"), "Approved implementation brief.\n");
+    const digest = createHash("sha256").update("Approved implementation brief.\n").digest("hex");
+    const workerBoard = validScoutBoard
+      .replace("type: scout", "type: worker")
+      .replace("assignee: Scout", "assignee: Worker")
+      .replace(`    expected_output:
+      - "Repo map"
+      - "Candidate tasks"`, `    allowed_files:
+      - src/**
+    verify:
+      - "true"
+    stop_if:
+      - "Need files outside allowed_files."
+    brief:
+      path: docs/goals/one/notes/T001.md
+      sha256: ${digest}`);
+    writeState(root, workerBoard);
+    const valid = runChecker(root);
+    assert.equal(valid.stdout.ok, true, JSON.stringify(valid.stdout.errors));
+
+    writeFileSync(join(root, "notes", "T001.md"), "Stale implementation brief.\n");
+    assert.ok(runChecker(root).stdout.errors.some((error) => /digest mismatch/.test(error)));
+
+    writeFileSync(join(root, "notes", "T001.md"), "Approved implementation brief.\n");
+    writeState(root, workerBoard.replace("type: worker", "type: judge").replace("assignee: Worker", "assignee: Judge"));
+    assert.ok(runChecker(root).stdout.errors.some((error) => /brief is allowed only on a Worker/.test(error)));
+
+    writeState(root, workerBoard.replace(`      sha256: ${digest}`, `      sha256: ${digest}\n      extra: forbidden`));
+    assert.ok(runChecker(root).stdout.errors.some((error) => /keys must be exact/.test(error)));
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});

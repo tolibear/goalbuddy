@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
+import { equalBriefBindings, verifyBrief } from "./brief-binding.mjs";
 
 const inputPath = process.argv[2];
 const isChildCheck = process.argv.includes("--child");
@@ -441,12 +442,16 @@ if (unexpected.length > 0) {
 const tasks = parseTasks();
 const ids = new Set();
 const transitionEvidenceTasks = new Map();
-if (/^    transition_evidence:/m.test(text)) {
+const strictTasks = new Map();
+if (/^    (?:transition_evidence|brief):/m.test(text)) {
   try {
     const strictDocument = parseGoalStateText(text, { allowFallback: false });
-    for (const task of strictDocument.tasks || []) transitionEvidenceTasks.set(task.id, task);
+    for (const task of strictDocument.tasks || []) {
+      strictTasks.set(task.id, task);
+      transitionEvidenceTasks.set(task.id, task);
+    }
   } catch (error) {
-    errors.push(`transition_evidence requires strict YAML parsing: ${error.message}`);
+    errors.push(`task brief and transition_evidence require strict YAML parsing: ${error.message}`);
   }
 }
 for (const task of tasks) {
@@ -502,7 +507,9 @@ if (activeTasks.length === 1 && activeTask !== activeTasks[0].id) {
 if (activeTask && !ids.has(activeTask)) errors.push(`active_task points to unknown task: ${activeTask}`);
 
 for (const task of tasks) {
-  validateTransitionEvidence(task, transitionEvidenceTasks.get(task.id)?.transition_evidence);
+  const persistedBrief = strictTasks.get(task.id)?.brief;
+  validateTaskBrief(task, persistedBrief);
+  validateTransitionEvidence(task, transitionEvidenceTasks.get(task.id)?.transition_evidence, persistedBrief);
   if (task.subgoal.present) {
     validateSubgoal(task);
   }
@@ -590,6 +597,20 @@ for (const task of tasks) {
   }
 }
 
+function validateTaskBrief(task, binding) {
+  if (binding === undefined) return;
+  const label = `task ${task.id} brief`;
+  if (task.type !== "worker") {
+    errors.push(`${label} is allowed only on a Worker task`);
+    return;
+  }
+  try {
+    verifyBrief({ goalRoot: statePath, binding });
+  } catch (error) {
+    errors.push(`${label} is invalid: ${error.message}`);
+  }
+}
+
 function validateReceiptNote(task) {
   if (!task.receipt.present || task.receipt.value === null || typeof task.receipt.has !== "function" || !task.receipt.has("note")) return;
   const note = task.receipt.scalar("note");
@@ -655,13 +676,13 @@ function isTerminalApprovalWait(tasks, activeTasks, activeTask) {
   return exactWaits.length === 1 && exactWaits[0].status === "blocked";
 }
 
-function validateTransitionEvidence(task, evidence) {
+function validateTransitionEvidence(task, evidence, persistedBrief) {
   if (evidence === undefined) return;
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
     errors.push(`task ${task.id} transition_evidence must be an object`);
     return;
   }
-  if (Object.hasOwn(evidence, "codex_worker_session")) validateCodexWorkerSession(task, evidence.codex_worker_session);
+  if (Object.hasOwn(evidence, "codex_worker_session")) validateCodexWorkerSession(task, evidence.codex_worker_session, persistedBrief);
   if (!Object.hasOwn(evidence, "exact_human_replies")) return;
   if (!Array.isArray(evidence.exact_human_replies) || evidence.exact_human_replies.length === 0) {
     errors.push(`task ${task.id} transition_evidence.exact_human_replies must be a non-empty array`);
@@ -697,7 +718,7 @@ function validateTransitionEvidence(task, evidence) {
   }
 }
 
-function validateCodexWorkerSession(task, session) {
+function validateCodexWorkerSession(task, session, persistedBrief) {
   const label = `task ${task.id} transition_evidence.codex_worker_session`;
   if (!session || typeof session !== "object" || Array.isArray(session)) {
     errors.push(`${label} must be an object`);
@@ -720,6 +741,15 @@ function validateCodexWorkerSession(task, session) {
   const briefAbsent = session.brief_path === null && session.brief_sha256 === null;
   const briefPresent = typeof session.brief_path === "string" && session.brief_path.length > 0 && /^[a-f0-9]{64}$/.test(String(session.brief_sha256 || ""));
   if (!briefAbsent && !briefPresent) errors.push(`${label}.brief_path and brief_sha256 must both be null or a nonempty path plus digest`);
+  if (persistedBrief !== undefined) {
+    try {
+      if (!equalBriefBindings(persistedBrief, { path: session.brief_path, sha256: session.brief_sha256 })) {
+        errors.push(`${label} brief identity must equal the task's persisted brief binding`);
+      }
+    } catch {
+      errors.push(`${label} brief identity must equal the task's persisted brief binding`);
+    }
+  }
   if (task.type !== "worker") errors.push(`${label} is allowed only on a Worker task`);
   const receiptFree = !task.receipt?.present || task.receipt?.value === null;
   if (task.status === "active" && !receiptFree) errors.push(`${label} active task must remain receipt-free`);

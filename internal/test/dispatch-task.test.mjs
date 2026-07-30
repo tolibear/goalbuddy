@@ -11,6 +11,7 @@ const dispatcher = resolve("goalbuddy/scripts/dispatch-task.mjs");
 const applyReceipt = resolve("goalbuddy/scripts/apply-receipt.mjs");
 const CODEX_SESSION_ID = "019f6dab-7b25-7620-9da6-4f79a0648146";
 const OTHER_CODEX_SESSION_ID = "019f6dac-0000-7000-8000-000000000000";
+const SYSTEM_GIT = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
 
 function makeProject({ taskType = "worker", successorType = "judge" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-dispatch-"));
@@ -96,6 +97,14 @@ function runDispatch(root, bin, extraArgs = []) {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
   });
+}
+
+function persistTaskBrief(root, path, sha256) {
+  const statePath = join(root, "docs", "goals", "one", "state.yaml");
+  writeFileSync(statePath, readFileSync(statePath, "utf8").replace(
+    "    receipt: null\n  - id: T002",
+    `    brief:\n      path: ${JSON.stringify(path)}\n      sha256: ${sha256}\n    receipt: null\n  - id: T002`,
+  ));
 }
 
 test("dispatch runs an external worker and reports a clean scope", () => {
@@ -798,18 +807,173 @@ test("dispatch binds an existing plan or JIT brief by repository path and digest
   }
 });
 
-test("changed or out-of-repository bound context fails before launch", () => {
+test("dispatch automatically consumes a persisted Worker brief and requires exact CLI agreement", () => {
+  const root = makeProject();
+  try {
+    const relative = "docs/goals/one/notes/T001-auto.md";
+    writeFileSync(join(root, relative), "Current task-specific implementation order.\n");
+    const digest = createHash("sha256").update(readFileSync(join(root, relative))).digest("hex");
+    persistTaskBrief(root, relative, digest);
+    let bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    let result = runDispatch(root, bin, ["--brief", relative, "--brief-sha256", digest]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).brief, { path: relative, sha256: digest });
+
+    const mismatchRoot = makeProject();
+    try {
+      writeFileSync(join(mismatchRoot, relative), "Task brief.\n");
+      persistTaskBrief(mismatchRoot, relative, createHash("sha256").update("Task brief.\n").digest("hex"));
+      const other = "docs/goals/one/notes/other.md";
+      writeFileSync(join(mismatchRoot, other), "Other brief.\n");
+      const marker = join(mismatchRoot, "harness-ran");
+      bin = fakeHarnessBin(mismatchRoot, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+      const beforeBoard = readFileSync(join(mismatchRoot, "docs", "goals", "one", "state.yaml"));
+      const beforeProduct = readFileSync(join(mismatchRoot, "src", "widget.mjs"));
+      result = runDispatch(mismatchRoot, bin, ["--brief", other, "--brief-sha256", createHash("sha256").update("Other brief.\n").digest("hex")]);
+      assert.equal(result.status, 1, result.stderr || result.stdout);
+      assert.equal(JSON.parse(result.stdout).error_code, "INVALID_ARGUMENT");
+      assert.match(JSON.parse(result.stdout).error, /agree exactly/);
+      assert.equal(existsSync(marker), false);
+      assert.deepEqual(readFileSync(join(mismatchRoot, "docs", "goals", "one", "state.yaml")), beforeBoard);
+      assert.deepEqual(readFileSync(join(mismatchRoot, "src", "widget.mjs")), beforeProduct);
+    } finally {
+      rmSync(mismatchRoot, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stale and component-symlink persisted briefs fail before launch without mutation", () => {
+  for (const scenario of ["stale", "symlink"]) {
+    const root = makeProject();
+    try {
+      const relative = scenario === "stale" ? "docs/goals/one/notes/stale.md" : "docs/goals/one/notes/linked/brief.md";
+      if (scenario === "stale") {
+        writeFileSync(join(root, relative), "admitted\n");
+        persistTaskBrief(root, relative, createHash("sha256").update("admitted\n").digest("hex"));
+        writeFileSync(join(root, relative), "changed\n");
+      } else {
+        const outside = join(root, "outside-briefs");
+        mkdirSync(outside);
+        writeFileSync(join(outside, "brief.md"), "outside\n");
+        symlinkSync(outside, join(root, "docs", "goals", "one", "notes", "linked"));
+        persistTaskBrief(root, relative, createHash("sha256").update("outside\n").digest("hex"));
+      }
+      const marker = join(root, "harness-ran");
+      const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+      const beforeBoard = readFileSync(join(root, "docs", "goals", "one", "state.yaml"));
+      const beforeProduct = readFileSync(join(root, "src", "widget.mjs"));
+      const result = runDispatch(root, bin);
+      assert.equal(result.status, 1, `${scenario}: ${result.stdout}`);
+      assert.equal(existsSync(marker), false);
+      assert.deepEqual(readFileSync(join(root, "docs", "goals", "one", "state.yaml")), beforeBoard);
+      assert.deepEqual(readFileSync(join(root, "src", "widget.mjs")), beforeProduct);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("dispatch rehashes the bound brief after contract construction and immediately before launch", () => {
+  const root = makeProject();
+  try {
+    const relative = "docs/goals/one/notes/prelaunch.md";
+    const briefPath = join(root, relative);
+    writeFileSync(briefPath, "admitted before contract\n");
+    const digest = createHash("sha256").update(readFileSync(briefPath)).digest("hex");
+    persistTaskBrief(root, relative, digest);
+
+    const marker = join(root, "harness-ran");
+    const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+    const gitWrapper = join(bin, "git");
+    writeFileSync(gitWrapper, `#!/bin/sh
+if [ "$1" = "ls-files" ]; then
+  printf '%s\\n' 'changed after contract construction' > '${briefPath}'
+fi
+exec '${SYSTEM_GIT}' "$@"
+`);
+    chmodSync(gitWrapper, 0o755);
+
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    const productPath = join(root, "src", "widget.mjs");
+    const beforeBoard = readFileSync(statePath);
+    const beforeProduct = readFileSync(productPath);
+    const result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(JSON.parse(result.stdout).error, /digest mismatch/);
+    assert.equal(existsSync(marker), false);
+    assert.deepEqual(readFileSync(statePath), beforeBoard);
+    assert.deepEqual(readFileSync(productPath), beforeProduct);
+    assert.equal(readFileSync(briefPath, "utf8"), "changed after contract construction\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manual dispatch rejects the mutable active board as a brief before launch", () => {
+  const root = makeProject();
+  try {
+    const statePath = join(root, "docs", "goals", "one", "state.yaml");
+    const digest = createHash("sha256").update(readFileSync(statePath)).digest("hex");
+    const marker = join(root, "harness-ran");
+    const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+    const beforeBoard = readFileSync(statePath);
+    const beforeProduct = readFileSync(join(root, "src", "widget.mjs"));
+    const result = runDispatch(root, bin, [
+      "--brief",
+      "docs/goals/one/state.yaml",
+      "--brief-sha256",
+      digest,
+    ]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(JSON.parse(result.stdout).error, /mutable GoalBuddy state\.yaml/);
+    assert.equal(existsSync(marker), false);
+    assert.deepEqual(readFileSync(statePath), beforeBoard);
+    assert.deepEqual(readFileSync(join(root, "src", "widget.mjs")), beforeProduct);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("exact-session resume automatically reuses the persisted task brief", () => {
+  const root = makeProject();
+  try {
+    const relative = "docs/goals/one/notes/resume.md";
+    writeFileSync(join(root, relative), "Bound resume context.\n");
+    const digest = createHash("sha256").update("Bound resume context.\n").digest("hex");
+    persistTaskBrief(root, relative, digest);
+    let bin = fakeHarnessBin(root, "codex", "exit 7");
+    let result = runDispatch(root, bin);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(JSON.parse(result.stdout).session_binding.session_id, CODEX_SESSION_ID);
+    bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    result = runDispatch(root, bin, ["--resume-session", CODEX_SESSION_ID, "--confirmed-not-live"]);
+    assert.equal(result.status, 0, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).brief, { path: relative, sha256: digest });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("missing, unsafe, and partial manual brief bindings fail before launch without mutation", () => {
   for (const extraArgs of [
     ["--brief", "docs/goals/one/notes/missing.md", "--brief-sha256", "0".repeat(64)],
     ["--brief", "../outside.md", "--brief-sha256", "0".repeat(64)],
+    ["--brief", "docs/goals/one/notes/missing.md"],
+    ["--brief-sha256", "0".repeat(64)],
   ]) {
     const root = makeProject();
     try {
       const marker = join(root, "harness-ran");
       const bin = fakeHarnessBin(root, "codex", `touch '${marker}'\necho '${RECEIPT}'`);
+      const beforeBoard = readFileSync(join(root, "docs", "goals", "one", "state.yaml"));
+      const beforeProduct = readFileSync(join(root, "src", "widget.mjs"));
       const result = runDispatch(root, bin, extraArgs);
       assert.equal(result.status, 1, result.stderr || result.stdout);
       assert.equal(existsSync(marker), false);
+      assert.deepEqual(readFileSync(join(root, "docs", "goals", "one", "state.yaml")), beforeBoard);
+      assert.deepEqual(readFileSync(join(root, "src", "widget.mjs")), beforeProduct);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

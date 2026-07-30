@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -742,6 +742,71 @@ test("apply-receipt hydrates an existing Worker placeholder from one exact task 
   }
 });
 
+test("task-card hydration persists only the exact binding for a path-only Worker brief", () => {
+  const { root, goalDir } = makeBoard({ placeholder: true });
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: root });
+    const brief = "docs/goals/one/notes/T042-execplan.md";
+    writeFileSync(join(root, brief), "Implement the approved vertical slice.\n");
+    const sha256 = createHash("sha256").update(readFileSync(join(root, brief))).digest("hex");
+    const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], DONE_RECEIPT, null, {
+      ...HYDRATED_T042,
+      brief,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const board = parseGoalStateText(readFileSync(join(goalDir, "state.yaml"), "utf8"), { allowFallback: false });
+    assert.deepEqual(board.tasks.find((task) => task.id === "T042").brief, { path: brief, sha256 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("unsafe, mutable-control, and nonregular briefs reject hydration without changing board bytes", () => {
+  for (const scenario of [
+    { name: "traversal", brief: "../outside.md" },
+    { name: "absolute", brief: "<absolute>" },
+    { name: "backslash", brief: "docs\\goals\\one\\notes\\brief.md" },
+    { name: "glob", brief: "docs/goals/one/notes/*.md" },
+    { name: "missing", brief: "docs/goals/one/notes/missing.md" },
+    { name: "pre-hashed object ingress", brief: { path: "docs/goals/one/notes/brief.md", sha256: "0".repeat(64) } },
+    { name: "active board state", brief: "docs/goals/one/state.yaml" },
+    { name: "directory", brief: "docs/goals/one/notes/directory", directory: true },
+    { name: "fifo", brief: "docs/goals/one/notes/brief.fifo", fifo: true },
+    { name: "final symlink", brief: "docs/goals/one/notes/final-link.md", finalSymlink: true },
+    { name: "component symlink", brief: "docs/goals/one/linked/brief.md", symlink: true },
+  ]) {
+    const { root, goalDir } = makeBoard({ placeholder: true });
+    try {
+      spawnSync("git", ["init", "-q"], { cwd: root });
+      let brief = scenario.brief === "<absolute>" ? join(root, "outside.md") : scenario.brief;
+      if (scenario.directory) mkdirSync(join(root, brief));
+      if (scenario.fifo) {
+        const fifo = spawnSync("mkfifo", [join(root, brief)], { encoding: "utf8" });
+        assert.equal(fifo.status, 0, fifo.stderr);
+      }
+      if (scenario.finalSymlink) {
+        writeFileSync(join(goalDir, "notes", "target.md"), "target\n");
+        symlinkSync(join(goalDir, "notes", "target.md"), join(root, brief));
+      }
+      if (scenario.symlink) {
+        const outside = join(root, "outside-notes");
+        mkdirSync(outside);
+        writeFileSync(join(outside, "brief.md"), "outside\n");
+        symlinkSync(outside, join(goalDir, "linked"));
+      }
+      const before = readFileSync(join(goalDir, "state.yaml"), "utf8");
+      const result = runApply(root, ["--task", "T001", "--hydrate-task", "T042", "--activate", "T042"], DONE_RECEIPT, null, {
+        ...HYDRATED_T042,
+        brief,
+      });
+      assert.equal(result.status, 1, `${scenario.name}: ${result.stdout}`);
+      assert.equal(readFileSync(join(goalDir, "state.yaml"), "utf8"), before, scenario.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("activating an unhydrated Worker placeholder fails closed with exact atomic retry guidance", () => {
   const { root, goalDir } = makeBoard({ placeholder: true });
   try {
@@ -791,6 +856,36 @@ test("apply-receipt hydrates a placeholder from the exact Judge worker_package",
     assert.match(state, /objective: "Run the receipt-selected Worker package\."/);
     assert.match(state, /verify:\n      - "npm test"\n      - "npm run lint"\n      - "git diff --check"/);
     assert.match(state, /constraints:\n      - "Keep the operation local\."/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("apply-receipt rejects extra Judge worker_package keys even when hydration is not requested", () => {
+  const { root, goalDir } = makeBoard({ sourceType: "judge" });
+  try {
+    const boardPath = join(goalDir, "state.yaml");
+    const before = readFileSync(boardPath, "utf8");
+    const receipt = {
+      result: "done",
+      task_id: "T001",
+      board_path: "docs/goals/one/state.yaml",
+      decision: "approved",
+      full_outcome_complete: false,
+      rationale: "The package is otherwise bounded.",
+      evidence: ["Reviewed the exact package."],
+      worker_package: {
+        objective: "Run the receipt-selected Worker package.",
+        allowed_files: ["src/pilot.mjs"],
+        verify: ["npm test"],
+        stop_if: ["Need files outside allowed_files."],
+        brief: "docs/goals/one/notes/forbidden.md",
+      },
+    };
+    const result = runApply(root, ["--task", "T001", "--activate", "T999"], receipt);
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(JSON.parse(result.stdout).error_code, "RECEIPT_SCHEMA_INVALID");
+    assert.equal(readFileSync(boardPath, "utf8"), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

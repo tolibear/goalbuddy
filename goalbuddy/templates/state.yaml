@@ -117,6 +117,9 @@ tasks:
       - "Need files outside allowed_files."
       - "Behavior is ambiguous."
       - "Verification fails twice."
+    # Optional path-only PM hydration ingress. GoalBuddy persists the exact {path, sha256}
+    # binding before activation; Judge worker_package must never carry this field.
+    # brief: docs/goals/<goal-slug>/notes/T003-execplan.md
     # Optional depth-1 child board promoted by PM when a task needs bounded branching work:
     # subgoal:
     #   status: active # active | blocked | done

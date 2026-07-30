@@ -11,7 +11,8 @@ import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue
 import { normalizeGoalBoard, parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { completionEligibility } from "./completion-eligibility.mjs";
-import { assertTaskReceipt } from "./receipt-contract.mjs";
+import { assertTaskReceipt, validateWorkerPackage } from "./receipt-contract.mjs";
+import { bindBrief } from "./brief-binding.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const OUT_OF_SCOPE_RECOVERY_GUIDANCE = "Do not widen or retry the active task after this rejection. Produce a truthful blocked receipt, then have the PM run GoalBuddy's direct digest-bound apply_amendment transition to atomically record the current task as blocked and create and activate a fully scoped successor, or apply_hydration when a queued successor already exists.";
@@ -931,6 +932,10 @@ function loadHydration(options, receipt) {
     if (task.id !== options.hydrateTaskId) {
       throw new Error(`${options.taskCardPath} task id ${task.id ?? "<missing>"} does not match --hydrate-task ${options.hydrateTaskId}.`);
     }
+    if (Object.hasOwn(task, "brief")) {
+      if (task.type !== "worker") throw new Error(`${options.taskCardPath} brief is allowed only on a Worker task.`);
+      task.brief = bindBrief({ goalRoot: options.goalRoot, path: task.brief });
+    }
     return { source: "task_card", value: task, sha256: actualSha256 };
   }
 
@@ -961,7 +966,7 @@ function hydratePlaceholderTask(lines, taskId, hydration) {
 }
 
 function replacePlaceholderFromCard(lines, taskId, task, start, end) {
-  const allowed = new Set(["id", "type", "assignee", "status", "reasoning_hint", "harness", "objective", "inputs", "constraints", "allowed_files", "verify", "stop_if", "expected_output", "receipt"]);
+  const allowed = new Set(["id", "type", "assignee", "status", "reasoning_hint", "harness", "objective", "inputs", "constraints", "allowed_files", "verify", "stop_if", "expected_output", "brief", "receipt"]);
   const extras = Object.keys(task).filter((key) => !allowed.has(key));
   if (extras.length) throw new Error(`Task card for ${taskId} has unsupported fields: ${extras.join(", ")}.`);
   const required = ["id", "type", "assignee", "status", "objective", "allowed_files", "verify", "stop_if", "receipt"];
@@ -973,16 +978,14 @@ function replacePlaceholderFromCard(lines, taskId, task, start, end) {
   }
   const existingAssignee = taskScalarValue(lines, start, end, "assignee");
   if (task.assignee !== existingAssignee) throw new Error(`Task card for ${taskId} must preserve assignee ${existingAssignee}.`);
-  validateWorkerPackage(task, `Task card for ${taskId}`);
+  validateTaskCardWorkerPackage(task, `Task card for ${taskId}`);
   const serialized = toYamlLines({ tasks: [task] }, 0).slice(1);
   return [...lines.slice(0, start), ...serialized, ...lines.slice(end)];
 }
 
 function replacePlaceholderFromWorkerPackage(lines, taskId, workerPackage) {
-  const allowed = new Set(["objective", "allowed_files", "verify", "stop_if"]);
-  const extras = Object.keys(workerPackage).filter((key) => !allowed.has(key));
-  if (extras.length) throw new Error(`receipt.worker_package has unsupported fields: ${extras.join(", ")}.`);
-  validateWorkerPackage(workerPackage, "receipt.worker_package");
+  const findings = validateWorkerPackage(workerPackage);
+  if (findings.length) throw new Error(`${findings[0].path}: ${findings[0].message}`);
   let next = lines;
   for (const key of ["objective", "allowed_files", "verify", "stop_if"]) {
     next = replaceTaskNode(next, taskId, key, workerPackage[key]);
@@ -990,7 +993,7 @@ function replacePlaceholderFromWorkerPackage(lines, taskId, workerPackage) {
   return next;
 }
 
-function validateWorkerPackage(value, label) {
+function validateTaskCardWorkerPackage(value, label) {
   if (typeof value.objective !== "string" || !value.objective.trim()) throw new Error(`${label} must include a non-empty objective.`);
   for (const key of ["allowed_files", "verify", "stop_if"]) {
     if (!Array.isArray(value[key]) || value[key].length === 0 || value[key].some((entry) => typeof entry !== "string" || !entry.trim())) {

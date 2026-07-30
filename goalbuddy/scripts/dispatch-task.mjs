@@ -2,7 +2,7 @@
 // Dispatch one board task to an external harness CLI and verify the result.
 // Dispatch one task, bind an external Codex Worker session when applicable, and return the verified receipt/scope report.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compareDispatchAuthority, compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
@@ -13,6 +13,7 @@ import { bindCodexWorkerSession } from "./apply-receipt.mjs";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { validateTaskReceipt } from "./receipt-contract.mjs";
+import { equalBriefBindings, verifyBrief } from "./brief-binding.mjs";
 
 const HARNESSES = new Set(["codex", "claude-code"]);
 const READ_ONLY_ROLES = new Set(["scout", "judge"]);
@@ -161,10 +162,16 @@ export async function dispatchTask(options) {
       sandbox: executionProfile.sandbox,
     },
   };
-  const boundOptions = options.resumeSession && existingBinding?.brief_path && !options.briefPath
-    ? { ...options, briefPath: existingBinding.brief_path, briefSha256: existingBinding.brief_sha256 }
-    : options;
-  const boundInput = loadBoundInput(root, boundOptions);
+  let boundInput;
+  try {
+    boundInput = resolveBoundInput({ boardPath: board.path, task, options, existingBinding });
+  } catch (error) {
+    return failure(error.code || "BRIEF_BINDING_INVALID", error.message, {
+      task_id: task.id,
+      role,
+      mutation: prelaunchMutation(board.stateDigest, existingBinding ? true : null),
+    });
+  }
   const dispatchContractSha256 = compileDispatchContract({ payload: dispatchPayload, to, executionProfile, brief: boundInput });
   if (!options.resumeSession && to === "codex" && role === "worker" && existingBinding) {
     return failure("DISPATCH_SESSION_BIND_FAILED", `Task ${task.id} already has bound Codex session ${existingBinding.session_id}; use exact resume after proving the prior Worker is not live.`, { task_id: task.id, role, session_binding: { session_id: existingBinding.session_id, state_digest: board.stateDigest }, mutation: prelaunchMutation(board.stateDigest, true) });
@@ -192,6 +199,18 @@ export async function dispatchTask(options) {
   }
   const boardRepositoryPath = normalizeRepositoryPath(root, board.path);
   if (options.resumeSession) validateResumeBinding({ options, existingBinding, task, board, root, boardRepositoryPath, dispatchContractSha256, boundInput });
+  if (boundInput) {
+    try {
+      const prelaunchBinding = verifyBrief({ goalRoot: board.path, binding: boundInput });
+      if (!equalBriefBindings(boundInput, prelaunchBinding)) throw new Error("Brief binding changed before harness launch.");
+    } catch (error) {
+      return failure(error.code || "BRIEF_BINDING_INVALID", error.message, {
+        task_id: task.id,
+        role,
+        mutation: prelaunchMutation(board.stateDigest, existingBinding ? true : null),
+      });
+    }
+  }
   let bindingReport = null;
   let authorizedControlSha256 = {};
   const continuationPrompt = `Continue the original GoalBuddy contract for task ${task.id}. Preserve its existing authority and return the required goalbuddy_receipt_v1.`;
@@ -302,8 +321,7 @@ export async function dispatchTask(options) {
       bindingReport,
       board,
       boardPath: board.path,
-      boundOptions,
-      root,
+      boundInput,
     });
     if (!repairEligibility.ok) {
       const first = receiptFindings[0];
@@ -425,14 +443,18 @@ export async function dispatchTask(options) {
   };
 }
 
-function exactReceiptRepairEligibility({ options, to, role, run, receipt, bindingReport, boardPath, boundOptions, root }) {
+function exactReceiptRepairEligibility({ options, to, role, run, receipt, bindingReport, boardPath, boundInput }) {
   if (options.resumeSession) return { ok: false, reason: "already_resumed_dispatch" };
   if (receipt?.result !== "done" && receipt?.result !== "blocked") return { ok: false, reason: "terminal_result_unknown" };
   if (to !== "codex" || role !== "worker" || !bindingReport?.session_id || run.threadId !== bindingReport.session_id) {
     return { ok: false, reason: "harness_has_no_exact_bound_session" };
   }
   if (sha256(readFileSync(boardPath)) !== bindingReport.after_digest) return { ok: false, reason: "board_contract_changed" };
-  try { loadBoundInput(root, boundOptions); } catch { return { ok: false, reason: "bound_input_changed" }; }
+  try {
+    if (boundInput) verifyBrief({ goalRoot: boardPath, binding: boundInput });
+  } catch {
+    return { ok: false, reason: "bound_input_changed" };
+  }
   return { ok: true };
 }
 
@@ -709,15 +731,24 @@ function effectiveExecutionProfile({ options, to, role, existingBinding }) {
   return bound;
 }
 
-function loadBoundInput(root, options) {
-  if (!options.briefPath) return null;
-  const path = normalizeRepositoryPath(root, options.briefPath);
-  const absolute = resolve(root, path);
-  const stat = lstatSync(absolute);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw publicError("INVALID_ARGUMENT", "Bound implementation context must be a regular non-symlink file inside the repository.");
-  const actual = sha256(readFileSync(absolute));
-  if (actual !== options.briefSha256) throw publicError("INVALID_ARGUMENT", `Bound implementation context digest mismatch: expected ${options.briefSha256}, got ${actual}.`);
-  return Object.freeze({ path, sha256: actual });
+function resolveBoundInput({ boardPath, task, options, existingBinding }) {
+  const taskBinding = Object.hasOwn(task, "brief")
+    ? verifyBrief({ goalRoot: boardPath, binding: task.brief })
+    : null;
+  const cliBinding = options.briefPath
+    ? verifyBrief({ goalRoot: boardPath, binding: { path: options.briefPath, sha256: options.briefSha256 } })
+    : null;
+  if (taskBinding && cliBinding && !equalBriefBindings(taskBinding, cliBinding)) {
+    throw publicError("BRIEF_BINDING_MISMATCH", "The explicit CLI brief must agree exactly with the task's persisted brief binding.");
+  }
+  if (taskBinding || cliBinding) return taskBinding || cliBinding;
+  if (options.resumeSession && existingBinding?.brief_path) {
+    return verifyBrief({
+      goalRoot: boardPath,
+      binding: { path: existingBinding.brief_path, sha256: existingBinding.brief_sha256 },
+    });
+  }
+  return null;
 }
 
 function codexSessionEvidence({ sessionId, task, boardRepositoryPath, root, dispatchContractSha256, boundInput, boardStateDigest, executionProfile }) {

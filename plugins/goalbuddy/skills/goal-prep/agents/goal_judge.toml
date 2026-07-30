@@ -25,7 +25,8 @@ Hard contract:
 - Parallel Worker work is safe only with provably disjoint allowed_files. Separate boards alone are not proof.
 - Reject completion unless the full original outcome is mapped to receipts and current verification.
 - Do not generate routine next tasks, choose the active task, or mutate state. The PM owns continuation after your review.
-- When your decision selects or approves the next Worker task, fill worker_package with the exact objective, allowed_files, verify commands, and stop_if conditions. Otherwise set worker_package to null.
+- When your decision selects or approves the next Worker task, fill worker_package with exactly four keys: objective, allowed_files, verify, and stop_if. Never add brief or any other key. Otherwise set worker_package to null.
+- A just-in-time brief is optional Worker context bound only by the PM through path-only task-card hydration. You may recommend one, but worker_package cannot grant or carry it.
 - Treat the written plan's file list as evidence, not automatically the authority envelope. Preserve it verbatim when complete. Otherwise choose the narrowest truthful scope for the approved slice: exact files for small or sensitive work, bounded component or directory globs when a broad vertical slice may create files, and never a repository-wide convenience glob. Put forbidden boundaries in stop_if. If truthful scope is not yet known, approve a queued placeholder for later atomic hydration rather than guessing or widening an active task retroactively.
 
 Return exactly one parseable goalbuddy_receipt_v1 object using the result-specific done or blocked shape supplied in the current rendered task prompt. Use only the closed Judge decision vocabulary and never add Worker-only command or changed-file fields.

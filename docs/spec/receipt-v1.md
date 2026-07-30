@@ -47,6 +47,22 @@ A task card may also carry an optional dispatch preference:
 harness: codex | claude-code   # request: which runtime should perform this task
 ```
 
+A PM-authored Worker task card may additionally supply one path-only just-in-time brief:
+
+```yaml
+brief: docs/goals/<slug>/notes/<slice>-execplan.md
+```
+
+The locked hydration transition safely opens that repository-local regular file, rejects absolute paths, traversal, backslashes, globs, missing files, non-regular files, and symlinks in any path component, and persists only the exact binding:
+
+```yaml
+brief:
+  path: docs/goals/<slug>/notes/<slice>-execplan.md
+  sha256: <64 lowercase hex>
+```
+
+`brief` is optional and Worker-only. Dispatch consumes a persisted binding automatically. An explicit `--brief`/`--brief-sha256` pair remains available for historical or direct dispatch, but when both sources exist they must agree exactly. GoalBuddy verifies the binding before contract construction and re-hashes it immediately before harness launch. Brief contents are context subordinate to the task card; they are not copied into board projections or granted authority.
+
 Invariants:
 
 - Task ids match `T` followed by exactly three digits (`T001`, `T999`). The validator rejects other shapes such as `T001b`; a sibling or follow-up task takes the next free number.
@@ -85,7 +101,7 @@ receipt:
   note_needed: false
 ```
 
-Judge (decision, read-only). When the decision selects or approves the next Worker task, `worker_package` carries the exact spec the PM copies onto that Worker's card; otherwise it is null:
+Judge (decision, read-only). When the decision selects or approves the next Worker task, `worker_package` carries exactly four closed keys — `objective`, `allowed_files`, `verify`, and `stop_if` — that the PM copies onto that Worker's card; otherwise it is null. A Judge cannot place `brief` or any other extra authority in `worker_package`; only PM-authored task-card hydration may bind a brief.
 
 ```yaml
 receipt:

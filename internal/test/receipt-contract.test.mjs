@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertTaskReceipt, receiptExample, validateTaskReceipt } from "../../goalbuddy/scripts/receipt-contract.mjs";
+import { assertTaskReceipt, receiptExample, validateTaskReceipt, validateWorkerPackage } from "../../goalbuddy/scripts/receipt-contract.mjs";
 
 const roles = ["worker", "judge", "scout", "pm"];
 const results = ["done", "blocked"];
@@ -105,4 +105,26 @@ test("blocked Worker preserves failure evidence and blocked role requirements", 
   delete withoutReason.blocked_reason;
   assert.ok(validateTaskReceipt(withoutReason, { role: "worker", taskId: "T001", boardPath: blocked.board_path })
     .some((finding) => finding.path === "blocked_reason"));
+});
+
+test("Judge worker_package is one exact four-key closed object at shared receipt admission", () => {
+  const valid = {
+    objective: "Implement the approved slice.",
+    allowed_files: ["src/example.mjs"],
+    verify: ["npm test"],
+    stop_if: ["Need broader authority."],
+  };
+  assert.deepEqual(validateWorkerPackage(valid), []);
+  for (const workerPackage of [
+    { ...valid, brief: "docs/goals/example/notes/slice.md" },
+    { ...valid, arbitrary_authority: true },
+    { objective: valid.objective, allowed_files: valid.allowed_files, verify: valid.verify },
+  ]) {
+    assert.ok(validateWorkerPackage(workerPackage).some((finding) => finding.path === "worker_package" && /keys must be exact/.test(finding.message)));
+    for (const result of ["done", "blocked"]) {
+      const receipt = { ...receiptExample({ role: "judge", result }), worker_package: workerPackage };
+      assert.ok(validateTaskReceipt(receipt, { role: "judge", taskId: "T001", boardPath: receipt.board_path })
+        .some((finding) => finding.path === "worker_package"));
+    }
+  }
 });

@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This plan must be maintained in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`. It builds on the completed interface work recorded in `docs/plans/goalbuddy-interface-simplification.md` and the Worker-continuity work recorded in `docs/plans/goalbuddy-fable-efficiency-stabilization.md`, but it is self-contained: an implementer should be able to execute it without reading those earlier plans.
 
-Status: **Canonical active GoalBuddy ExecPlan — reconciled and independently approved; Milestone 0 is implemented and verified on the isolated branch. Milestones 1-5 and activation remain separately gated.**
+Status: **Canonical active GoalBuddy ExecPlan — reconciled and independently approved; Milestone 0 is implemented and verified on the isolated branch, and the owner has authorized continued implementation through Milestone 5 and the validation gates. Live activation remains separately gated.**
 
 ## Purpose / Big Picture
 
@@ -29,7 +29,8 @@ The observable success case is a material slice in which Fable needs one healthy
 - [x] (2026-07-30) Completed a ChatGPT Pro Milestone 0 collaboration review and local source adjudication; accepted the full bounded JSON-safe inverse, complete reserialized-receipt expectation coverage, shared completion eligibility, blocked-sibling parity, exact task-ID scanning, and positional-help wording corrections without changing the milestone architecture.
 - [x] (2026-07-30) Committed the reviewed plan at `ab867f1`, created clean isolated branch `codex/goalbuddy-semantic-frontier-m0`, and established the isolated baseline: 250 Node tests and 49 Python tests passed; `npm pack --dry-run` produced a 147-file, 12.8 MB package preview.
 - [x] (2026-07-30) Implemented Milestone 0: every candidate now passes strict parse, resume normalization, and exact reserialized-receipt checks before install; completion projection shares mutation eligibility; task IDs scan `T000` through `T999`; and direct help lists all five positional modes. After three independent read-only reviews and targeted fixes, `npm run check` passed 259 Node tests and 49 Python tests, and `npm run pack:dry-run` previewed 149 files at 12.8 MB.
-- [ ] Implement Milestone 1: automatic task-level JIT brief binding and early closed-object validation for `worker_package`.
+- [x] (2026-07-30) Obtained owner authorization to continue the isolated implementation through Milestones 1-5 and all non-activation validation gates. Live installation or activation remains a separate owner-approved transaction.
+- [x] (2026-07-30) Implemented and independently reviewed Milestone 1: PM task-card hydration now persists one exact repository-local JIT brief binding; Worker dispatch loads that brief automatically; exact resume preserves it; unsafe, mutable, stale, or post-contract-changed briefs fail before launch; and the Judge `worker_package` contract is a closed exact four-key object for every Judge result. The focused public suites passed 124 Node tests, the synchronized candidate passed 282 Node tests and 49 Python tests, and `npm run pack:dry-run` previewed 155 files at 12.8 MB.
 - [ ] Implement Milestone 2: durable applied provenance and held-receipt evidence, deviation-set acceptance, and exact-final-review contracts.
 - [ ] Implement Milestone 3: a provenance-aware semantic frontier in shadow mode and repair every decision-relevant omission.
 - [ ] Implement Milestone 4: explicit-source-or-held-handle `advance` over the existing atomic receipt transition without scanning or receipt normalization.
@@ -87,6 +88,18 @@ The observable success case is a material slice in which Fable needs one healthy
 - Observation: The completed Milestone 0 release candidate is green and package-complete without touching the live installation.
   Evidence: the final isolated `npm run check` passed 259 Node tests and 49 Python tests; the synchronized canonical/plugin trees include `completion-eligibility.mjs`; `npm run pack:dry-run` previewed 149 files, 12.8 MB packed and 14.2 MB unpacked. No live Codex or Claude home, active board, product repository, or user configuration was changed.
 
+- Observation: An active board's mutable `state.yaml` cannot safely serve as its own task brief.
+  Evidence: persisting the brief binding mutates that file immediately, invalidating the just-recorded digest. Milestone 1 now rejects the active board state and every `docs/goals/**/state.yaml` path while continuing to admit immutable repository-local plan and brief artifacts.
+
+- Observation: Descriptor validation must reject nonregular brief paths before a potentially blocking open, not merely after it.
+  Evidence: a FIFO fixture hung when the implementation opened the path before checking its file type. The final implementation `lstat`s the terminal component, opens with `O_NONBLOCK | O_NOFOLLOW`, verifies the descriptor identity, and rejects final or ancestor symlinks without launching the Worker.
+
+- Observation: A nominal stale-brief test does not prove the required prelaunch TOCTOU rehash.
+  Evidence: independent review showed that changing the brief before dispatch would still pass if the second rehash were deleted. A deterministic Git-wrapper fixture now mutates the brief during manifest capture, after contract construction but before the second verification, and proves no harness launch or board/product mutation.
+
+- Observation: The completed Milestone 1 candidate is green, mirrored, package-complete, and independently clear of findings.
+  Evidence: canonical and plugin trees are byte-exact; the focused Milestone 1 suites passed 124 Node tests; the full candidate, which also includes the separately uncommitted Milestone 2 foundation, passed 282 Node tests and 49 Python tests; `npm run pack:dry-run` previewed 155 files at 12.8 MB; and the final adversarial re-review returned no findings.
+
 ## Decision Log
 
 - Decision: Preserve board version 2, task roles, historical receipts, exact session binding, scope enforcement, and the existing atomic transition boundary; permit only the narrow additive receipt fields required for honest completion proof.
@@ -140,6 +153,18 @@ The observable success case is a material slice in which Fable needs one healthy
 - Decision: Keep full evidence available through explicit drill-down references and never replace the full diff or decisive screenshots with summaries.
   Rationale: Compression can save context but can also suppress evidence. The frontier is a navigation and decision packet, not the sole evidence store.
   Date/Author: 2026-07-21 / Codex
+
+- Decision: Continue implementation through Milestone 5 and the complete isolated validation ladder, while preserving live activation as a separate owner transaction.
+  Rationale: The owner explicitly asked the active plan run to continue after Milestone 0. Building and testing the candidate is reversible inside the isolated worktree; changing installed Codex or Claude surfaces is not and remains separately gated by this plan.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Bind JIT briefs only to stable repository-local regular files, excluding the active board state and every GoalBuddy board `state.yaml`.
+  Rationale: A brief must remain byte-identical across hydration, dispatch construction, and the immediate prelaunch rehash. Mutable board truth cannot satisfy that invariant and would create a self-invalidating binding.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Treat brief opening as an adversarial filesystem boundary and require a nonblocking, no-follow, descriptor-verified regular file at every verification.
+  Rationale: A path-only check admits symlink swaps and can block indefinitely on special files. The Worker launch gate must prove the exact safe bytes twice and fail without mutation or launch.
+  Date/Author: 2026-07-30 / Codex
 
 - Decision: Remove Worker monitoring from this plan.
   Rationale: Monitoring does not address the proven waste, current liveness remains deliberately unknown, and adding a monitor would enlarge the release before the semantic and completion boundaries are correct. Existing Ledger recovery remains unchanged.
@@ -527,3 +552,5 @@ It does not remove Fable from material planning, Codex prompt authoring or appro
 2026-07-30: Recorded owner authorization for the durability commit, isolated worktree, and Milestone 0 only, together with the adjudicated ChatGPT Pro findings. The architecture is unchanged, but the Milestone 0 oracle now explicitly covers the complete bounded JSON-safe serializer/parser inverse, every reserialized receipt-semantic subtree, shared completion eligibility including blocked-sibling parity, exact `T000` through `T999` allocation, and accurate positional-help wording. Milestones 1-5 and activation still require separate authorization.
 
 2026-07-30: Completed Milestone 0 on the isolated branch. Root verification and independent review repaired ordinary-comment handling, colon-bearing plain sequence scalars, and object display normalization for shadowing own keys before the final green run. The canonical/plugin runtime trees are synchronized, the package contains the new shared eligibility module, and Milestones 1-5 plus activation remain untouched and separately gated.
+
+2026-07-30: Recorded the owner's instruction to continue the active plan through Milestones 1-5 and the complete isolated validation ladder. This expands implementation authority beyond Milestone 0 but does not authorize live installation, user-configuration changes, or activation.

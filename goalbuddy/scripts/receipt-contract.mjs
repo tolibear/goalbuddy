@@ -2,6 +2,7 @@ const ROLES = new Set(["worker", "judge", "scout", "pm"]);
 const RESULTS = new Set(["done", "blocked"]);
 const JUDGE_DECISIONS = new Set(["approved", "rejected", "approve_subgoal", "reject_subgoal", "not_complete", "complete"]);
 const BLOCKED_COMMAND_STATUSES = new Set(["pass", "fail", "blocked", "error", "not_run", "skipped"]);
+const WORKER_PACKAGE_KEYS = Object.freeze(["objective", "allowed_files", "verify", "stop_if"]);
 const RESERVED_BY_ROLE = Object.freeze({
   worker: new Set(["decision", "full_outcome_complete", "worker_package", "facts", "contradictions", "ambiguity_requiring_judge"]),
   judge: new Set(["changed_files", "commands", "deviations", "verification_attempts", "facts", "contradictions", "ambiguity_requiring_judge"]),
@@ -167,6 +168,11 @@ function validateWorker(receipt, verify, add) {
 }
 
 function validateJudge(receipt, add) {
+  if (Object.hasOwn(receipt, "worker_package") && receipt.worker_package !== null) {
+    for (const finding of validateWorkerPackage(receipt.worker_package)) {
+      add(finding.path, finding.message, finding.value);
+    }
+  }
   if (receipt.result === "done") {
     if (!JUDGE_DECISIONS.has(receipt.decision)) add("decision", `Judge decision must be one of ${[...JUDGE_DECISIONS].join(", ")}`, receipt.decision);
     requireString(receipt, "rationale", add);
@@ -174,7 +180,6 @@ function validateJudge(receipt, add) {
     if (Object.hasOwn(receipt, "full_outcome_complete") && typeof receipt.full_outcome_complete !== "boolean") {
       add("full_outcome_complete", "full_outcome_complete must be boolean", receipt.full_outcome_complete);
     }
-    if (Object.hasOwn(receipt, "worker_package") && receipt.worker_package !== null) validateWorkerPackage(receipt.worker_package, add);
   } else if (receipt.result === "blocked") {
     requireString(receipt, "blocked_reason", add);
     requireStringArray(receipt, "missing_evidence", add, { required: true });
@@ -237,13 +242,26 @@ function requireCommands(receipt, add) {
   }
 }
 
-function validateWorkerPackage(value, add) {
+export function validateWorkerPackage(value) {
+  const findings = [];
+  const add = (path, message, raw) => findings.push({
+    code: "RECEIPT_SCHEMA_INVALID",
+    path,
+    value: boundedValue(raw),
+    message,
+  });
   if (!isPlainObject(value)) {
     add("worker_package", "worker_package must be null or an object", value);
-    return;
+    return findings;
+  }
+  const missing = WORKER_PACKAGE_KEYS.filter((key) => !Object.hasOwn(value, key));
+  const extras = Object.keys(value).filter((key) => !WORKER_PACKAGE_KEYS.includes(key));
+  if (missing.length || extras.length) {
+    add("worker_package", `worker_package keys must be exact; missing [${missing.join(", ")}], unexpected [${extras.join(", ")}]`, value);
   }
   requireString(value, "objective", add, "worker_package.");
   for (const field of ["allowed_files", "verify", "stop_if"]) requireStringArray(value, field, add, { required: true, prefix: "worker_package." });
+  return findings;
 }
 
 function requireString(object, field, add, prefix = "") {
