@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseGoalStateText } from "../../goalbuddy/surfaces/local-goal-board/scripts/lib/goal-board.mjs";
-import { bindCodexWorkerSession } from "../../goalbuddy/scripts/apply-receipt.mjs";
+import { applyReceipt, bindCodexWorkerSession } from "../../goalbuddy/scripts/apply-receipt.mjs";
+import { holdReceipt } from "../../goalbuddy/scripts/goal-operation.mjs";
 import {
   canonicalJsonSha256,
   createReceiptSourceContext,
@@ -112,6 +113,102 @@ const DONE_RECEIPT = {
   summary: "widget adjusted",
   harness: "codex",
 };
+
+test("programmatic held receipt selection applies one exact handle and preserves the others", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const statePath = join(goalDir, "state.yaml");
+    mkdirSync(join(root, "receipts"), { recursive: true });
+    const firstPath = "receipts/first.json";
+    const secondPath = "receipts/second.json";
+    writeFileSync(join(root, firstPath), JSON.stringify(DONE_RECEIPT));
+    writeFileSync(join(root, secondPath), JSON.stringify({
+      ...DONE_RECEIPT,
+      summary: "alternate exact receipt",
+    }));
+
+    const firstHold = holdReceipt({
+      goalRoot: goalDir,
+      taskId: "T001",
+      sourcePath: firstPath,
+      expectedStateDigest: createHash("sha256").update(readFileSync(statePath)).digest("hex"),
+    });
+    const secondHold = holdReceipt({
+      goalRoot: goalDir,
+      taskId: "T001",
+      sourcePath: secondPath,
+      expectedStateDigest: createHash("sha256").update(readFileSync(statePath)).digest("hex"),
+    });
+
+    const beforeRejected = readFileSync(statePath);
+    assert.throws(() => applyReceipt({
+      goalRoot: goalDir,
+      taskId: "T001",
+      activate: "T999",
+      expectedStateDigest: createHash("sha256").update(beforeRejected).digest("hex"),
+      receiptSelection: {
+        kind: "held",
+        handle: firstHold.handle,
+        closeoutAuthority: "pm_blocked_closeout",
+      },
+    }), /closeout authority does not match/);
+    assert.deepEqual(readFileSync(statePath), beforeRejected);
+    assert.equal(existsSync(join(root, firstPath)), true);
+    assert.equal(existsSync(join(root, secondPath)), true);
+
+    const report = applyReceipt({
+      goalRoot: goalDir,
+      taskId: "T001",
+      activate: "T999",
+      expectedStateDigest: createHash("sha256").update(readFileSync(statePath)).digest("hex"),
+      receiptSelection: {
+        kind: "held",
+        handle: firstHold.handle,
+        closeoutAuthority: "original_role",
+      },
+    });
+    assert.equal(report.ok, true);
+    const board = parseGoalStateText(readFileSync(statePath, "utf8"), { allowFallback: false });
+    const sourceTask = board.tasks.find((task) => task.id === "T001");
+    assert.equal(sourceTask.receipt.summary, DONE_RECEIPT.summary);
+    assert.deepEqual(
+      sourceTask.transition_evidence.held_receipts.map((entry) => entry.handle),
+      [secondHold.handle],
+    );
+    assert.equal(sourceTask.transition_evidence.receipt_provenance.closeout_authority, "original_role");
+    assert.equal(existsSync(join(root, firstPath)), true);
+    assert.equal(existsSync(join(root, secondPath)), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("programmatic explicit receipt selection preserves the legacy transition semantics", () => {
+  const { root, goalDir } = makeBoard();
+  try {
+    const statePath = join(goalDir, "state.yaml");
+    const sourcePath = "explicit-receipt.json";
+    writeFileSync(join(root, sourcePath), JSON.stringify(DONE_RECEIPT));
+    const report = applyReceipt({
+      goalRoot: goalDir,
+      taskId: "T001",
+      activate: "T999",
+      expectedStateDigest: createHash("sha256").update(readFileSync(statePath)).digest("hex"),
+      receiptSelection: {
+        kind: "explicit",
+        sourcePath,
+        originArtifactPath: "",
+        closeoutAuthority: "original_role",
+        strictOperationSource: true,
+      },
+    });
+    assert.equal(report.ok, true);
+    const board = parseGoalStateText(readFileSync(statePath, "utf8"), { allowFallback: false });
+    assert.deepEqual(board.tasks.find((task) => task.id === "T001").receipt, DONE_RECEIPT);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function acceptedDispatchReport(root, receipt, { status = "unavailable", reportPath = null } = {}) {
   const statePath = join(root, "docs", "goals", "one", "state.yaml");

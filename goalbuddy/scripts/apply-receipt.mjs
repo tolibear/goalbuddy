@@ -11,15 +11,19 @@ import { joinedOptionValue, printPublicFailure, publicError, requiredOptionValue
 import { normalizeGoalBoard, parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
 import { completionEligibility } from "./completion-eligibility.mjs";
-import { assertTaskReceipt, validateWorkerPackage } from "./receipt-contract.mjs";
+import { assertPmBlockedCloseoutReceipt, assertTaskReceipt, validateWorkerPackage } from "./receipt-contract.mjs";
 import { bindBrief } from "./brief-binding.mjs";
 import {
   artifactIdentity,
+  canonicalJson,
+  canonicalJsonSha256,
   createReceiptSourceContext,
   deriveReceiptSource,
+  heldReceiptFromDerivedSource,
   openContainedArtifact,
   provenanceFromDerivedSource,
   resolveArtifactRoots,
+  validateHeldReceipt,
   validateReceiptProvenance,
 } from "./receipt-provenance.mjs";
 import { validateFinalReviewContract } from "./final-review-contract.mjs";
@@ -245,71 +249,34 @@ function applyReceiptUnderLock(options, statePath) {
   const context = loadReceiptAdmissionContext(options, statePath);
   authorizeReceiptSource(context.document, options.taskId);
   const sourceTask = selectedTask(context.document, options.taskId);
-  const openedSource = openSuppliedReceiptArtifact({
-    cwd: dirname(statePath),
-    sourcePath: options.receiptPath,
-  });
-  let source;
-  try {
-    source = JSON.parse(openedSource.bytes.toString("utf8"));
-  } catch (error) {
-    throw publicError("RECEIPT_MISSING", `${options.receiptPath} is not exact JSON: ${error.message}`);
-  }
-  if (source && typeof source === "object" && !Array.isArray(source)
-      && (Object.hasOwn(source, "receipt") || Object.hasOwn(source, "scope_check") || Object.hasOwn(source, "ok"))
-      && (source.ok !== true || source.scope_check?.status !== "clean" || !source.receipt)) {
-    throw publicError("DISPATCH_SCOPE_FAILED", "Dispatch report is not authoritative: require ok: true, scope_check.status: clean, and one receipt.");
-  }
-  let sourceContext;
-  try {
-    sourceContext = createReceiptSourceContext({
-      cwd: dirname(statePath),
-      statePath,
-      taskId: options.taskId,
-      admittedStateDigest: context.originalDigest,
-    });
-  } catch (error) {
-    throw publicError("CHECKER_FAILED", `Receipt provenance requires a strictly resumable source board: ${error.message}`, {
-      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
-      before_digest: context.originalDigest,
-      after_digest: context.originalDigest,
-      digest_kind: "state_yaml_sha256",
-    });
-  }
-  let derived;
-  try {
-    derived = deriveReceiptSource({
-      source,
-      sourceArtifact: artifactIdentity(openedSource),
-      closeoutAuthority: "original_role",
-      sourceContext,
-    });
-  } catch (error) {
-    const identityFailure = /task_id|board_path|ENOENT|no such file/i.test(error.message);
-    throw publicError(identityFailure ? "RECEIPT_IDENTITY_MISMATCH" : "RECEIPT_SCHEMA_INVALID", identityFailure
-      ? `Receipt board_path or task_id identity mismatch: ${error.message}`
-      : error.message, {
-      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: context.originalDigest, afterDigest: context.originalDigest }),
-    });
-  }
+  const selection = resolveReceiptSelection({ options, statePath, context, sourceTask });
+  const derived = selection.derived;
   const receipt = derived.receipt;
   if (!["done", "blocked"].includes(receipt.result)) {
     throw new Error(`Receipt result must be exactly done or blocked; got ${JSON.stringify(receipt.result)}.`);
   }
   try {
-    const terminal = completionEligibility({
-      goalStatus: context.document.goal?.status,
-      activeTaskId: context.document.active_task,
-      task: sourceTask,
-      tasks: context.document.tasks || [],
-    });
-    assertTaskReceipt(receipt, {
-      role: String(sourceTask.type || "").toLowerCase(),
-      taskId: options.taskId,
-      verify: Array.isArray(sourceTask.verify) ? sourceTask.verify : [],
-      terminalCompletionEligible: terminal.eligible,
-      boundary: "apply receipt",
-    });
+    if (derived.closeout_authority === "pm_blocked_closeout") {
+      assertPmBlockedCloseoutReceipt(receipt, {
+        taskId: options.taskId,
+        boardPath: receipt.board_path,
+        boundary: "apply receipt PM blocked closeout",
+      });
+    } else {
+      const terminal = completionEligibility({
+        goalStatus: context.document.goal?.status,
+        activeTaskId: context.document.active_task,
+        task: sourceTask,
+        tasks: context.document.tasks || [],
+      });
+      assertTaskReceipt(receipt, {
+        role: String(sourceTask.type || "").toLowerCase(),
+        taskId: options.taskId,
+        verify: Array.isArray(sourceTask.verify) ? sourceTask.verify : [],
+        terminalCompletionEligible: terminal.eligible,
+        boundary: "apply receipt",
+      });
+    }
   } catch (error) {
     throw publicError("RECEIPT_SCHEMA_INVALID", error.message, {
       receipt_findings: error.findings || [],
@@ -325,7 +292,15 @@ function applyReceiptUnderLock(options, statePath) {
   if (taskCards.length) lines = appendTaskCards(lines, taskCards);
   if (hydration) lines = hydratePlaceholderTask(lines, options.hydrateTaskId, hydration);
   const preTransition = withFinalNewline(lines.join("\n"));
-  const transitionDocument = parseExactTaskProjection(preTransition, [options.taskId, options.activate], "receipt transition");
+  let transitionDocument;
+  try {
+    transitionDocument = parseExactTaskProjection(preTransition, [options.taskId, options.activate], "receipt transition");
+  } catch (error) {
+    if (String(error?.message || "").includes(`raw task block ${options.activate}`)) {
+      throw publicError("SUCCESSOR_NOT_QUEUED", `Receipt successor ${options.activate} does not identify one queued receipt-free task.`);
+    }
+    throw error;
+  }
   authorizeReceiptSuccessor(transitionDocument, options.activate);
   lines = setTaskField(lines, options.taskId, "status", status);
   const transitionEvidence = sourceTask.transition_evidence && typeof sourceTask.transition_evidence === "object" && !Array.isArray(sourceTask.transition_evidence)
@@ -333,6 +308,9 @@ function applyReceiptUnderLock(options, statePath) {
     : {};
   if (transitionEvidence.receipt_provenance !== undefined) {
     throw publicError("RECEIPT_SCHEMA_INVALID", `Task ${options.taskId} already has receipt_provenance before receipt application.`);
+  }
+  if (selection.kind === "held") {
+    transitionEvidence.held_receipts = selection.remainingHeldReceipts;
   }
   transitionEvidence.receipt_provenance = provenance;
   lines = upsertTaskNode(lines, options.taskId, "transition_evidence", transitionEvidence, { beforeKey: "receipt" });
@@ -352,11 +330,306 @@ function applyReceiptUnderLock(options, statePath) {
     active_task: nextActive,
     receipt_provenance: provenance,
   }, [
+    ...(selection.kind === "held"
+      ? [receiptExpectation(options.taskId, ["transition_evidence", "held_receipts"], selection.remainingHeldReceipts)]
+      : []),
     receiptExpectation(options.taskId, ["transition_evidence", "receipt_provenance"], provenance),
     receiptExpectation(options.taskId, ["receipt"], receipt),
     ...taskCards.map((task) => receiptExpectation(task.id, ["receipt"], null)),
     ...(hydration ? [receiptExpectation(options.hydrateTaskId, ["receipt"], null)] : []),
   ]);
+}
+
+function resolveReceiptSelection({ options, statePath, context, sourceTask }) {
+  if (options.receiptSelection === undefined) {
+    return deriveExplicitReceiptSelection({
+      sourcePath: options.receiptPath,
+      originArtifactPath: "",
+      closeoutAuthority: "original_role",
+      strictOperationSource: false,
+      legacyDispatchPrefilter: true,
+      statePath,
+      context,
+      sourceTask,
+      taskId: options.taskId,
+    });
+  }
+  if (options.receiptPath) {
+    throw publicError("INVALID_ARGUMENT", "receiptPath and receiptSelection are mutually exclusive.");
+  }
+  const selection = options.receiptSelection;
+  if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
+    throw publicError("INVALID_ARGUMENT", "receiptSelection must be one explicit or held selection object.");
+  }
+  if (selection.kind === "explicit") {
+    assertExactObjectKeys(selection, [
+      "closeoutAuthority",
+      "kind",
+      "originArtifactPath",
+      "sourcePath",
+      "strictOperationSource",
+    ], "explicit receiptSelection");
+    if (selection.strictOperationSource !== true) {
+      throw publicError("INVALID_ARGUMENT", "explicit receiptSelection.strictOperationSource must be true.");
+    }
+    return deriveExplicitReceiptSelection({
+      ...selection,
+      legacyDispatchPrefilter: false,
+      statePath,
+      context,
+      sourceTask,
+      taskId: options.taskId,
+    });
+  }
+  if (selection.kind === "held") {
+    assertExactObjectKeys(selection, ["closeoutAuthority", "handle", "kind"], "held receiptSelection");
+    return deriveHeldReceiptSelection({
+      selection,
+      statePath,
+      context,
+      sourceTask,
+      taskId: options.taskId,
+    });
+  }
+  throw publicError("INVALID_ARGUMENT", "receiptSelection.kind must be exactly explicit or held.");
+}
+
+function deriveExplicitReceiptSelection({
+  sourcePath,
+  originArtifactPath,
+  closeoutAuthority,
+  strictOperationSource,
+  legacyDispatchPrefilter,
+  statePath,
+  context,
+  sourceTask,
+  taskId,
+}) {
+  assertCloseoutAuthority(closeoutAuthority);
+  if (typeof sourcePath !== "string" || sourcePath.trim() === "") {
+    throw publicError("INVALID_ARGUMENT", "Explicit receipt selection requires one nonempty sourcePath.");
+  }
+  if (typeof originArtifactPath !== "string") {
+    throw publicError("INVALID_ARGUMENT", "Explicit receipt selection originArtifactPath must be a string.");
+  }
+  const openedSource = openSuppliedReceiptArtifact({
+    cwd: dirname(statePath),
+    sourcePath,
+    absoluteGitReportOnly: strictOperationSource && isAbsolute(sourcePath),
+  });
+  const source = parseSelectedReceiptJson(openedSource, sourcePath);
+  if (legacyDispatchPrefilter
+      && source && typeof source === "object" && !Array.isArray(source)
+      && (Object.hasOwn(source, "receipt") || Object.hasOwn(source, "scope_check") || Object.hasOwn(source, "ok"))
+      && (source.ok !== true || source.scope_check?.status !== "clean" || !source.receipt)) {
+    throw publicError("DISPATCH_SCOPE_FAILED", "Dispatch report is not authoritative: require ok: true, scope_check.status: clean, and one receipt.");
+  }
+  const openedOrigin = originArtifactPath
+    ? openSuppliedReceiptArtifact({
+        cwd: dirname(statePath),
+        sourcePath: originArtifactPath,
+        absoluteGitReportOnly: strictOperationSource && isAbsolute(originArtifactPath),
+      })
+    : null;
+  const origin = openedOrigin ? parseSelectedReceiptJson(openedOrigin, originArtifactPath) : null;
+  rejectExplicitHeldCollision({
+    sourceTask,
+    taskId,
+    sourceIdentity: artifactIdentity(openedSource),
+  });
+  const sourceContext = createSelectedReceiptSourceContext({
+    statePath,
+    taskId,
+    admittedStateDigest: context.originalDigest,
+    originalDigest: context.originalDigest,
+  });
+  const derived = deriveSelectedReceiptSource({
+    source,
+    sourceArtifact: artifactIdentity(openedSource),
+    origin,
+    originArtifact: openedOrigin ? artifactIdentity(openedOrigin) : null,
+    closeoutAuthority,
+    sourceContext,
+    originalDigest: context.originalDigest,
+    legacyIdentityMessage: legacyDispatchPrefilter,
+  });
+  return {
+    kind: "explicit",
+    derived,
+  };
+}
+
+function rejectExplicitHeldCollision({ sourceTask, taskId, sourceIdentity }) {
+  const rawEntries = sourceTask.transition_evidence?.held_receipts;
+  if (rawEntries === undefined) return;
+  if (!Array.isArray(rawEntries)) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Task ${taskId} held_receipts must be an array.`);
+  }
+  let entries;
+  try {
+    entries = rawEntries.map((entry) => validateHeldReceipt(entry));
+  } catch (error) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Held receipt evidence is invalid: ${error.message}`);
+  }
+  const collision = entries.find((entry) => (
+    canonicalJson(entry.source_artifact) === canonicalJson(sourceIdentity)
+  ));
+  if (collision) {
+    throw publicError(
+      "INVALID_ARGUMENT",
+      `Receipt source is already held as ${collision.handle}; advance it with --held-receipt ${collision.handle}.`,
+    );
+  }
+}
+
+function deriveHeldReceiptSelection({ selection, statePath, context, sourceTask, taskId }) {
+  assertCloseoutAuthority(selection.closeoutAuthority);
+  if (typeof selection.handle !== "string" || !/^[a-f0-9]{64}$/.test(selection.handle)) {
+    throw publicError("INVALID_ARGUMENT", "Held receipt selection handle must contain exactly 64 lowercase hex characters.");
+  }
+  const rawEntries = sourceTask.transition_evidence?.held_receipts;
+  if (!Array.isArray(rawEntries)) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Task ${taskId} has no valid held_receipts array.`);
+  }
+  let entries;
+  try {
+    entries = rawEntries.map((entry) => validateHeldReceipt(entry));
+  } catch (error) {
+    throw publicError("RECEIPT_SCHEMA_INVALID", `Held receipt evidence is invalid: ${error.message}`);
+  }
+  const matches = entries.filter((entry) => entry.handle === selection.handle);
+  if (matches.length !== 1) {
+    throw publicError("RECEIPT_MISSING", `Held receipt handle ${selection.handle} must identify exactly one entry; found ${matches.length}.`);
+  }
+  const roots = resolveArtifactRoots(dirname(statePath));
+  const validated = entries.map((entry) => {
+    const openedSource = openContainedArtifact({
+      roots,
+      root: entry.source_artifact.root,
+      path: entry.source_artifact.path,
+    });
+    if (canonicalJson(artifactIdentity(openedSource)) !== canonicalJson(entry.source_artifact)) {
+      throw publicError("RECEIPT_IDENTITY_MISMATCH", `Held receipt ${entry.handle} source artifact identity changed.`);
+    }
+    const openedOrigin = entry.origin_artifact === null
+      ? null
+      : openContainedArtifact({
+          roots,
+          root: entry.origin_artifact.root,
+          path: entry.origin_artifact.path,
+        });
+    if (openedOrigin
+        && canonicalJson(artifactIdentity(openedOrigin)) !== canonicalJson(entry.origin_artifact)) {
+      throw publicError("RECEIPT_IDENTITY_MISMATCH", `Held receipt ${entry.handle} origin artifact identity changed.`);
+    }
+    const source = parseSelectedReceiptJson(openedSource, `${entry.source_artifact.root}:${entry.source_artifact.path}`);
+    const origin = openedOrigin
+      ? parseSelectedReceiptJson(openedOrigin, `${entry.origin_artifact.root}:${entry.origin_artifact.path}`)
+      : null;
+    const sourceContext = createSelectedReceiptSourceContext({
+      statePath,
+      taskId,
+      admittedStateDigest: entry.admitted_state_digest,
+      originalDigest: context.originalDigest,
+    });
+    if (entry.board_path !== sourceContext.board_path
+        || entry.task_authority_sha256 !== canonicalJsonSha256(sourceContext.task_authority)
+        || entry.dispatch_contract_sha256 !== sourceContext.expected_dispatch_contract_sha256) {
+      throw publicError("RECEIPT_IDENTITY_MISMATCH", `Held receipt ${entry.handle} does not match the current board path, task authority, or dispatch contract.`);
+    }
+    const derived = deriveSelectedReceiptSource({
+      source,
+      sourceArtifact: artifactIdentity(openedSource),
+      origin,
+      originArtifact: openedOrigin ? artifactIdentity(openedOrigin) : null,
+      closeoutAuthority: entry.origin_artifact === null ? "original_role" : "pm_blocked_closeout",
+      sourceContext,
+      originalDigest: context.originalDigest,
+    });
+    const rederived = heldReceiptFromDerivedSource({ taskId, derived });
+    if (canonicalJson(rederived) !== canonicalJson(entry)) {
+      throw publicError("RECEIPT_IDENTITY_MISMATCH", `Held receipt ${entry.handle} no longer matches the current board authority and exact artifacts.`);
+    }
+    return { entry, derived };
+  });
+  const selected = validated.find(({ entry }) => entry.handle === selection.handle);
+  if (selected.derived.closeout_authority !== selection.closeoutAuthority) {
+    throw publicError("RECEIPT_IDENTITY_MISMATCH", `Held receipt ${selection.handle} closeout authority does not match the requested authority.`);
+  }
+  return {
+    kind: "held",
+    derived: selected.derived,
+    remainingHeldReceipts: entries.filter((entry) => entry.handle !== selection.handle),
+  };
+}
+
+function createSelectedReceiptSourceContext({ statePath, taskId, admittedStateDigest, originalDigest }) {
+  try {
+    return createReceiptSourceContext({
+      cwd: dirname(statePath),
+      statePath,
+      taskId,
+      admittedStateDigest,
+    });
+  } catch (error) {
+    throw publicError("CHECKER_FAILED", `Receipt provenance requires a strictly resumable source board: ${error.message}`, {
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: originalDigest, afterDigest: originalDigest }),
+      before_digest: originalDigest,
+      after_digest: originalDigest,
+      digest_kind: "state_yaml_sha256",
+    });
+  }
+}
+
+function deriveSelectedReceiptSource({
+  source,
+  sourceArtifact,
+  origin,
+  originArtifact,
+  closeoutAuthority,
+  sourceContext,
+  originalDigest,
+  legacyIdentityMessage = false,
+}) {
+  try {
+    return deriveReceiptSource({
+      source,
+      sourceArtifact,
+      origin,
+      originArtifact,
+      closeoutAuthority,
+      sourceContext,
+    });
+  } catch (error) {
+    const identityFailure = /task_id|board_path|authority|contract|ENOENT|no such file/i.test(error.message);
+    throw publicError(identityFailure ? "RECEIPT_IDENTITY_MISMATCH" : "RECEIPT_SCHEMA_INVALID", identityFailure
+      ? `${legacyIdentityMessage ? "Receipt board_path or task_id identity mismatch" : "Receipt source identity mismatch"}: ${error.message}`
+      : error.message, {
+      mutation: mutationTruth({ board: "unchanged", product: "none_observed", receiptApplied: false, beforeDigest: originalDigest, afterDigest: originalDigest }),
+    });
+  }
+}
+
+function parseSelectedReceiptJson(opened, sourcePath) {
+  try {
+    return JSON.parse(opened.bytes.toString("utf8"));
+  } catch (error) {
+    throw publicError("RECEIPT_MISSING", `${sourcePath} is not exact JSON: ${error.message}`);
+  }
+}
+
+function assertCloseoutAuthority(value) {
+  if (value !== "original_role" && value !== "pm_blocked_closeout") {
+    throw publicError("INVALID_ARGUMENT", "Receipt selection closeoutAuthority must be original_role or pm_blocked_closeout.");
+  }
+}
+
+function assertExactObjectKeys(value, expected, label) {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (!isDeepStrictEqual(actual, wanted)) {
+    throw publicError("INVALID_ARGUMENT", `${label} must contain exactly: ${wanted.join(", ")}.`);
+  }
 }
 
 export function enterExactHumanWait(options) {

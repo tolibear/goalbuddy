@@ -2,6 +2,7 @@ const ERROR_CATALOG = Object.freeze({
   STALE_STATE_DIGEST: "Rerun the exact resume command and retry with its current state digest.",
   TASK_NOT_CURRENT_ACTIVE: "Resume the board and use only the projected current active task.",
   CHECKER_FAILED: "Run the GoalBuddy checker and escalate to Ledger or full-board recovery.",
+  ADVANCE_OUTPUT_FAILED: "Resume the board from checked state; the receipt was already applied, so do not replay advance.",
   SUCCESSOR_NOT_QUEUED: "Correct or hydrate one queued receipt-free successor before retrying.",
   DISPATCH_SCOPE_FAILED: "Inspect the reported changed paths and do not apply this receipt.",
   DISPATCH_SCOPE_UNSAFE: "Narrow the task scope or hydrate a bounded exact path or directory/** tree, then retry the same digest-bound dispatch.",

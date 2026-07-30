@@ -28,15 +28,14 @@ export function runFrontier(args, { cwd = process.cwd() } = {}) {
   const previousCwd = process.cwd();
   if (cwd !== previousCwd) process.chdir(cwd);
   try {
-    const goalRoot = resolve(options.goalRoot);
-    const checked = createCheckedResumeProjection(goalRoot, {
-      frontier: true,
-      planning: true,
-    });
-    if (!checked.ok) {
-      const errors = checked.projectionError
-        ? [checked.projectionError]
-        : checked.checker.errors;
+    try {
+      const frontier = createCheckedSemanticFrontier(resolve(options.goalRoot));
+      console.log(JSON.stringify(frontier, null, 2));
+      return 0;
+    } catch (error) {
+      const errors = Array.isArray(error?.errors) && error.errors.length > 0
+        ? error.errors
+        : [String(error?.message || error)];
       console.error(JSON.stringify({
         ok: false,
         kind: "goalbuddy_frontier_error_v1",
@@ -45,22 +44,44 @@ export function runFrontier(args, { cwd = process.cwd() } = {}) {
       }, null, 2));
       return 1;
     }
-
-    const repositoryEvidence = collectCheckedRepositoryEvidence({
-      resumeProjection: checked.projection,
-      boardSnapshots: checked.boardSnapshots,
-      goalRoot,
-    });
-    const frontier = createSemanticFrontier({
-      resumeProjection: checked.projection,
-      repositoryEvidence,
-    });
-    assertBoardTreeSnapshotsCurrent(checked.boardSnapshots);
-    console.log(JSON.stringify(frontier, null, 2));
-    return 0;
   } finally {
     if (cwd !== previousCwd) process.chdir(previousCwd);
   }
+}
+
+export function createCheckedSemanticFrontier(goalRootValue, {
+  expectedStateDigest = "",
+} = {}) {
+  if (expectedStateDigest && !/^[a-f0-9]{64}$/.test(expectedStateDigest)) {
+    throw new Error("Expected semantic-frontier state digest must contain exactly 64 lowercase hex characters.");
+  }
+  const goalRoot = resolve(goalRootValue);
+  const checked = createCheckedResumeProjection(goalRoot, {
+    frontier: true,
+    planning: true,
+  });
+  if (!checked.ok) {
+    const errors = checked.projectionError
+      ? [checked.projectionError]
+      : checked.checker.errors;
+    const error = new Error(errors[0] || "The GoalBuddy board did not pass checked projection.");
+    error.errors = errors;
+    throw error;
+  }
+  if (expectedStateDigest && checked.projection?.board?.state_digest !== expectedStateDigest) {
+    throw new Error("Semantic frontier did not bind the exact installed advance state.");
+  }
+  const repositoryEvidence = collectCheckedRepositoryEvidence({
+    resumeProjection: checked.projection,
+    boardSnapshots: checked.boardSnapshots,
+    goalRoot,
+  });
+  const frontier = createSemanticFrontier({
+    resumeProjection: checked.projection,
+    repositoryEvidence,
+  });
+  assertBoardTreeSnapshotsCurrent(checked.boardSnapshots);
+  return frontier;
 }
 
 function parseFrontierArgs(args) {

@@ -241,6 +241,37 @@ function runHold(root, {
   return spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
 }
 
+function runAdvance(root, {
+  source = "receipts/source.json",
+  heldReceipt = "",
+  closeoutAuthority = "original_role",
+  origin = "",
+  taskId = "T001",
+  activate = "T999",
+  taskCard = "",
+  extraArgs = [],
+} = {}) {
+  const args = [
+    script,
+    "advance",
+    "docs/goals/one",
+    "--task",
+    taskId,
+  ];
+  if (heldReceipt) args.push("--held-receipt", heldReceipt);
+  else if (source) args.push("--source", source);
+  args.push(
+    "--closeout-authority",
+    closeoutAuthority,
+    "--activate",
+    activate,
+  );
+  if (origin) args.push("--origin-artifact", origin);
+  if (taskCard) args.push("--task-card", taskCard);
+  args.push(...extraArgs, "--json");
+  return spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
+}
+
 function heldEntries(statePath) {
   const state = parseGoalStateText(readFileSync(statePath, "utf8"), { allowFallback: false });
   return state.tasks.find((task) => task.id === "T001").transition_evidence?.held_receipts || [];
@@ -566,6 +597,521 @@ test("an unselected held receipt remains checked history after the task closes",
     assert.equal(closed.transition_evidence.held_receipts.length, 1);
     assert.equal(closed.transition_evidence.receipt_provenance.kind, "goalbuddy_receipt_provenance_v1");
   } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance applies a bare receipt atomically and returns only the activated semantic frontier", () => {
+  const fixture = makeBoard();
+  try {
+    const sourcePath = join(fixture.root, "receipts", "source.json");
+    writeFileSync(sourcePath, JSON.stringify(receipt(fixture.statePath)));
+
+    const result = runAdvance(fixture.root);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(output).sort(), ["frontier", "ok", "outcome"]);
+    assert.deepEqual(output.outcome, {
+      task_id: "T001",
+      result: "done",
+      next_task_id: "T999",
+      hydrated_task_id: null,
+    });
+    assert.equal(output.frontier.kind, "goalbuddy_frontier_v1");
+    assert.equal(output.frontier.slice.id, "T999");
+    assert.equal(output.frontier.slice.status, "active");
+    assert.doesNotMatch(JSON.stringify(output), /state_digest|before_digest|after_digest/);
+
+    const state = parseGoalStateText(readFileSync(fixture.statePath, "utf8"), { allowFallback: false });
+    const closed = state.tasks.find((task) => task.id === "T001");
+    assert.equal(closed.status, "done");
+    assert.equal(closed.receipt.summary, "widget adjusted");
+    assert.equal(closed.transition_evidence.receipt_provenance.closeout_authority, "original_role");
+    assert.equal(state.tasks.find((task) => task.id === "T999").status, "active");
+    assert.equal(state.active_task, "T999");
+    assert.equal(existsSync(sourcePath), true);
+
+    const after = readFileSync(fixture.statePath);
+    const replay = runAdvance(fixture.root);
+    assert.equal(replay.status, 1);
+    assert.match(JSON.parse(replay.stdout).error, /current active|active task|active_task/i);
+    assert.deepEqual(readFileSync(fixture.statePath), after);
+    assert.equal(existsSync(sourcePath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance accepts unavailable transport and cleans only an eligible ready report", () => {
+  for (const transport of ["unavailable", "ready"]) {
+    const fixture = makeBoard();
+    try {
+      const before = readFileSync(fixture.statePath);
+      const digest = sha256(before);
+      let source;
+      if (transport === "ready") {
+        const reportDir = join(fixture.root, ".git", "goalbuddy", "dispatch-reports", "T001-advance");
+        mkdirSync(reportDir, { recursive: true });
+        source = join(reportDir, "dispatch-report.json");
+        writeFileSync(source, JSON.stringify(acceptedDispatch({
+          statePath: fixture.statePath,
+          stateDigest: digest,
+          value: receipt(fixture.statePath),
+          reportPath: source,
+          transport,
+        })));
+      } else {
+        source = join(fixture.root, "receipts", "source.json");
+        writeFileSync(source, JSON.stringify(acceptedDispatch({
+          statePath: fixture.statePath,
+          stateDigest: digest,
+          value: receipt(fixture.statePath),
+        })));
+      }
+
+      const result = runAdvance(fixture.root, {
+        source: transport === "ready" ? source : "receipts/source.json",
+      });
+      assert.equal(result.status, 0, `${transport}: ${result.stderr || result.stdout}`);
+      assert.equal(existsSync(source), transport === "unavailable", transport);
+      const state = parseGoalStateText(readFileSync(fixture.statePath, "utf8"), { allowFallback: false });
+      const provenance = state.tasks.find((task) => task.id === "T001").transition_evidence.receipt_provenance;
+      assert.equal(provenance.report_transport, transport);
+      assert.equal(provenance.dispatch_disposition, "accepted");
+      assert.equal(provenance.receipt_artifact.retention_policy, transport === "ready" ? "cleanup_eligible" : "retained");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("advance installs an explicit PM blocked closeout only with its exact rejected origin", () => {
+  const fixture = makeBoard();
+  try {
+    const digest = sha256(readFileSync(fixture.statePath));
+    const closeoutPath = join(fixture.root, "receipts", "source.json");
+    const originPath = join(fixture.root, "receipts", "rejected.json");
+    writeFileSync(closeoutPath, JSON.stringify({
+      result: "blocked",
+      task_id: "T001",
+      board_path: fixture.statePath,
+      authored_by: "pm",
+      summary: "Preserved rejected dispatch evidence.",
+      blocked_reason: "Worker dispatch was rejected after launch.",
+      remaining_blockers: ["A bounded successor is required."],
+      evidence: ["receipts/rejected.json"],
+    }));
+    writeFileSync(originPath, JSON.stringify(rejectedDispatch({
+      statePath: fixture.statePath,
+      stateDigest: digest,
+    })));
+
+    const result = runAdvance(fixture.root, {
+      closeoutAuthority: "pm_blocked_closeout",
+      origin: "receipts/rejected.json",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const state = parseGoalStateText(readFileSync(fixture.statePath, "utf8"), { allowFallback: false });
+    const closed = state.tasks.find((task) => task.id === "T001");
+    assert.equal(closed.status, "blocked");
+    assert.equal(closed.transition_evidence.receipt_provenance.closeout_authority, "pm_blocked_closeout");
+    assert.equal(closed.transition_evidence.receipt_provenance.dispatch_disposition, "rejected");
+    assert.equal(state.active_task, "T999");
+    assert.equal(existsSync(closeoutPath), true);
+    assert.equal(existsSync(originPath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance reopens and applies a held PM blocked closeout with its rejected origin", () => {
+  const fixture = makeBoard();
+  try {
+    const digest = sha256(readFileSync(fixture.statePath));
+    const sourcePath = join(fixture.root, "receipts", "source.json");
+    const originPath = join(fixture.root, "receipts", "rejected.json");
+    writeFileSync(sourcePath, JSON.stringify({
+      result: "blocked",
+      task_id: "T001",
+      board_path: fixture.statePath,
+      authored_by: "pm",
+      summary: "Preserved rejected dispatch evidence.",
+      blocked_reason: "Worker dispatch was rejected after launch.",
+      remaining_blockers: ["A bounded successor is required."],
+      evidence: ["receipts/rejected.json"],
+    }));
+    writeFileSync(originPath, JSON.stringify(rejectedDispatch({
+      statePath: fixture.statePath,
+      stateDigest: digest,
+    })));
+    const held = runHold(fixture.root, {
+      digest,
+      origin: "receipts/rejected.json",
+    });
+    assert.equal(held.status, 0, held.stderr || held.stdout);
+    const handle = JSON.parse(held.stdout).handle;
+
+    const result = runAdvance(fixture.root, {
+      source: "",
+      heldReceipt: handle,
+      closeoutAuthority: "pm_blocked_closeout",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const state = parseGoalStateText(readFileSync(fixture.statePath, "utf8"), { allowFallback: false });
+    const closed = state.tasks.find((task) => task.id === "T001");
+    assert.equal(closed.status, "blocked");
+    assert.equal(closed.transition_evidence.receipt_provenance.dispatch_disposition, "rejected");
+    assert.deepEqual(closed.transition_evidence.held_receipts, []);
+    assert.equal(existsSync(sourcePath), true);
+    assert.equal(existsSync(originPath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance consumes exactly one held handle and preserves all rejected evidence byte-identically", () => {
+  const fixture = makeBoard();
+  try {
+    const firstPath = join(fixture.root, "receipts", "source.json");
+    const secondPath = join(fixture.root, "receipts", "second.json");
+    writeFileSync(firstPath, JSON.stringify(receipt(fixture.statePath)));
+    writeFileSync(secondPath, JSON.stringify(receipt(fixture.statePath, { summary: "alternate receipt" })));
+    const first = JSON.parse(runHold(fixture.root).stdout);
+    const second = JSON.parse(runHold(fixture.root, {
+      source: "receipts/second.json",
+      digest: sha256(readFileSync(fixture.statePath)),
+    }).stdout);
+    assert.notEqual(first.handle, second.handle);
+
+    const beforeRejected = readFileSync(fixture.statePath);
+    const missing = runAdvance(fixture.root, {
+      source: "",
+      heldReceipt: "0".repeat(64),
+    });
+    assert.equal(missing.status, 1);
+    assert.match(JSON.parse(missing.stdout).error, /held receipt|handle/i);
+    assert.deepEqual(readFileSync(fixture.statePath), beforeRejected);
+    assert.equal(existsSync(firstPath), true);
+    assert.equal(existsSync(secondPath), true);
+
+    const applied = runAdvance(fixture.root, {
+      source: "",
+      heldReceipt: first.handle,
+    });
+    assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+    const remaining = heldEntries(fixture.statePath);
+    assert.deepEqual(remaining.map((entry) => entry.handle), [second.handle]);
+    assert.equal(existsSync(firstPath), true);
+    assert.equal(existsSync(secondPath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance cannot bypass a held ready report through a fresh source selection", () => {
+  const fixture = makeBoard();
+  try {
+    const digest = sha256(readFileSync(fixture.statePath));
+    const reportDir = join(fixture.root, ".git", "goalbuddy", "dispatch-reports", "T001-held-ready");
+    mkdirSync(reportDir, { recursive: true });
+    const reportPath = join(reportDir, "dispatch-report.json");
+    writeFileSync(reportPath, JSON.stringify(acceptedDispatch({
+      statePath: fixture.statePath,
+      stateDigest: digest,
+      value: receipt(fixture.statePath),
+      reportPath,
+      transport: "ready",
+    })));
+    const held = runHold(fixture.root, { source: reportPath, digest });
+    assert.equal(held.status, 0, held.stderr || held.stdout);
+    const handle = JSON.parse(held.stdout).handle;
+    const boardBefore = readFileSync(fixture.statePath);
+    const reportBefore = readFileSync(reportPath);
+
+    const bypass = runAdvance(fixture.root, { source: reportPath });
+    assert.equal(bypass.status, 1);
+    const failure = JSON.parse(bypass.stdout);
+    assert.equal(failure.error_code, "INVALID_ARGUMENT");
+    assert.match(failure.error, new RegExp(`already held as ${handle}`));
+    assert.deepEqual(readFileSync(fixture.statePath), boardBefore);
+    assert.deepEqual(readFileSync(reportPath), reportBefore);
+
+    const applied = runAdvance(fixture.root, {
+      source: "",
+      heldReceipt: handle,
+    });
+    assert.equal(applied.status, 0, applied.stderr || applied.stdout);
+    assert.equal(existsSync(reportPath), false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance computes an exact task-card binding and hydrates the approved Worker successor atomically", () => {
+  const fixture = makeBoard();
+  try {
+    const placeholder = readFileSync(fixture.statePath, "utf8").replace(
+      `  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Audit the outcome."
+    receipt: null
+`,
+      `  - id: T999
+    type: worker
+    assignee: Worker
+    status: queued
+    reasoning_hint: high
+    objective: "Provisional Worker; approved task card required."
+    inputs:
+      - T001 receipt
+    constraints:
+      - "Keep the operation local."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "The provisional card has not been replaced."
+    expected_output:
+      - "Exact implementation receipt"
+    receipt: null
+`,
+    );
+    writeFileSync(fixture.statePath, placeholder);
+    writeFileSync(join(fixture.root, "receipts", "source.json"), JSON.stringify(receipt(fixture.statePath)));
+    const taskCard = {
+      id: "T999",
+      type: "worker",
+      assignee: "Worker",
+      status: "queued",
+      reasoning_hint: "high",
+      objective: "Implement the approved bounded successor.",
+      inputs: ["T001 receipt"],
+      constraints: ["Keep the operation local."],
+      allowed_files: ["src/successor.mjs"],
+      verify: ["npm test", "git diff --check"],
+      stop_if: ["Need files outside allowed_files."],
+      expected_output: ["Exact implementation receipt"],
+      receipt: null,
+    };
+    const cardPath = join(fixture.root, "receipts", "task-card.json");
+    writeFileSync(cardPath, JSON.stringify(taskCard));
+
+    const result = runAdvance(fixture.root, {
+      taskCard: "receipts/task-card.json",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.outcome.hydrated_task_id, "T999");
+    assert.equal(output.frontier.slice.id, "T999");
+    assert.equal(output.frontier.slice.objective, taskCard.objective);
+    const state = parseGoalStateText(readFileSync(fixture.statePath, "utf8"), { allowFallback: false });
+    const active = state.tasks.find((task) => task.id === "T999");
+    assert.equal(active.status, "active");
+    assert.equal(active.objective, taskCard.objective);
+    assert.deepEqual(active.allowed_files, taskCard.allowed_files);
+    assert.deepEqual(active.verify, taskCard.verify);
+    assert.equal(existsSync(cardPath), true);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance rejects an invalid task card without changing the board or either exact artifact", () => {
+  const fixture = makeBoard();
+  try {
+    const placeholder = readFileSync(fixture.statePath, "utf8").replace(
+      `  - id: T999
+    type: judge
+    assignee: Judge
+    status: queued
+    objective: "Audit the outcome."
+    receipt: null
+`,
+      `  - id: T999
+    type: worker
+    assignee: Worker
+    status: queued
+    objective: "Provisional Worker."
+    allowed_files: []
+    verify: []
+    stop_if:
+      - "The provisional card has not been replaced."
+    receipt: null
+`,
+    );
+    writeFileSync(fixture.statePath, placeholder);
+    const sourcePath = join(fixture.root, "receipts", "source.json");
+    const cardPath = join(fixture.root, "receipts", "task-card.json");
+    writeFileSync(sourcePath, JSON.stringify(receipt(fixture.statePath)));
+    writeFileSync(cardPath, JSON.stringify({
+      id: "T998",
+      type: "worker",
+      assignee: "Worker",
+      status: "queued",
+      objective: "Wrong successor.",
+      allowed_files: ["src/wrong.mjs"],
+      verify: ["npm test"],
+      stop_if: ["Need files outside allowed_files."],
+      receipt: null,
+    }));
+    const boardBefore = readFileSync(fixture.statePath);
+    const sourceBefore = readFileSync(sourcePath);
+    const cardBefore = readFileSync(cardPath);
+
+    const result = runAdvance(fixture.root, {
+      taskCard: "receipts/task-card.json",
+    });
+    assert.equal(result.status, 1);
+    assert.match(JSON.parse(result.stdout).error, /task id T998 does not match|hydrate-task T999/i);
+    assert.deepEqual(readFileSync(fixture.statePath), boardBefore);
+    assert.deepEqual(readFileSync(sourcePath), sourceBefore);
+    assert.deepEqual(readFileSync(cardPath), cardBefore);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance rejects invalid source, authority, scope, identity, and successor cases byte-identically", () => {
+  const scenarios = [
+    {
+      name: "malformed source",
+      source(fixture) {
+        return "{";
+      },
+      options: {},
+      expected: /exact JSON/,
+    },
+    {
+      name: "stale dispatch",
+      source(fixture) {
+        return JSON.stringify(acceptedDispatch({
+          statePath: fixture.statePath,
+          stateDigest: "0".repeat(64),
+          value: receipt(fixture.statePath),
+        }));
+      },
+      options: {},
+      expected: /state digest|identity mismatch/i,
+    },
+    {
+      name: "dirty dispatch",
+      source(fixture) {
+        const digest = sha256(readFileSync(fixture.statePath));
+        const value = acceptedDispatch({
+          statePath: fixture.statePath,
+          stateDigest: digest,
+          value: receipt(fixture.statePath),
+        });
+        value.scope_check = { status: "violations", violations: ["outside scope"] };
+        return JSON.stringify(value);
+      },
+      options: {},
+      expected: /scope|authoritative/i,
+    },
+    {
+      name: "wrong receipt task",
+      source(fixture) {
+        return JSON.stringify(receipt(fixture.statePath, { task_id: "T002" }));
+      },
+      options: {},
+      expected: /task_id|identity/i,
+    },
+    {
+      name: "PM authority without origin",
+      source(fixture) {
+        return JSON.stringify(receipt(fixture.statePath));
+      },
+      options: { closeoutAuthority: "pm_blocked_closeout" },
+      expected: /requires --origin-artifact/,
+    },
+    {
+      name: "unknown successor",
+      source(fixture) {
+        return JSON.stringify(receipt(fixture.statePath));
+      },
+      options: { activate: "T998" },
+      expected: /successor|queued/i,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const fixture = makeBoard();
+    try {
+      const sourcePath = join(fixture.root, "receipts", "source.json");
+      writeFileSync(sourcePath, scenario.source(fixture));
+      const boardBefore = readFileSync(fixture.statePath);
+      const sourceBefore = readFileSync(sourcePath);
+      const result = runAdvance(fixture.root, scenario.options);
+      assert.equal(result.status, 1, `${scenario.name}: ${result.stderr || result.stdout}`);
+      assert.match(JSON.parse(result.stdout).error, scenario.expected, scenario.name);
+      assert.deepEqual(readFileSync(fixture.statePath), boardBefore, scenario.name);
+      assert.deepEqual(readFileSync(sourcePath), sourceBefore, scenario.name);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("advance rejects a changed held artifact before application and preserves the held board", () => {
+  const fixture = makeBoard();
+  try {
+    const sourcePath = join(fixture.root, "receipts", "source.json");
+    writeFileSync(sourcePath, JSON.stringify(receipt(fixture.statePath)));
+    const held = runHold(fixture.root);
+    assert.equal(held.status, 0, held.stderr || held.stdout);
+    const handle = JSON.parse(held.stdout).handle;
+    const boardBefore = readFileSync(fixture.statePath);
+    writeFileSync(sourcePath, JSON.stringify(receipt(fixture.statePath, { summary: "changed after hold" })));
+    const changedSource = readFileSync(sourcePath);
+
+    const result = runAdvance(fixture.root, {
+      source: "",
+      heldReceipt: handle,
+    });
+    assert.equal(result.status, 1);
+    assert.match(JSON.parse(result.stdout).error, /artifact|sha|checker|held/i);
+    assert.deepEqual(readFileSync(fixture.statePath), boardBefore);
+    assert.deepEqual(readFileSync(sourcePath), changedSource);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("advance consumes the exact ready report from the active linked worktree", () => {
+  const fixture = makeBoard();
+  const worktreeParent = realpathSync(mkdtempSync(join(tmpdir(), "goalbuddy-advance-worktree-")));
+  const linked = join(worktreeParent, "linked");
+  try {
+    git(fixture.root, ["config", "user.name", "GoalBuddy Test"]);
+    git(fixture.root, ["config", "user.email", "goalbuddy@example.invalid"]);
+    git(fixture.root, ["add", "."]);
+    git(fixture.root, ["commit", "-qm", "fixture"]);
+    git(fixture.root, ["worktree", "add", "-qb", "advance-fixture", linked]);
+    mkdirSync(join(linked, "receipts"), { recursive: true });
+    const statePath = join(linked, "docs", "goals", "one", "state.yaml");
+    const digest = sha256(readFileSync(statePath));
+    const rawGitDir = git(linked, ["rev-parse", "--git-dir"]);
+    const activeGitDir = realpathSync(resolve(linked, rawGitDir));
+    const reportDir = join(activeGitDir, "goalbuddy", "dispatch-reports", "T001-linked");
+    mkdirSync(reportDir, { recursive: true });
+    const reportPath = join(reportDir, "dispatch-report.json");
+    writeFileSync(reportPath, JSON.stringify(acceptedDispatch({
+      statePath,
+      stateDigest: digest,
+      value: receipt(statePath),
+      reportPath,
+      transport: "ready",
+    })));
+
+    const result = runAdvance(linked, { source: reportPath });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(JSON.parse(result.stdout).frontier.slice.id, "T999");
+    assert.equal(existsSync(reportPath), false);
+    const state = parseGoalStateText(readFileSync(statePath, "utf8"), { allowFallback: false });
+    assert.equal(state.active_task, "T999");
+  } finally {
+    rmSync(worktreeParent, { recursive: true, force: true });
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

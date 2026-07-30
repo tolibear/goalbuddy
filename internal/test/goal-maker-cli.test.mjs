@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { receiptExample, validateTaskReceipt } from "../../goalbuddy/scripts/receipt-contract.mjs";
 import { projectTransitionEvidence } from "../../goalbuddy/scripts/resume-board.mjs";
+import { createCheckedSemanticFrontier } from "../../goalbuddy/scripts/frontier.mjs";
 
 const cli = resolve("internal/cli/goal-maker.mjs");
 const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
@@ -2830,6 +2831,14 @@ test("frontier is a read-only shadow route over the checked resume boundary", ()
     const result = runGoalMaker(["frontier", goalPath, "--json"], { cwd: root });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
+    const digestBound = createCheckedSemanticFrontier(goalDir, {
+      expectedStateDigest: JSON.parse(resumeBefore.stdout).board.state_digest,
+    });
+    assert.equal(digestBound.kind, "goalbuddy_frontier_v1");
+    assert.equal(digestBound.slice.id, "T002");
+    assert.throws(() => createCheckedSemanticFrontier(goalDir, {
+      expectedStateDigest: "0".repeat(64),
+    }), /exact installed advance state/);
     assert.deepEqual(Object.keys(report), [
       "kind",
       "goal",
@@ -2942,6 +2951,100 @@ test("frontier rejects discovery, non-JSON, planning, unknown flags, and extra r
   assert.match(help.stdout, /goalbuddy frontier <docs\/goals\/slug> --json/);
   assert.match(help.stdout, /frontier is shadow-only/);
   assert.match(help.stdout, /Installed \/goal continues to use the checked resume projection/);
+});
+
+test("advance publicly closes one checked slice and returns the activated semantic frontier", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-advance-public-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const git = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+    assert.equal(git.status, 0, git.stderr || git.stdout);
+    mkdirSync(join(root, "receipts"), { recursive: true });
+    const statePath = join(goalDir, "state.yaml");
+    writeFileSync(join(root, "receipts", "T002.json"), JSON.stringify({
+      result: "done",
+      task_id: "T002",
+      board_path: statePath,
+      changed_files: ["src/widget.mjs"],
+      commands: [{ cmd: "npm test", status: "pass" }],
+      summary: "The bounded widget slice is complete.",
+      harness: "codex",
+    }));
+
+    const result = runGoalMaker([
+      "advance",
+      "docs/goals/one",
+      "--task",
+      "T002",
+      "--source",
+      "receipts/T002.json",
+      "--closeout-authority",
+      "original_role",
+      "--activate",
+      "T003",
+      "--json",
+    ], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.outcome, {
+      task_id: "T002",
+      result: "done",
+      next_task_id: "T003",
+      hydrated_task_id: null,
+    });
+    assert.equal(report.frontier.kind, "goalbuddy_frontier_v1");
+    assert.equal(report.frontier.slice.id, "T003");
+    assert.equal(report.frontier.slice.status, "active");
+    assert.doesNotMatch(result.stdout, /state_digest|before_digest|after_digest/);
+    assert.equal(existsSync(join(root, "receipts", "T002.json")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("advance exposes one strict public grammar without caller-supplied digest control", () => {
+  const valid = [
+    "advance",
+    "docs/goals/one",
+    "--task",
+    "T001",
+    "--source",
+    "receipt.json",
+    "--closeout-authority",
+    "original_role",
+    "--activate",
+    "T002",
+    "--json",
+  ];
+  const cases = [
+    [["advance", "docs/goals/one", "--task", "T001", "--closeout-authority", "original_role", "--activate", "T002", "--json"], /exactly one of --source or --held-receipt/, "INVALID_ARGUMENT"],
+    [[...valid.slice(0, 6), "--held-receipt", "0".repeat(64), ...valid.slice(6)], /exactly one of --source or --held-receipt/, "INVALID_ARGUMENT"],
+    [["advance", "docs/goals/one", "--task", "T001", "--held-receipt", "0".repeat(64), "--origin-artifact", "origin.json", "--closeout-authority", "original_role", "--activate", "T002", "--json"], /origin-artifact is allowed only with --source/, "INVALID_ARGUMENT"],
+    [valid.filter((value) => !["--closeout-authority", "original_role"].includes(value)), /requires --closeout-authority/, "INVALID_ARGUMENT"],
+    [valid.map((value) => value === "original_role" ? "owner" : value), /requires --closeout-authority/, "INVALID_ARGUMENT"],
+    [valid.map((value) => value === "T002" ? "T001" : value), /successor must be distinct/, "SUCCESSOR_NOT_QUEUED"],
+    [["advance", "docs/goals/one", "--task", "T001", "--held-receipt", "abc", "--closeout-authority", "original_role", "--activate", "T002", "--json"], /64 lowercase hex/, "INVALID_ARGUMENT"],
+    [[...valid.slice(0, -1), "--expected-state-digest", "0".repeat(64), "--json"], /Unknown argument: --expected-state-digest/, "INVALID_ARGUMENT"],
+    [[...valid.slice(0, -1), "--wat", "--json"], /Unknown argument: --wat/, "INVALID_ARGUMENT"],
+    [[...valid.slice(0, -1), "docs/goals/two", "--json"], /Unexpected argument/, "INVALID_ARGUMENT"],
+    [[...valid.slice(0, -1), "--task", "T002", "--json"], /Duplicate argument: --task/, "INVALID_ARGUMENT"],
+  ];
+  for (const [args, expected, errorCode] of cases) {
+    const result = runGoalMaker(args);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const failure = JSON.parse(result.stdout);
+    assert.equal(failure.ok, false);
+    assert.equal(failure.error_code, errorCode);
+    assert.match(failure.error, expected);
+  }
+
+  const help = runGoalMaker(["advance", "--help"]);
+  assert.equal(help.status, 0, help.stderr || help.stdout);
+  assert.match(help.stdout, /goalbuddy advance <docs\/goals\/slug>/);
+  assert.doesNotMatch(
+    help.stdout.match(/goalbuddy advance .*$/m)?.[0] || "",
+    /expected-state-digest/,
+  );
 });
 
 test("resume scoped to one goal dir returns a validated continuation projection", () => {
