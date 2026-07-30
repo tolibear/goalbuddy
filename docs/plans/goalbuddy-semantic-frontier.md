@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This plan must be maintained in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`. It builds on the completed interface work recorded in `docs/plans/goalbuddy-interface-simplification.md` and the Worker-continuity work recorded in `docs/plans/goalbuddy-fable-efficiency-stabilization.md`, but it is self-contained: an implementer should be able to execute it without reading those earlier plans.
 
-Status: **Canonical active GoalBuddy ExecPlan — reconciled and independently approved; Milestones 0-4 are complete on the isolated branch, the owner has authorized continued implementation through Milestone 5 and the validation gates, and live activation remains separately gated.**
+Status: **Canonical completed GoalBuddy implementation ExecPlan — Milestones 0-5 and every isolated validation gate are complete on `codex/goalbuddy-semantic-frontier-m0`; live installation and activation remain separately owner-gated.**
 
 ## Purpose / Big Picture
 
@@ -35,8 +35,8 @@ The observable success case is a material slice in which Fable needs one healthy
 - [x] (2026-07-30) Implemented and independently reviewed Milestone 3: `goalbuddy frontier <goal-root> --json` is a read-only shadow route over the checked root-and-child projection; every semantic claim has explicit board, receipt, transition, artifact, note, or diff provenance; malformed or missing structured review evidence becomes a bounded anomaly; active child lanes and held evidence remain visible without exposing control fields; and installed `/goal` remains on resume. The synchronized candidate passed 379 Node tests and 49 Python tests; `npm run pack:dry-run` previewed 169 files at 12.8 MB.
 - [x] (2026-07-30) Completed the Milestone 3 fresh-Fable parity gate in a disposable comparison directory. Independent no-session Fable contexts made identical decisions from full materials and the frontier plus drill-down on all eleven seams for both a non-UI material slice and a UI slice, including direct screenshot inspection. The compact prompts were 75.23% and 79.47% smaller; no decision-relevant omission remained after the evaluation contract separated product scope from review-workflow scope.
 - [x] (2026-07-30) Implemented and independently reviewed Milestone 4: `goalbuddy advance` captures its own checked state, requires one explicit source or exact held handle plus authority and successor, derives transport and dispatch provenance under the existing receipt lock, optionally binds and hydrates one exact task card, and returns the digest-bound successor frontier. Clean reports, bare receipts, unavailable transport, explicit and held PM rejected-dispatch closeout, held selection, hydration, linked worktrees, replay, malformed/stale evidence, and byte-preserving rejection all pass. The synchronized candidate passed 394 Node tests and 49 Python tests; `npm run pack:dry-run` previewed 169 files at 12.8 MB.
-- [ ] Implement Milestone 5: promote the compact healthy path only after retained-fixture and fresh material/UI canaries preserve Fable's decisions.
-- [ ] Run the complete package, mirror, isolated-install, doctor, deterministic journey, and existing-board compatibility gates.
+- [x] (2026-07-30) Implemented and independently reviewed Milestone 5: prepared `/goal` now starts from charter, compact kernel, and frontier; fresh dispatch captures its own checked state and returns one exact source; ordinary closeout uses `advance`; Fable/PM retains all eleven semantic seams; native Claude tasks remain optional disposable projection; and Keeper/Ledger stay exceptional/recovery-only. Review-found report-transport and human-output defects were repaired before acceptance.
+- [x] (2026-07-30) Completed the full isolated validation ladder: byte-exact mirrors; one transaction into temporary Codex and Claude homes with both contracts and doctors green; deterministic promoted lifecycle; faithful 0.5 compatibility without historical receipt mutation; 400 Node and 49 Python tests; a 169-file, 12.9 MB package preview; retained M3 parity; and fresh no-session non-UI plus exact-render UI Fable journeys with two GoalBuddy calls, zero digest/receipt manipulation, checker-valid T001→T002 advance, preserved receipts, and all eleven semantic decisions recorded.
 - [ ] Obtain separate explicit approval before activating the new interface. Activation is not part of implementation.
 
 ## Surprises & Discoveries
@@ -139,6 +139,21 @@ The observable success case is a material slice in which Fable needs one healthy
 
 - Observation: The completed Milestone 4 candidate removes Fable's digest and receipt-extraction work without weakening explicit semantic choice.
   Evidence: the public grammar has no caller digest or receipt-copy field; Fable still supplies the reviewed source or held handle, closeout authority, successor, and optional approved task card. The final synchronized candidate passed 394 Node tests and 49 Python tests, byte-exact mirror checks, linked-worktree cleanup, and a 169-file, 12.8 MB package preview; independent re-review returned no remaining blocker, high, or medium finding.
+
+- Observation: Promoting the frontier exposed one remaining healthy-path bookkeeping leak in dispatch.
+  Evidence: the first Milestone 5 draft still required Fable to obtain and relay a resume digest before every Worker. Fresh semantic dispatch now captures the exact board digest internally immediately before admission and launch; explicit caller digests remain only for recovery, immutable-history work, and exact-session continuation. The compact success result contains only the semantic receipt source, result, scope, repair status, and next action.
+
+- Observation: Receipt transport failure needs a semantic fallback, not raw report leakage.
+  Evidence: Git-local materialization can fail on an unsafe or unavailable metadata path. The promoted dispatcher then retains the complete unavailable-transport artifact under the board's verified `notes/` directory and returns only its relative `receipt_source`. If both transports fail, the public error remains redacted and nonzero; bound Codex work names exact-session recovery, while unbound Claude work truthfully preserves product writes and routes to Ledger plus exceptional owner/Keeper adjudication without promising an impossible resume.
+
+- Observation: Human output is part of the promoted public interface.
+  Evidence: the initial formatter understood only the legacy report shape, hid `receipt_source`, and instructed a direct `receipt` transition when semantic dispatch ran without `--json`. It now prints the compact outcome, exact source, and `advance` or final-completion path without exposing digests, sessions, receipt JSON, or command templates.
+
+- Observation: A UI canary is invalid if its screenshot is real but not rendered from the product under review.
+  Evidence: the first fresh UI run directly inspected a real GoalBuddy board image before advance, but the image did not render the changed fixture. That run is preserved and explicitly superseded. The accepted rerun uses `ui/board.svg`, a PNG deterministically rendered from those exact bytes, an exact-current independent review bound to the full diff, direct image inspection at tool call 7, decision persistence at call 9, and `advance` at call 10. Re-rendering reproduced SHA-256 `b166c69a104a9ad76e8e9da3a47636d9b9725db81c10b6a613b60e0fbb5050f1` byte-for-byte.
+
+- Observation: The completed Milestone 5 candidate is fully validated without touching live runtime state.
+  Evidence: `npm run check` passes 400 Node tests and 49 Python tests; canonical and plugin trees are byte-exact; the 169-file package preview includes both frontier/advance/dispatch implementations and the Claude `/goal` command; isolated dual-harness install, contract, and doctor checks pass; deterministic and retained-0.5 journeys pass; independent final review reports no P1/P2 finding; and `/tmp/goalbuddy-m5-fable-journeys/comparison-validation.json` records two accepted fresh Fable journeys with zero retries or manual control events.
 
 ## Decision Log
 
@@ -258,6 +273,18 @@ The observable success case is a material slice in which Fable needs one healthy
   Rationale: The outcome and next slice must describe one transition. If rendering fails after atomic install, reporting ordinary rejection would encourage a dangerous replay; `ADVANCE_OUTPUT_FAILED` instead preserves installed mutation truth and requires checked resume.
   Date/Author: 2026-07-30 / Codex
 
+- Decision: Make fresh semantic dispatch capture its own checked state while preserving explicit digest admission for recovery.
+  Rationale: A digest is concurrency control, not a Fable decision. The dispatcher can capture and immediately revalidate it without weakening admission, while immutable-history and exact-session continuation still require an explicit recovery-bound digest.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Treat report transport as a two-tier implementation detail with a redacted truthful terminal failure.
+  Rationale: A verified Git-local report is preferred, but a verified repository-retained unavailable-transport artifact is still an exact `advance` source. If neither can be retained, returning raw receipt or control data would violate the promoted interface; recovery guidance must instead reflect whether a real session binding exists.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Reject semantic canaries whose visual evidence is not an exact rendering of the reviewed product.
+  Rationale: Direct image inspection is not a checkbox. A screenshot can affect acceptance only when its derivation and scope bind it to the exact UI under review; otherwise it is contextual evidence and the promotion run must be repeated.
+  Date/Author: 2026-07-30 / Codex
+
 ## Outcomes & Retrospective
 
 Milestone 0 is complete on the isolated branch. Candidate installation now fails closed unless the exact bytes strictly parse, normalize through the resume path, and preserve every receipt-semantic subtree reserialized by that transition. The bounded serializer/parser inverse covers ambiguous strings, finite exponent numbers, negative zero, nested and empty arrays, unsafe or empty mapping keys, prototype-shaped keys, legacy indentationless sequences, ordinary comments, colon-bearing plain sequence scalars, and JSON-safe evidence objects with shadowing own keys. Projection now reports the lowest free root task ID and an exact `complete_goal` command only when the same pure mechanical predicate used by mutation says completion is legal; `apply_receipt` remains available.
@@ -273,6 +300,12 @@ Fresh-Fable shadow comparison also passed. On the non-UI material fixture, both 
 Milestone 4 is complete. The public `advance` boundary accepts exactly one reviewed source or held handle, one legal closeout authority, one distinct queued successor, and an optional approved task card. It internally captures checked concurrency identity; validates fresh or held receipt provenance under the existing board lock; atomically installs receipt, provenance, held-entry removal, optional hydration, source closeout, and successor activation; cleans only provenance-authorized ready reports after success; and returns a frontier bound to the exact installed transition. Retrying a completed source is rejected, while every pre-install failure preserves board and evidence bytes.
 
 The adversarial pass closed the two material defects found after the initial green suite: exact held artifacts cannot bypass handle selection, and outcome plus frontier cannot straddle two post-lock transitions. Explicit and held original-role receipts, explicit and held rejected-dispatch PM blocked closeouts, unavailable transport, ready-report cleanup, task-card hydration, linked-worktree identity, changed held artifacts, malformed or stale sources, scope failures, illegal successors, public grammar, and replay recovery are covered. Final verification is 394 Node tests plus 49 Python tests, byte-exact canonical/plugin scripts, a 169-file, 12.8 MB package preview, and a no-finding independent re-review. No live installation or activation occurred.
+
+Milestone 5 is complete. The healthy prepared interface is now the charter, compact execution kernel, and `goalbuddy_frontier_v1`. Fable/PM still chooses slice strategy, research depth, JIT plan and operator prompt, independent review, finding and scope adjudication, repair convergence, decisive screenshot acceptance, deviations, successor, and final acceptance. Fresh dispatch and `advance` move state and receipt bookkeeping below that interface without guessing those choices. Ledger remains recovery-only, Keeper remains exceptional, and Claude's native task list is optional disposable visibility rather than board truth.
+
+The final adversarial passes found and closed three material promotion defects: healthy dispatch still leaked a resume digest, double report-transport failure promised impossible exact-session recovery for unbound Claude work, and human semantic dispatch printed the legacy closeout path. The first UI canary was also rejected because its inspected screenshot was not rendered from the reviewed product; the accepted rerun binds the exact SVG product, full diff, final independent slice review, deterministic PNG, Fable inspection, and advance in one evidence chain. Both accepted fresh journeys used exactly two GoalBuddy calls (`frontier`, `advance`), ten total tool calls, zero retries, and zero manual digest or receipt operations; prompt inputs were 4,454 and 4,598 bytes.
+
+Final isolated verification is 400 Node tests plus 49 Python tests, byte-exact canonical/plugin trees, a 169-file 12.9 MB package preview, temporary-home Codex and Claude install/contracts/doctors, a deterministic promoted lifecycle, a faithful 0.5 board journey with byte-preserved historical receipts, retained M3 semantic parity, and two accepted fresh no-session Fable journeys. Independent final review reports no remaining P1/P2 finding. The candidate has not been installed into either live harness, no existing board was migrated, and activation still requires a separate owner decision.
 
 Plan reconciliation remains complete: this is the only surviving GoalBuddy implementation plan; the useful task-level brief-binding and runtime-correctness work has been absorbed; the receipt index, owner profile/evaluation program, and monitor have been retired; and the closeout design now matches actual run provenance. Milestone 3 records that the shadow frontier preserved every fact that changed Fable's judgment in the two material canaries. At the end of Milestone 5, record the change in Fable-visible GoalBuddy calls and input volume together with plan, prompt, review, screenshot, scope, deviation, and completion decisions. Final completion requires reduced mechanical burden, truthful terminal semantics, exact-current-review proof when required, and no evidence of reduced product quality.
 
@@ -560,6 +593,16 @@ If exact receipt provenance cannot be established but the candidate artifact is 
 Activation is a separate transaction. Existing live sessions may retain old instructions, so activate only after checking live Worker quiescence and following the repository's isolated install and doctor procedure. Existing boards are not rewritten as part of activation.
 
 ## Artifacts and Notes
+
+Final isolated evidence record (2026-07-30):
+
+- Branch: `codex/goalbuddy-semantic-frontier-m0`; implementation commit: the milestone-closeout commit containing this record.
+- Verification: 400 Node tests and 49 Python tests pass; canonical and plugin skill trees are byte-exact; `npm pack --dry-run` previews 169 files, 12.9 MB packed and 14.7 MB unpacked.
+- Isolated installation: one rollback-safe transaction into temporary Codex and Claude homes commits; both `contract --json` responses and both target doctors pass; installed skill/compiler fingerprints equal source, and installed Claude `/goal` bytes equal the plugin command.
+- Runtime/compatibility: strict projectability and exact JSON-safe receipt preservation remain green; provenance, accepted-deviation, and exact-current-review fixtures pass; the promoted deterministic lifecycle finishes; a faithful 0.5 board resumes, advances, and recovers without rewriting historical receipts.
+- Semantic comparison: retained M3 full-versus-frontier parity remains 11/11 with 75.23% and 79.47% compact-input reductions.
+- Fresh Fable promotion pair: `/tmp/goalbuddy-m5-fable-journeys/comparison-validation.json` records non-UI and exact-render UI no-session journeys; both inspect plan, operator brief, full diff, final independent slice review, scope, deviations, gates, receipt, and acceptance; the UI run directly inspects the deterministically derived PNG before advance; both preserve source receipts, pass checker and fresh recovery, advance T001→T002, and use zero manual digest/receipt operations. The first weaker UI image run is retained and marked superseded.
+- Activation: not performed; live Codex/Claude homes, existing boards, and user configuration remain unchanged.
 
 Keep shadow comparison artifacts under a disposable or explicitly ignored test-fixture location. The minimum comparison record for each seam should contain the source fixture identifier, current resume output path, semantic frontier output path, decision-relevant facts used by the reviewer, omissions found, and disposition. Do not store full Worker transcripts in Fable-facing artifacts.
 

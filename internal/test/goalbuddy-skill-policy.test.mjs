@@ -24,6 +24,7 @@ const releaseNotes = readFileSync("docs/releases/0.5.0.md", "utf8");
 const receiptSpec = readFileSync("docs/spec/receipt-v1.md", "utf8");
 const adaptiveSpec = readFileSync("docs/spec/adaptive-execution-strategy.md", "utf8");
 const compilerReference = readFileSync("codex-goal-compiler/references/goalbuddy-compiler.md", "utf8");
+const dispatchScript = readFileSync("goalbuddy/scripts/dispatch-task.mjs", "utf8");
 
 const PREPARED_GOAL_COMMAND_MAX_BYTES = 2418;
 const EXECUTION_CONTRACT_MAX_BYTES = 18000;
@@ -144,11 +145,12 @@ test("exceptional syntax stays in one non-normative reference", () => {
 test("prepared /goal stays a compact execution entrypoint", () => {
   assert.ok(Buffer.byteLength(claudeGoalCommand) <= PREPARED_GOAL_COMMAND_MAX_BYTES);
   assert.match(claudeGoalCommand, /references\/goal-execution\.md/);
-  assert.match(claudeGoalCommand, /read only that charter and the installed Goal Prep kernel/);
+  assert.match(claudeGoalCommand, /read only that charter and the installed GoalBuddy execution kernel/);
   assert.match(claudeGoalCommand, /do not search source repos, locate alternate copies, or compare mirrors/);
-  assert.match(claudeGoalCommand, /compact explicit-board resume projection/);
+  assert.match(claudeGoalCommand, /scripts\/frontier\.mjs docs\/goals\/<slug> --json/);
+  assert.match(claudeGoalCommand, /healthy semantic frontier/);
   assert.match(claudeGoalCommand, /Do not load Goal Prep, Codex Goal Compiler, raw `state\.yaml`, or `references\/goal-execution-reference\.md` on a healthy start/);
-  assert.match(claudeGoalCommand, /Load only the exceptional-reference recipe named by a kernel trigger/);
+  assert.match(claudeGoalCommand, /new-session or post-compaction uncertainty.*checked resume plus Ledger audit/);
   assert.match(claudeGoalCommand, /If the kernel cannot be read, fail closed/);
   assert.doesNotMatch(claudeGoalCommand, /codex-goal-compiler|handoff-prompts|goalbuddy-compiler/);
   assert.doesNotMatch(claudeGoalCommand, /Read the complete `state\.yaml`|Read every reference|Each board has at most one active task/);
@@ -165,8 +167,8 @@ test("one-location board edits stay direct only when no board read is needed", (
     assert.doesNotMatch(text, /for every full-board inspection and every mutation/);
   }
 
-  assert.match(canonicalExecution, /Complete canonical decisions use the deterministic digest-bound CLI directly/);
-  assert.match(canonicalExecution, /receipt closeout plus successor activation/);
+  assert.match(canonicalExecution, /Ordinary reviewed closeout uses one explicit-source semantic operation/);
+  assert.match(canonicalExecution, /Other complete canonical decisions use the deterministic digest-bound CLI directly/);
   assert.match(canonicalExecution, /deterministic digest-bound CLI/);
   assert.match(canonicalExecution, /only when no board read is needed/);
   assert.match(canonicalExecution, /otherwise use Keeper/);
@@ -184,9 +186,12 @@ test("current public contracts agree on typed transition ownership and exact dis
 
   assert.match(canonicalExecution, /--expected-state-digest <sha256>/);
   assert.doesNotMatch(canonicalExecution, /--status done/);
-  assert.match(canonicalExecution, /observes the before\/after write frontier/);
-  assert.match(canonicalExecution, /stores its authoritative full report in private Git-local transport and returns a compact outcome/);
-  assert.match(canonicalExecution, /Do not reconstruct a digest or materialize dispatch JSON by hand/);
+  assert.match(canonicalExecution, /fresh dispatch captures and validates its own exact state/);
+  assert.match(canonicalExecution, /stores the full report in private Git-local transport and returns one exact `receipt_source`/);
+  assert.match(canonicalExecution, /no digest, raw receipt, session ID, or command template/);
+  assert.match(dispatchScript, /compactSemanticDispatchOutcome/);
+  assert.match(dispatchScript, /receiptSource = report\.report_path/);
+  assert.match(dispatchScript, /receipt_source: receiptSource/);
   assert.match(readme, /match receipt `changed_files` exactly/);
   assert.match(releaseNotes, /one exact checker-admitted current task/);
   assert.match(receiptSpec, /The receipt's `result` is the sole source of terminal status/);
@@ -403,7 +408,7 @@ test("Milestone 2 policy owners require durable provenance and exact terminal pr
   assert.doesNotMatch(stateTemplate, /^\s+receipt_provenance:/m);
 });
 
-test("Milestone 3 semantic frontier remains a shadow-only checked projection", () => {
+test("Milestone 5 promotes the semantic frontier and explicit-source advance", () => {
   const projection = readFileSync("goalbuddy/scripts/frontier-projection.mjs", "utf8");
   const adapter = readFileSync("goalbuddy/scripts/frontier.mjs", "utf8");
   const cli = readFileSync("internal/cli/goal-maker.mjs", "utf8");
@@ -421,19 +426,61 @@ test("Milestone 3 semantic frontier remains a shadow-only checked projection", (
   assert.doesNotMatch(projection, /^import /m);
   assert.match(adapter, /createCheckedResumeProjection/);
   assert.match(cli, /frontier <docs\/goals\/slug> --json/);
-  assert.match(cli, /frontier is shadow-only/);
+  assert.match(cli, /frontier is the healthy prepared \/goal interface/);
+  assert.doesNotMatch(cli, /frontier is shadow-only/);
+  assert.doesNotMatch(adapter, /frontier is shadow-only/);
   assert.equal(pluginProjection, projection);
   assert.equal(pluginAdapter, adapter);
 
-  for (const text of [
-    canonicalExecution,
-    canonicalSkill,
-    canonicalGoalTemplate,
-    claudeGoalCommand,
-  ]) {
-    assert.match(text, /resume-board\.mjs/);
-    assert.doesNotMatch(text, /goalbuddy frontier|scripts\/frontier(?:-projection)?\.mjs/);
+  for (const text of [canonicalExecution, canonicalGoalTemplate, claudeGoalCommand]) {
+    assert.match(text, /scripts\/frontier\.mjs/);
+    assert.match(text, /advance/);
+    assert.doesNotMatch(text, /shadow-only/);
   }
+  assert.match(canonicalSkill, /goalbuddy_frontier_v1/);
+  assert.match(canonicalSkill, /explicit-source `advance`/);
+  assert.match(canonicalSkill, /If it cannot be read, prepared execution fails closed without dispatch or mutation/);
+  assert.doesNotMatch(canonicalSkill, /If it cannot be read, these execution invariants still hold/);
+  assert.doesNotMatch(canonicalSkill, /shadow-only/);
+
+  for (const text of [canonicalExecution, canonicalSkill, canonicalGoalTemplate, claudeGoalCommand]) {
+    assert.match(text, /new-session or post-compaction uncertainty/i);
+    assert.match(text, /Ledger/);
+    assert.match(text, /optional ephemeral projection/);
+    assert.match(text, /never board truth|never board truth or a second ledger/);
+    assert.match(text, /ordinary reviewed closeout/i);
+    assert.match(text, /Keeper/);
+  }
+
+  for (const text of [canonicalExecution, canonicalSkill, canonicalGoalTemplate]) {
+    for (const seam of [
+      /slice strategy/,
+      /current-repository research when useful/,
+      /JIT ExecPlan/,
+      /Codex operator-prompt/,
+      /full product-diff review/,
+      /independent-review selection and adjudication/,
+      /direct decisive-screenshot inspection/,
+      /unexpected-write and scope decisions|unexpected-write\/scope decisions/,
+      /review convergence|review-convergence judgment/,
+      /accepted-deviation judgment/,
+      /final acceptance/,
+    ]) {
+      assert.match(text, seam);
+    }
+    assert.match(text, /checker.*test.*Worker.*receipt.*native task completion.*evidence, not semantic completion/is);
+  }
+
+  assert.match(canonicalExecution, /Never copy an embedded receipt, relay a digest, scan for a likely report, or route ordinary closeout through Keeper/);
+  assert.match(canonicalGoalTemplate, /Keeper is exceptional, never ordinary closeout/);
+  assert.match(canonicalSkill, /Ordinary closeout never goes through Keeper/);
+  assert.match(claudeGoalCommand, /Ordinary reviewed closeout uses the kernel's explicit-source `advance`, never Keeper/);
+  assert.match(canonicalExecution, /no digest, raw receipt, session ID, or command template/);
+  assert.match(canonicalExecution, /On conflict, discard and rebuild it from the frontier/);
+  assert.match(canonicalGoalTemplate, /discard and rebuild it from the frontier on conflict/);
+  assert.match(canonicalSkill, /rebuild it from the frontier on conflict/);
+  assert.match(canonicalExecution, /If no legal successor exists, follow Final Completion; never invent one/);
+  assert.match(canonicalGoalTemplate, /if no legal successor exists, follow final completion and never invent one/);
 });
 
 test("adaptive execution strategy governs quality routing in contract and charter", () => {
@@ -444,7 +491,7 @@ test("adaptive execution strategy governs quality routing in contract and charte
     assert.match(text, /Decision risk/);
     assert.match(text, /Execution risk/);
     assert.match(text, /If unsure whether a seam is material, treat it as material/);
-    assert.match(text, /dispatch it directly with an outcome-oriented operator prompt/);
+    assert.match(text, /Dispatch a decision-complete mechanical card directly with an outcome-oriented operator prompt/);
     assert.match(text, /Claude resolves semantic capabilities to its native workflow planning, review, simplify, browser-QA, and Codex Exec routes/);
     assert.match(text, /Codex resolves them to its native Omega planning\/review, browser-QA, and Worker routes/);
     assert.match(text, /A completion claim alone is not proof/);

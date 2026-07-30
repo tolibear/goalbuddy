@@ -1,6 +1,6 @@
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import test from "node:test";
@@ -1825,6 +1825,97 @@ test("CODEX_HOME and CLAUDE_HOME override paths without narrowing the default in
   }
 });
 
+test("one isolated transaction installs and verifies the promoted runtime for both harnesses", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-m5-isolated-install-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const claudeHome = join(root, "claude-home");
+    const env = fakeCodexEnv(root);
+    assert.ok(resolve(codexHome).startsWith(`${resolve(root)}${sep}`));
+    assert.ok(resolve(claudeHome).startsWith(`${resolve(root)}${sep}`));
+
+    const install = runGoalMaker([
+      "install",
+      "--codex-home",
+      codexHome,
+      "--claude-home",
+      claudeHome,
+      "--json",
+    ], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    const installReport = JSON.parse(install.stdout);
+    assert.equal(installReport.ok, true);
+    assert.equal(installReport.transaction.status, "committed");
+    assert.deepEqual(installReport.transaction.targets, ["codex", "claude"]);
+
+    const codexContract = runGoalMaker([
+      "contract",
+      "--target",
+      "codex",
+      "--codex-home",
+      codexHome,
+      "--json",
+    ], { env });
+    assert.equal(codexContract.status, 0, codexContract.stderr || codexContract.stdout);
+    const codexContractReport = JSON.parse(codexContract.stdout);
+    assert.equal(codexContractReport.ok, true);
+    assert.equal(
+      codexContractReport.skills.goal_prep.tree_fingerprint,
+      codexContractReport.skills.goal_prep.source_tree_fingerprint,
+    );
+    assert.equal(
+      codexContractReport.skills.compiler.tree_fingerprint,
+      codexContractReport.skills.compiler.source_tree_fingerprint,
+    );
+
+    const codexDoctor = runGoalMaker([
+      "doctor",
+      "--target",
+      "codex",
+      "--codex-home",
+      codexHome,
+    ], { env });
+    assert.equal(codexDoctor.status, 0, codexDoctor.stderr || codexDoctor.stdout);
+    assert.deepEqual(JSON.parse(codexDoctor.stdout).errors, []);
+
+    const claudeContract = runGoalMaker([
+      "contract",
+      "--target",
+      "claude",
+      "--claude-home",
+      claudeHome,
+      "--json",
+    ], { env });
+    assert.equal(claudeContract.status, 0, claudeContract.stderr || claudeContract.stdout);
+    const claudeContractReport = JSON.parse(claudeContract.stdout);
+    assert.equal(claudeContractReport.ok, true);
+    assert.equal(
+      claudeContractReport.skills.goal_prep.tree_fingerprint,
+      claudeContractReport.skills.goal_prep.source_tree_fingerprint,
+    );
+    assert.equal(
+      claudeContractReport.skills.compiler.tree_fingerprint,
+      claudeContractReport.skills.compiler.source_tree_fingerprint,
+    );
+
+    const claudeDoctor = runGoalMaker([
+      "doctor",
+      "--target",
+      "claude",
+      "--claude-home",
+      claudeHome,
+    ], { env });
+    assert.equal(claudeDoctor.status, 0, claudeDoctor.stderr || claudeDoctor.stdout);
+    assert.deepEqual(JSON.parse(claudeDoctor.stdout).errors, []);
+    assert.deepEqual(
+      readFileSync(join(claudeHome, "commands", "goal.md")),
+      readFileSync("plugins/goalbuddy/commands/goal.md"),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("install reports Codex plugin state in json mode", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
@@ -2724,7 +2815,7 @@ test("rebind exposes the typed digest-bound GoalBuddy control mutation", () => {
   }
 });
 
-test("frontier is a read-only shadow route over the checked resume boundary", () => {
+test("frontier is the read-only healthy interface over the checked resume boundary", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-frontier-cli-"));
   try {
     const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
@@ -2949,8 +3040,9 @@ test("frontier rejects discovery, non-JSON, planning, unknown flags, and extra r
   const help = runGoalMaker(["frontier", "--help"]);
   assert.equal(help.status, 0, help.stderr || help.stdout);
   assert.match(help.stdout, /goalbuddy frontier <docs\/goals\/slug> --json/);
-  assert.match(help.stdout, /frontier is shadow-only/);
-  assert.match(help.stdout, /Installed \/goal continues to use the checked resume projection/);
+  assert.match(help.stdout, /frontier is the healthy prepared \/goal interface/);
+  assert.match(help.stdout, /Checked resume remains available for recovery and explicit digest-bound continuation/);
+  assert.doesNotMatch(help.stdout, /shadow-only/);
 });
 
 test("advance publicly closes one checked slice and returns the activated semantic frontier", () => {

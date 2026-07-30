@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { compareDispatchAuthority, compareDispatchScope, compileDispatchScope, captureDispatchManifest, normalizeRepositoryPath, repositoryRoot } from "./dispatch-scope-manifest.mjs";
 import { sha256 } from "./immutable-history-proof.mjs";
 import { joinedOptionValue, printPublicFailure, publicError, publicFailure, requiredOptionValue } from "./public-error.mjs";
-import { admitCurrentTask, formatPrompt } from "./render-task-prompt.mjs";
+import { admitCurrentTask, formatPrompt, resolveBoardPath } from "./render-task-prompt.mjs";
 import { bindCodexWorkerSession } from "./apply-receipt.mjs";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
 import { buildApplyReceiptCommand } from "./controller-commands.mjs";
@@ -34,12 +34,16 @@ const READ_ONLY_ROLES = new Set(["scout", "judge"]);
 if (isDirectRun()) {
   try {
     const options = parseDispatchArgs(process.argv.slice(2));
+    const semanticDispatch = !options.expectedStateDigest;
     let report = await dispatchTask(options);
     if (report.ok) {
       try {
-        report = compactDispatchOutcome(materializeDispatchReport(report, options));
+        const materialized = materializeDispatchReport(report, options);
+        report = semanticDispatch
+          ? compactSemanticDispatchOutcome(materialized)
+          : compactDispatchOutcome(materialized);
       } catch (error) {
-        report = {
+        const unavailable = {
           ...report,
           report_path: null,
           report_transport: {
@@ -48,6 +52,25 @@ if (isDirectRun()) {
             error: String(error?.message || error).slice(0, 300),
           },
         };
+        if (!semanticDispatch) {
+          report = unavailable;
+        } else {
+          try {
+            const receiptSource = materializeRetainedDispatchOutput(unavailable);
+            report = compactSemanticDispatchOutcome(unavailable, {
+              receiptSource,
+              reportTransport: {
+                kind: "repository_retained_v1",
+                status: "ready",
+              },
+            });
+          } catch (retentionError) {
+            report = semanticDispatchTransportFailure(unavailable, {
+              gitError: error,
+              retentionError,
+            });
+          }
+        }
       }
     }
     if (options.json) {
@@ -101,10 +124,13 @@ export function parseDispatchArgs(args) {
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!options.goalRoot && !options.boardPath) {
-    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
+    throw new Error("Usage: node dispatch-task.mjs <goal-root> --to codex|claude-code [--expected-state-digest <sha256>] [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]");
   }
-  if (!/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
-    throw publicError("STALE_STATE_DIGEST", "dispatch requires --expected-state-digest with exactly 64 lowercase hex characters.");
+  if (options.expectedStateDigest && !/^[a-f0-9]{64}$/.test(options.expectedStateDigest)) {
+    throw publicError("STALE_STATE_DIGEST", "--expected-state-digest must contain exactly 64 lowercase hex characters.");
+  }
+  if (!options.expectedStateDigest && (options.allowImmutableHistory || options.resumeSession)) {
+    throw publicError("STALE_STATE_DIGEST", "Recovery dispatch requires --expected-state-digest with exactly 64 lowercase hex characters.");
   }
   if (Boolean(options.briefPath) !== Boolean(options.briefSha256) || (options.briefSha256 && !/^[a-f0-9]{64}$/.test(options.briefSha256))) {
     throw publicError("INVALID_ARGUMENT", "dispatch requires --brief and --brief-sha256 together with a 64-character lowercase digest.");
@@ -145,6 +171,13 @@ function parseTimeoutSeconds(value) {
 export async function dispatchTask(options) {
   let admitted;
   try {
+    if (!options.expectedStateDigest) {
+      const boardPath = resolveBoardPath(options);
+      options = {
+        ...options,
+        expectedStateDigest: sha256(readFileSync(boardPath)),
+      };
+    }
     admitted = admitCurrentTask(options);
   } catch (error) {
     throw publicError(error.code || "INVALID_ARGUMENT", error.message, {
@@ -208,7 +241,7 @@ export async function dispatchTask(options) {
     "",
     "Dispatch notes:",
     `- Work only inside the admitted repository: ${root}`,
-    "- Do not edit state.yaml or any GoalBuddy control files; the PM applies your receipt through GoalBuddy's direct digest-bound typed transition.",
+    "- Do not edit state.yaml or any GoalBuddy control files; the PM reviews your exact source and closes it through GoalBuddy advance.",
     `- End your reply with exactly one goalbuddy_receipt_v1 JSON object, including "harness": "${to}".`,
     ...(boundInput ? [`- Read the bound implementation context at ${boundInput.path}; its admitted SHA-256 is ${boundInput.sha256}. Treat it as context subordinate to the structured task authority.`] : []),
   ].join("\n");
@@ -610,6 +643,40 @@ function materializeDispatchReport(report, options) {
   return materialized;
 }
 
+function materializeRetainedDispatchOutput(report) {
+  const goalDir = dirname(report.board_path);
+  const goalIdentity = verifiedDirectoryIdentity(goalDir, "Goal directory");
+  if (realpathSync(goalDir) !== goalDir) {
+    throw new Error("Goal directory must be a real canonical directory.");
+  }
+  const notesPath = join(goalDir, "notes");
+  try {
+    mkdirSync(notesPath, { mode: 0o700 });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  assertDirectoryIdentity(goalDir, goalIdentity, "Goal directory");
+  const notesIdentity = verifiedDirectoryIdentity(notesPath, "Goal notes directory");
+  if (dirname(notesPath) !== goalDir || realpathSync(notesPath) !== notesPath) {
+    throw new Error("Goal notes directory must be a real contained directory.");
+  }
+  const reportDir = mkdtempSync(join(notesPath, `${report.task_id}-dispatch-output-`));
+  assertDirectoryIdentity(notesPath, notesIdentity, "Goal notes directory");
+  const reportDirIdentity = verifiedDirectoryIdentity(reportDir, "Retained dispatch output directory", {
+    mode: 0o700,
+  });
+  if (dirname(reportDir) !== notesPath || realpathSync(reportDir) !== reportDir) {
+    throw new Error("Retained dispatch output directory escaped GoalBuddy notes.");
+  }
+  const reportPath = join(reportDir, "dispatch-output.json");
+  writeVerifiedExclusiveFile(
+    reportPath,
+    `${JSON.stringify(report, null, 2)}\n`,
+    reportDirIdentity,
+  );
+  return normalizeRepositoryPath(repositoryRoot(goalDir), reportPath);
+}
+
 function createVerifiedChildDirectory(parentPath, parentIdentity, name) {
   if (!/^[a-z0-9-]+$/.test(name)) {
     throw new Error(`Refusing unsafe Git-local transport component: ${name}`);
@@ -716,6 +783,68 @@ function compactDispatchOutcome(report) {
     commands: {
       apply_receipt: report.commands.apply_receipt,
     },
+  };
+}
+
+function compactSemanticDispatchOutcome(report, {
+  receiptSource = report.report_path,
+  reportTransport = {
+    kind: report.report_transport.kind,
+    status: report.report_transport.status,
+  },
+} = {}) {
+  return {
+    kind: "goalbuddy_dispatch_outcome_v1",
+    ok: true,
+    harness: report.harness,
+    task_id: report.task_id,
+    role: report.role,
+    exit_status: report.exit_status,
+    result: {
+      status: report.receipt?.result || "unknown",
+      summary: report.receipt?.summary || null,
+    },
+    scope_check: {
+      status: report.scope_check.status,
+      changed_files: report.scope_check.changed_files,
+      violations: report.scope_check.violations,
+    },
+    repair: {
+      attempted: report.repair.attempted,
+      succeeded: report.repair.succeeded,
+      failure: report.repair.failure,
+    },
+    receipt_source: receiptSource,
+    report_transport: reportTransport,
+    next_action: "Inspect the full product diff and required evidence, then use receipt_source as the exact --source for advance.",
+  };
+}
+
+function semanticDispatchTransportFailure(report, { gitError, retentionError }) {
+  const nextAction = report.session_binding
+    ? "Do not redispatch. Run the semantic frontier and the named recovery audit; recover the exact bound Worker output before closeout."
+    : "Do not redispatch or use original_role advance: the original receipt is unavailable. Preserve current product writes, run the semantic frontier and the named recovery audit, then use exceptional Keeper/owner adjudication before any repair or independently verified closeout.";
+  return {
+    kind: "goalbuddy_dispatch_error_v1",
+    ok: false,
+    error_code: "DISPATCH_REPORT_UNAVAILABLE",
+    error: "The Worker returned, but GoalBuddy could not retain an exact receipt source.",
+    task_id: report.task_id,
+    scope_check: {
+      status: report.scope_check.status,
+      changed_files: report.scope_check.changed_files,
+      violations: report.scope_check.violations,
+    },
+    mutation: {
+      board: report.mutation.board,
+      product: report.mutation.product,
+      receipt_applied: false,
+    },
+    transport_errors: [
+      String(gitError?.message || gitError).slice(0, 300),
+      String(retentionError?.message || retentionError).slice(0, 300),
+    ],
+    next_action: nextAction,
   };
 }
 
@@ -1041,6 +1170,16 @@ function cleanScalar(value) {
 function printHumanReport(report) {
   if (!report.ok) {
     console.error(`${report.error_code}: ${report.error} Next: ${report.next_action}`);
+    return;
+  }
+  if (report.kind === "goalbuddy_dispatch_outcome_v1") {
+    console.log(`Dispatch from ${report.harness} for ${report.task_id} (${report.role}): result ${report.result.status}`);
+    console.log(`Scope check: ${report.scope_check.status}`);
+    if (report.scope_check.violations?.length) {
+      console.log(`Violations: ${report.scope_check.violations.join(", ")}`);
+    }
+    console.log(`Exact receipt source: ${report.receipt_source}`);
+    console.log("Review the full product diff and required evidence. If a legal successor exists, use this exact source with goalbuddy advance; otherwise follow final completion.");
     return;
   }
   if (report.receipt) {

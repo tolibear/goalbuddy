@@ -17,7 +17,7 @@ function run(root, args, env = {}) {
   });
 }
 
-test("public preactivation lifecycle stays digest-bound from init through completion", () => {
+test("public preactivation lifecycle uses frontier, semantic dispatch, advance, and exact completion", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-preactivation-lifecycle-"));
   const bin = mkdtempSync(join(tmpdir(), "goalbuddy-preactivation-bin-"));
   const marker = `${root}.harness-launched`;
@@ -121,42 +121,70 @@ printf '%s\\n' '${workerReceipt}'
     chmodSync(fakeCodex, 0o755);
     const harnessEnv = { PATH: `${bin}${delimiter}${process.env.PATH}`, GOALBUDDY_MARKER: marker };
 
+    const firstFrontier = run(root, ["frontier", "docs/goals/ship-widget", "--json"]);
+    assert.equal(firstFrontier.status, 0, firstFrontier.stderr || firstFrontier.stdout);
+    assert.equal(JSON.parse(firstFrontier.stdout).slice.id, "T001");
+
     const firstResume = run(root, ["resume", "docs/goals/ship-widget", "--json"]);
     assert.equal(firstResume.status, 0, firstResume.stderr || firstResume.stdout);
     const firstProjection = JSON.parse(firstResume.stdout);
-    const firstDigest = firstProjection.board.state_digest;
     assert.equal(firstProjection.board.active_task.id, "T001");
-
-    const firstPrompt = run(root, ["prompt", "docs/goals/ship-widget", "--expected-state-digest", firstDigest, "--json"]);
-    assert.equal(firstPrompt.status, 0, firstPrompt.stderr || firstPrompt.stdout);
-    assert.equal(JSON.parse(firstPrompt.stdout).task.id, "T001");
 
     const staleDispatch = run(root, ["dispatch", "docs/goals/ship-widget", "--to", "codex", "--expected-state-digest", "0".repeat(64), "--json"], harnessEnv);
     assert.equal(staleDispatch.status, 1, staleDispatch.stderr || staleDispatch.stdout);
     assert.equal(JSON.parse(staleDispatch.stdout).error_code, "STALE_STATE_DIGEST");
     assert.equal(existsSync(marker), false, "a rejected admission must not launch the harness");
 
-    const validDispatch = run(root, ["dispatch", "docs/goals/ship-widget", "--to", "codex", "--expected-state-digest", firstDigest, "--json"], { ...harnessEnv, GOALBUDDY_FAKE_MODE: "valid" });
+    const validDispatch = run(root, ["dispatch", "docs/goals/ship-widget", "--to", "codex", "--json"], { ...harnessEnv, GOALBUDDY_FAKE_MODE: "valid" });
     assert.equal(validDispatch.status, 0, validDispatch.stderr || validDispatch.stdout);
     const dispatchReport = JSON.parse(validDispatch.stdout);
     assert.equal(dispatchReport.ok, true);
+    assert.equal(dispatchReport.kind, "goalbuddy_dispatch_outcome_v1");
     assert.equal(dispatchReport.scope_check.status, "clean");
-    assert.equal(typeof dispatchReport.session_binding.state_digest, "string");
-    const dispatchPath = dispatchReport.report_path;
+    assert.equal("state_digest" in dispatchReport, false);
+    assert.equal("session_binding" in dispatchReport, false);
+    assert.equal("receipt" in dispatchReport, false);
+    assert.equal("commands" in dispatchReport, false);
+    const dispatchPath = dispatchReport.receipt_source;
     assert.equal(typeof dispatchPath, "string");
     assert.equal(existsSync(dispatchPath), true);
 
-    const boardBeforeStaleReceipt = readFileSync(statePath, "utf8");
-    const staleReceipt = run(root, ["receipt", "docs/goals/ship-widget", "--task", "T001", "--receipt", dispatchPath, "--expected-state-digest", "0".repeat(64), "--activate", "T999", "--json"]);
-    assert.equal(staleReceipt.status, 1, staleReceipt.stderr || staleReceipt.stdout);
-    assert.equal(staleReceipt.stderr, "");
-    assert.equal(staleReceipt.stdout.trim().split("\n").length, 1);
-    assert.equal(JSON.parse(staleReceipt.stdout).error_code, "STALE_STATE_DIGEST");
-    assert.equal(readFileSync(statePath, "utf8"), boardBeforeStaleReceipt);
-
-    const receiptTransition = run(root, ["receipt", "docs/goals/ship-widget", "--task", "T001", "--receipt", dispatchPath, "--expected-state-digest", dispatchReport.session_binding.state_digest, "--activate", "T999", "--json"]);
+    const receiptTransition = run(root, [
+      "advance",
+      "docs/goals/ship-widget",
+      "--task",
+      "T001",
+      "--source",
+      dispatchPath,
+      "--closeout-authority",
+      "original_role",
+      "--activate",
+      "T999",
+      "--json",
+    ]);
     assert.equal(receiptTransition.status, 0, receiptTransition.stderr || receiptTransition.stdout);
-    assert.equal(JSON.parse(receiptTransition.stdout).active_task, "T999");
+    const advanced = JSON.parse(receiptTransition.stdout);
+    assert.equal(advanced.outcome.next_task_id, "T999");
+    assert.equal(advanced.frontier.slice.id, "T999");
+    assert.equal(existsSync(dispatchPath), false);
+
+    const boardAfterAdvance = readFileSync(statePath, "utf8");
+    const replay = run(root, [
+      "advance",
+      "docs/goals/ship-widget",
+      "--task",
+      "T001",
+      "--source",
+      dispatchPath,
+      "--closeout-authority",
+      "original_role",
+      "--activate",
+      "T999",
+      "--json",
+    ]);
+    assert.equal(replay.status, 1, replay.stderr || replay.stdout);
+    assert.match(JSON.parse(replay.stdout).error, /current active|active receipt-free|active_task/i);
+    assert.equal(readFileSync(statePath, "utf8"), boardAfterAdvance);
 
     const secondResume = run(root, ["resume", "docs/goals/ship-widget", "--json"]);
     assert.equal(secondResume.status, 0, secondResume.stderr || secondResume.stdout);
@@ -164,9 +192,9 @@ printf '%s\\n' '${workerReceipt}'
     const secondDigest = secondProjection.board.state_digest;
     assert.equal(secondProjection.board.active_task.id, "T999");
 
-    const finalPrompt = run(root, ["prompt", "docs/goals/ship-widget", "--expected-state-digest", secondDigest, "--json"]);
-    assert.equal(finalPrompt.status, 0, finalPrompt.stderr || finalPrompt.stdout);
-    assert.equal(JSON.parse(finalPrompt.stdout).task.id, "T999");
+    const secondFrontier = run(root, ["frontier", "docs/goals/ship-widget", "--json"]);
+    assert.equal(secondFrontier.status, 0, secondFrontier.stderr || secondFrontier.stdout);
+    assert.equal(JSON.parse(secondFrontier.stdout).slice.id, "T999");
 
     const reviewScope = {
       kind: "goalbuddy_review_scope_v1",
@@ -223,6 +251,9 @@ printf '%s\\n' '${workerReceipt}'
     const finalProjection = JSON.parse(finalResume.stdout);
     assert.equal(finalProjection.board.status, "done");
     assert.equal(finalProjection.board.active_task, null);
+    const finalFrontier = run(root, ["frontier", "docs/goals/ship-widget", "--json"]);
+    assert.equal(finalFrontier.status, 0, finalFrontier.stderr || finalFrontier.stdout);
+    assert.equal(JSON.parse(finalFrontier.stdout).goal.status, "done");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(bin, { recursive: true, force: true });

@@ -368,7 +368,7 @@ Usage:
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
   ${canonicalCliName} frontier <docs/goals/slug> --json
-  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]
+  ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--expected-state-digest <sha256>] [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--allow-immutable-history] [--json]
   ${canonicalCliName} hold <docs/goals/slug> --task T### --source <file> [--origin-artifact <rejected-dispatch.json>] --expected-state-digest <sha256> [--json]
   ${canonicalCliName} advance <docs/goals/slug> --task T### (--source <exact-path> [--origin-artifact <exact-path>] | --held-receipt <handle>) --closeout-authority original_role|pm_blocked_closeout --activate T### [--task-card <path>] [--json]
@@ -381,8 +381,9 @@ Usage:
 
 Targets: install/update transactionally prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the transaction.
 
-Shadow evaluation:
-  ${canonicalCliName} frontier is shadow-only. Installed /goal continues to use the checked resume projection until frontier promotion.
+Semantic execution:
+  ${canonicalCliName} frontier is the healthy prepared /goal interface. Checked resume remains available for recovery and explicit digest-bound continuation.
+  Fresh dispatch captures checked state internally and returns one exact receipt_source without exposing control digests. Recovery or exact-session resume remains explicitly digest-bound.
 
 Default:
   ${canonicalCliName}                  Shows this help without changing runtime state.

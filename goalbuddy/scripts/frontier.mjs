@@ -99,7 +99,7 @@ function parseFrontierArgs(args) {
     }
   }
   if (!options.goalRoot) throw new Error("goalbuddy frontier requires one explicit goal root.");
-  if (!options.json) throw new Error("goalbuddy frontier is shadow-only and requires --json.");
+  if (!options.json) throw new Error("goalbuddy frontier requires --json.");
   return options;
 }
 

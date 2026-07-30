@@ -9,6 +9,7 @@ import { parseDispatchArgs } from "../../goalbuddy/scripts/dispatch-task.mjs";
 
 const dispatcher = resolve("goalbuddy/scripts/dispatch-task.mjs");
 const applyReceipt = resolve("goalbuddy/scripts/apply-receipt.mjs");
+const goalOperation = resolve("goalbuddy/scripts/goal-operation.mjs");
 const CODEX_SESSION_ID = "019f6dab-7b25-7620-9da6-4f79a0648146";
 const OTHER_CODEX_SESSION_ID = "019f6dac-0000-7000-8000-000000000000";
 const SYSTEM_GIT = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
@@ -169,6 +170,235 @@ test("dispatch runs an external worker and reports a clean scope", () => {
     assert.equal(existsSync(report.report_path), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("healthy dispatch captures state internally and returns only the semantic source needed by advance", () => {
+  const root = makeProject();
+  try {
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = spawnSync(process.execPath, [
+      dispatcher,
+      "docs/goals/one",
+      "--to",
+      "codex",
+      "--json",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(report), [
+      "kind",
+      "ok",
+      "harness",
+      "task_id",
+      "role",
+      "exit_status",
+      "result",
+      "scope_check",
+      "repair",
+      "receipt_source",
+      "report_transport",
+      "next_action",
+    ]);
+    assert.equal(report.kind, "goalbuddy_dispatch_outcome_v1");
+    assert.deepEqual(report.result, {
+      status: "done",
+      summary: "widget adjusted",
+    });
+    assert.equal(report.scope_check.status, "clean");
+    assert.equal(report.report_transport.status, "ready");
+    assert.equal(existsSync(report.receipt_source), true);
+    for (const forbidden of [
+      "state_digest",
+      "before_digest",
+      "after_digest",
+      "session_id",
+      "command_template",
+      "dispatch_contract_sha256",
+    ]) {
+      assert.equal(result.stdout.includes(forbidden), false, forbidden);
+    }
+
+    const fullReport = JSON.parse(readFileSync(report.receipt_source, "utf8"));
+    assert.equal(fullReport.receipt.result, "done");
+    assert.match(fullReport.state_digest, /^[a-f0-9]{64}$/);
+
+    const advance = spawnSync(process.execPath, [
+      goalOperation,
+      "advance",
+      "docs/goals/one",
+      "--task",
+      "T001",
+      "--source",
+      report.receipt_source,
+      "--closeout-authority",
+      "original_role",
+      "--activate",
+      "T002",
+      "--json",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(advance.status, 0, advance.stderr || advance.stdout);
+    const advanced = JSON.parse(advance.stdout);
+    assert.equal(advanced.outcome.task_id, "T001");
+    assert.equal(advanced.outcome.next_task_id, "T002");
+    assert.equal(advanced.frontier.slice.id, "T002");
+    assert.equal(existsSync(report.receipt_source), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("healthy human dispatch names the exact source and semantic advance path", () => {
+  const root = makeProject();
+  try {
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = spawnSync(process.execPath, [
+      dispatcher,
+      "docs/goals/one",
+      "--to",
+      "codex",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Dispatch from codex for T001 \(worker\): result done/);
+    assert.match(result.stdout, /Exact receipt source: .*dispatch-report\.json/);
+    assert.match(result.stdout, /use this exact source with goalbuddy advance/);
+    assert.doesNotMatch(result.stdout, /goalbuddy receipt transition/);
+    for (const forbidden of [
+      "state_digest",
+      "session_id",
+      "dispatch_contract_sha256",
+      "goalbuddy_receipt_v1",
+    ]) {
+      assert.equal(result.stdout.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("healthy dispatch retains a compact repository source when Git-local transport is unavailable", () => {
+  const root = makeProject();
+  const external = mkdtempSync(join(tmpdir(), "goalbuddy-semantic-transport-external-"));
+  try {
+    symlinkSync(external, join(root, ".git", "goalbuddy"));
+    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const result = spawnSync(process.execPath, [
+      dispatcher,
+      "docs/goals/one",
+      "--to",
+      "codex",
+      "--json",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.kind, "goalbuddy_dispatch_outcome_v1");
+    assert.deepEqual(report.report_transport, {
+      kind: "repository_retained_v1",
+      status: "ready",
+    });
+    assert.match(report.receipt_source, /^docs\/goals\/one\/notes\/T001-dispatch-output-/);
+    const retainedPath = join(root, report.receipt_source);
+    assert.equal(existsSync(retainedPath), true);
+    const retained = JSON.parse(readFileSync(retainedPath, "utf8"));
+    assert.equal(retained.report_path, null);
+    assert.equal(retained.report_transport.status, "unavailable");
+    assert.equal(retained.receipt.result, "done");
+    for (const forbidden of [
+      "state_digest",
+      "session_id",
+      "command_template",
+      "dispatch_contract_sha256",
+    ]) {
+      assert.equal(result.stdout.includes(forbidden), false, forbidden);
+    }
+
+    const advance = spawnSync(process.execPath, [
+      goalOperation,
+      "advance",
+      "docs/goals/one",
+      "--task",
+      "T001",
+      "--source",
+      report.receipt_source,
+      "--closeout-authority",
+      "original_role",
+      "--activate",
+      "T002",
+      "--json",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(advance.status, 0, advance.stderr || advance.stdout);
+    assert.equal(JSON.parse(advance.stdout).frontier.slice.id, "T002");
+    assert.equal(existsSync(retainedPath), true, "repository fallback evidence is retained");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test("an unbound Claude result reports truthful recovery when both receipt transports fail", () => {
+  const root = makeProject();
+  const externalGit = mkdtempSync(join(tmpdir(), "goalbuddy-double-transport-git-"));
+  const externalNotes = mkdtempSync(join(tmpdir(), "goalbuddy-double-transport-notes-"));
+  try {
+    symlinkSync(externalGit, join(root, ".git", "goalbuddy"));
+    const notesPath = join(root, "docs", "goals", "one", "notes");
+    rmSync(notesPath, { recursive: true });
+    symlinkSync(externalNotes, notesPath);
+    const claudeReceipt = JSON.stringify({
+      goalbuddy_receipt_v1: {
+        ...JSON.parse(RECEIPT).goalbuddy_receipt_v1,
+        harness: "claude-code",
+      },
+    });
+    const bin = fakeHarnessBin(root, "claude", `echo "export const widget = 2;" > src/widget.mjs\necho '${claudeReceipt}'`);
+    const result = spawnSync(process.execPath, [
+      dispatcher,
+      "docs/goals/one",
+      "--to",
+      "claude-code",
+      "--json",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+    });
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.kind, "goalbuddy_dispatch_error_v1");
+    assert.equal(report.error_code, "DISPATCH_REPORT_UNAVAILABLE");
+    assert.equal(report.mutation.board, "unchanged");
+    assert.equal(report.mutation.product, "observed");
+    assert.equal(report.mutation.receipt_applied, false);
+    assert.match(report.next_action, /original receipt is unavailable/);
+    assert.match(report.next_action, /Preserve current product writes/);
+    assert.match(report.next_action, /Keeper\/owner adjudication/);
+    assert.doesNotMatch(report.next_action, /exact bound Worker output/);
+    assert.equal(readFileSync(join(root, "src", "widget.mjs"), "utf8"), "export const widget = 2;\n");
+    for (const forbidden of [
+      "state_digest",
+      "session_id",
+      "dispatch_contract_sha256",
+      "goalbuddy_receipt_v1",
+      "widget adjusted",
+    ]) {
+      assert.equal(result.stdout.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(externalGit, { recursive: true, force: true });
+    rmSync(externalNotes, { recursive: true, force: true });
   }
 });
 
@@ -490,6 +720,11 @@ test("dispatch times out hung harness CLIs", () => {
 
 test("dispatch has no implicit deadline and accepts only explicit positive timeouts", () => {
   const baseArgs = ["docs/goals/one", "--to", "codex", "--expected-state-digest", "0".repeat(64)];
+  assert.equal(parseDispatchArgs(["docs/goals/one", "--to", "codex"]).expectedStateDigest, "");
+  assert.throws(
+    () => parseDispatchArgs(["docs/goals/one", "--to", "codex", "--resume-session", CODEX_SESSION_ID, "--confirmed-not-live"]),
+    /Recovery dispatch requires --expected-state-digest/,
+  );
   assert.equal(parseDispatchArgs(baseArgs).timeoutSeconds, null);
   assert.equal(parseDispatchArgs(baseArgs).reasoningEffort, "");
   assert.equal(parseDispatchArgs(baseArgs).serviceTier, "");
