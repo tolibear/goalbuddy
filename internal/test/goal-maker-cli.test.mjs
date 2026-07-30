@@ -10,6 +10,7 @@ import { projectTransitionEvidence } from "../../goalbuddy/scripts/resume-board.
 
 const cli = resolve("internal/cli/goal-maker.mjs");
 const bundledResume = resolve("goalbuddy/scripts/resume-board.mjs");
+const bundledFrontier = resolve("goalbuddy/scripts/frontier.mjs");
 const compilerPreflight = resolve("codex-goal-compiler/scripts/check_goalbuddy_runtime.py");
 const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 const runtimeCapabilities = {
@@ -2562,6 +2563,15 @@ test("hold is exposed through the public CLI and resume returns the exact held-r
     assert.equal(projectedHeld[0].source_artifact.sha256, createHash("sha256").update(readFileSync(sourcePath)).digest("hex"));
     assert.equal(projectedHeld[0].receipt_value_sha256.length, 64);
     assert.equal(projectedHeld[0].origin_artifact, null);
+
+    const frontier = runGoalMaker(["frontier", goalDir, "--json"], { cwd: root });
+    assert.equal(frontier.status, 0, frontier.stderr || frontier.stdout);
+    const semanticHeld = JSON.parse(frontier.stdout).evidence.held_receipts;
+    assert.equal(semanticHeld.length, 1);
+    assert.equal(semanticHeld[0].handle, holdReport.handle);
+    assert.equal(semanticHeld[0].state, "held_unapplied");
+    assert.equal(semanticHeld[0].source.kind, "held_artifact");
+    assert.doesNotMatch(frontier.stdout, /source_artifact|dispatch-reports|state_digest/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2711,6 +2721,227 @@ test("rebind exposes the typed digest-bound GoalBuddy control mutation", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("frontier is a read-only shadow route over the checked resume boundary", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-frontier-cli-"));
+  try {
+    const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const statePath = join(goalDir, "state.yaml");
+    mkdirSync(join(root, "reviews"), { recursive: true });
+    mkdirSync(join(root, "screenshots"), { recursive: true });
+    const roundOneBytes = "{\"kind\":\"independent_review\",\"round\":1}\n";
+    const roundTwoBytes = "{\"kind\":\"independent_review\",\"round\":2}\n";
+    const roundOneDiffBytes = "diff --git a/src/widget.mjs b/src/widget.mjs\n";
+    const screenshotBytes = Buffer.from("decisive screenshot fixture");
+    writeFileSync(join(root, "reviews", "round-one.json"), roundOneBytes);
+    writeFileSync(join(root, "reviews", "round-two.json"), roundTwoBytes);
+    writeFileSync(join(root, "reviews", "round-one.diff"), roundOneDiffBytes);
+    writeFileSync(join(root, "screenshots", "widget.png"), screenshotBytes);
+    const roundOneSha256 = createHash("sha256").update(roundOneBytes).digest("hex");
+    const roundTwoSha256 = createHash("sha256").update(roundTwoBytes).digest("hex");
+    const roundOneDiffSha256 = createHash("sha256").update(roundOneDiffBytes).digest("hex");
+    const screenshotSha256 = createHash("sha256").update(screenshotBytes).digest("hex");
+    const briefPath = "docs/goals/one/notes/T002-brief.md";
+    const briefBytes = "# T002 brief\n\nImplement and verify the bounded widget slice.\n";
+    writeFileSync(join(root, briefPath), briefBytes);
+    const briefSha256 = createHash("sha256").update(briefBytes).digest("hex");
+    const state = readFileSync(statePath, "utf8")
+      .replace(
+        `      note: notes/T001-transition.md`,
+        `      note: notes/T001-transition.md
+      evidence:
+        - kind: goalbuddy_review_evidence_v1
+          identity: round-one
+          round: 1
+          reviewer: independent-code-review
+          status: complete
+          scope_status: exact
+          findings: 8
+          accepted_findings: 6
+          yield: high
+          selection: selected_for_material_diff
+          adjudication: six_findings_accepted
+          artifact:
+            path: reviews/round-one.json
+            sha256: ${roundOneSha256}
+          diff_artifact:
+            path: reviews/round-one.diff
+            sha256: ${roundOneDiffSha256}
+            identity:
+              kind: content_sha256
+              value: ${"b".repeat(64)}
+            scope:
+              - src/**
+          scope_anomalies: []
+        - kind: goalbuddy_review_evidence_v1
+          identity: round-two
+          round: 2
+          reviewer: independent-code-review
+          status: complete
+          scope_status: wrong_scope
+          findings: 1
+          accepted_findings: 0
+          yield: diminishing
+          selection: selected_as_convergence_check
+          adjudication: finding_rejected
+          artifact:
+            path: reviews/round-two.json
+            sha256: ${roundTwoSha256}
+          diff_artifact: null
+          scope_anomalies:
+            - kind: wrong_scope_workflow
+              status: open
+              detail: Review included an unrelated generated file.
+        - kind: goalbuddy_browser_evidence_v1
+          state: completed_widget
+          verdict: accepted
+          decisive: true
+          summary: The widget state is visually correct.
+          screenshot:
+            path: screenshots/widget.png
+            sha256: ${screenshotSha256}
+        - kind: goalbuddy_product_decision_v1
+          id: PD001
+          status: blocked
+          decision: Owner must choose the activation threshold.
+          note: docs/goals/one/notes/T001-transition.md`,
+      )
+      .replace(
+        `    stop_if:
+      - "Need files outside allowed_files."
+    receipt: null`,
+        `    stop_if:
+      - "Need files outside allowed_files."
+    brief:
+      path: ${briefPath}
+      sha256: ${briefSha256}
+    receipt: null`,
+      );
+    writeFileSync(statePath, state);
+
+    const goalPath = "docs/goals/one";
+    const resumeBefore = runGoalMaker(["resume", goalPath, "--json"], { cwd: root });
+    assert.equal(resumeBefore.status, 0, resumeBefore.stderr || resumeBefore.stdout);
+    const before = snapshotPath(root);
+
+    const result = runGoalMaker(["frontier", goalPath, "--json"], { cwd: root });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(report), [
+      "kind",
+      "goal",
+      "slice",
+      "worker",
+      "evidence",
+      "reviews",
+      "deviations",
+      "decisions",
+      "drill_down",
+    ]);
+    assert.equal(report.kind, "goalbuddy_frontier_v1");
+    assert.equal(report.goal.objective, "The widget works and the test proves it.");
+    assert.equal(report.goal.source.path, "docs/goals/one/goal.md");
+    assert.equal(report.slice.id, "T002");
+    assert.equal(report.slice.brief.status, "bound");
+    assert.equal(report.slice.brief.path, briefPath);
+    assert.equal(report.worker.liveness, "unknown");
+    assert.equal(report.evidence.changed_paths[0].status, "unavailable");
+    assert.equal(report.evidence.browser[0].decisive, true);
+    assert.equal(report.evidence.browser[0].source.kind, "stored_receipt");
+    assert.equal(report.reviews.rounds[0].yield, "high");
+    assert.equal(report.reviews.rounds[1].yield, "diminishing");
+    assert.equal(report.reviews.rounds[1].scope_status, "wrong_scope");
+    assert.equal(report.reviews.scope_anomalies[0].kind, "wrong_scope_workflow");
+    assert.equal(report.reviews.final_review.status, "unavailable");
+    assert.equal(report.decisions.unresolved.some((decision) => decision.id === "PD001"), true);
+    assert.equal(
+      report.decisions.queued_placeholders.find((task) => task.id === "T004").hydration,
+      "required",
+    );
+    assert.equal(
+      report.drill_down.some((entry) => entry.source?.path === briefPath),
+      true,
+    );
+    assert.equal(
+      report.drill_down.some((entry) => entry.source?.path === "screenshots/widget.png"),
+      true,
+    );
+    assert.deepEqual(
+      new Set(report.drill_down.map((entry) => entry.source?.kind)),
+      new Set(["plan_or_note", "review_artifact", "diff_identity", "screenshot_artifact"]),
+    );
+    for (const forbidden of [
+      "state_digest",
+      "board_tree_digest",
+      "command_template",
+      "session_id",
+      "dispatch-reports",
+    ]) {
+      assert.equal(result.stdout.includes(forbidden), false, forbidden);
+    }
+
+    const direct = spawnSync(process.execPath, [bundledFrontier, goalPath, "--json"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(direct.status, 0, direct.stderr || direct.stdout);
+    assert.deepEqual(JSON.parse(direct.stdout), report);
+    assert.deepEqual(snapshotPath(root), before);
+
+    const resumeAfter = runGoalMaker(["resume", goalPath, "--json"], { cwd: root });
+    assert.equal(resumeAfter.status, 0, resumeAfter.stderr || resumeAfter.stdout);
+    assert.deepEqual(JSON.parse(resumeAfter.stdout), JSON.parse(resumeBefore.stdout));
+
+    rmSync(join(root, "reviews", "round-two.json"));
+    const missingArtifactBefore = snapshotPath(root);
+    const missingArtifact = runGoalMaker(["frontier", goalPath, "--json"], { cwd: root });
+    assert.equal(missingArtifact.status, 0, missingArtifact.stderr || missingArtifact.stdout);
+    const missingArtifactReport = JSON.parse(missingArtifact.stdout);
+    assert.deepEqual(
+      missingArtifactReport.reviews.rounds.map((review) => review.identity),
+      ["round-one"],
+    );
+    assert.equal(
+      missingArtifactReport.reviews.scope_anomalies.some((anomaly) => (
+        anomaly.kind === "frontier_evidence_invalid"
+        && anomaly.detail === "Semantic frontier evidence references a missing artifact."
+      )),
+      true,
+    );
+    assert.equal(
+      missingArtifactReport.drill_down.some((entry) => (
+        entry.source?.path === "reviews/round-two.json"
+      )),
+      false,
+    );
+    assert.deepEqual(snapshotPath(root), missingArtifactBefore);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("frontier rejects discovery, non-JSON, planning, unknown flags, and extra roots", () => {
+  const cases = [
+    [["frontier", "--json"], /requires one explicit goal root/],
+    [["frontier", "docs/goals/one"], /requires --json/],
+    [["frontier", "docs/goals/one", "--planning", "--json"], /Unknown argument: --planning/],
+    [["frontier", "docs/goals/one", "--wat", "--json"], /Unknown argument: --wat/],
+    [["frontier", "docs/goals/one", "docs/goals/two", "--json"], /Unexpected argument/],
+  ];
+  for (const [args, expected] of cases) {
+    const result = runGoalMaker(args);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stderr, expected);
+  }
+
+  const help = runGoalMaker(["frontier", "--help"]);
+  assert.equal(help.status, 0, help.stderr || help.stdout);
+  assert.match(help.stdout, /goalbuddy frontier <docs\/goals\/slug> --json/);
+  assert.match(help.stdout, /frontier is shadow-only/);
+  assert.match(help.stdout, /Installed \/goal continues to use the checked resume projection/);
 });
 
 test("resume scoped to one goal dir returns a validated continuation projection", () => {
@@ -3010,6 +3241,17 @@ test("resume and parallel-plan bind every active child lane to one composite boa
     assert.equal(firstReport.recovery.active_lane_count, 2);
     assert.match(firstReport.commands.parallel_plan, /goalbuddy parallel-plan/);
 
+    const frontier = runGoalMaker(["frontier", goalDir, "--json"], { cwd: root });
+    assert.equal(frontier.status, 0, frontier.stderr || frontier.stdout);
+    const semantic = JSON.parse(frontier.stdout);
+    assert.deepEqual(semantic.slice.active_lanes.map((lane) => lane.id), ["T002", "T010"]);
+    assert.deepEqual(semantic.worker.active_lanes.map((lane) => lane.id), ["T002", "T010"]);
+    assert.equal(
+      semantic.slice.active_lanes.find((lane) => lane.id === "T010").objective,
+      "Implement the child lane.",
+    );
+    assert.doesNotMatch(frontier.stdout, /board_tree_digest|state_digest|render-task-prompt/);
+
     const plan = runParallelPlan(goalDir, { cwd: root });
     assert.equal(plan.status, 0, plan.stderr || plan.stdout);
     const planReport = JSON.parse(plan.stdout);
@@ -3047,6 +3289,37 @@ test("resume and parallel-plan bind every active child lane to one composite boa
       secondReport.board.tree.boards.find((board) => board.path !== "state.yaml").state_digest,
       firstReport.board.tree.boards.find((board) => board.path !== "state.yaml").state_digest,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resume and frontier reject child boards reached through symlink components", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-child-symlink-"));
+  try {
+    const goalDir = writeResumeGoal(root, "one", { active: true });
+    const childDir = writeResumeChildBoard(goalDir, { objective: "EXTERNAL_CHILD_MUST_NOT_PROJECT" });
+    const goalAlias = join(root, "goal-alias");
+    symlinkSync(goalDir, goalAlias, "dir");
+    const aliasResume = runGoalMaker(["resume", goalAlias, "--json"], { cwd: root });
+    assert.equal(aliasResume.status, 0, aliasResume.stderr || aliasResume.stdout);
+
+    const outsideChild = join(root, "outside-child");
+    cpSync(childDir, outsideChild, { recursive: true });
+    rmSync(childDir, { recursive: true, force: true });
+    symlinkSync(outsideChild, childDir, "dir");
+    const before = snapshotPath(root);
+
+    const resume = runGoalMaker(["resume", goalDir, "--json"], { cwd: root });
+    assert.equal(resume.status, 1, resume.stderr || resume.stdout);
+    assert.match(resume.stdout, /symlink components/);
+    assert.doesNotMatch(resume.stdout, /EXTERNAL_CHILD_MUST_NOT_PROJECT/);
+
+    const frontier = runGoalMaker(["frontier", goalDir, "--json"], { cwd: root });
+    assert.equal(frontier.status, 1, frontier.stderr || frontier.stdout);
+    assert.match(frontier.stderr, /symlink components/);
+    assert.doesNotMatch(frontier.stderr, /EXTERNAL_CHILD_MUST_NOT_PROJECT/);
+    assert.deepEqual(snapshotPath(root), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

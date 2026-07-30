@@ -8,7 +8,6 @@ import {
   BOARD_TREE_VERSION,
   boardTreeDigest,
   normalizeBoardTreeEntries,
-  normalizeBoardTreePath,
 } from "./board-tree.mjs";
 import {
   createBoardPayload,
@@ -16,6 +15,7 @@ import {
   parseGoalStateText,
 } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { isCompletionEligible } from "./completion-eligibility.mjs";
+import { resolveContainedChildState } from "./child-board-path.mjs";
 import { buildApplyHydrationCommand, buildApplyReceiptCommand, buildCompleteGoalCommand } from "./controller-commands.mjs";
 
 const skillRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,31 +60,53 @@ function parseResumeArgs(args) {
 }
 
 function resumeBoard(goalDir, options) {
-  const validation = runResumeChecker(goalDir);
-  if (!validation.checker.ok) {
-    printResumeFailure(goalDir, validation.checker, options, { stateText: validation.stateText });
-    return 1;
-  }
-  if (validation.boardTreeError) {
-    printResumeFailure(goalDir, validation.checker, options, {
-      stateText: validation.stateText,
-      projectionError: validation.boardTreeError,
+  const checked = createCheckedResumeProjection(goalDir, options);
+  if (!checked.ok) {
+    printResumeFailure(goalDir, checked.checker, options, {
+      stateText: checked.stateText,
+      projectionError: checked.projectionError,
     });
     return 1;
+  }
+  if (options.json) printJson(checked.projection);
+  else printResumeProjection(checked.projection);
+  return 0;
+}
+
+export function createCheckedResumeProjection(goalDir, options = {}) {
+  const validation = runResumeChecker(goalDir);
+  if (!validation.checker.ok) {
+    return {
+      ok: false,
+      checker: validation.checker,
+      stateText: validation.stateText,
+      projectionError: "",
+    };
+  }
+  if (validation.boardTreeError) {
+    return {
+      ok: false,
+      checker: validation.checker,
+      stateText: validation.stateText,
+      projectionError: validation.boardTreeError,
+    };
   }
 
   try {
     const projection = createResumeProjection(goalDir, validation.checker, validation.boardSnapshots, options);
     assertBoardTreeSnapshotsCurrent(validation.boardSnapshots);
-    if (options.json) printJson(projection);
-    else printResumeProjection(projection);
-    return 0;
+    return {
+      ok: true,
+      projection,
+      boardSnapshots: validation.boardSnapshots,
+    };
   } catch (error) {
-    printResumeFailure(goalDir, validation.checker, options, {
+    return {
+      ok: false,
+      checker: validation.checker,
       stateText: validation.stateText,
       projectionError: error.message,
-    });
-    return 1;
+    };
   }
 }
 
@@ -246,17 +268,10 @@ export function captureBoardTreeSnapshots(goalDir, rootReport, rootStateText, {
   }];
   const childPaths = rootDocument.tasks
     .map((task) => task?.subgoal?.path)
-    .filter((path) => path !== undefined && path !== null && path !== "")
-    .map(normalizeBoardTreePath);
+    .filter((path) => path !== undefined && path !== null && path !== "");
 
-  for (const childPath of childPaths) {
-    if (childPath === "state.yaml") {
-      throw new Error("GoalBuddy child board path may not reuse the root state.yaml.");
-    }
-    const statePath = resolve(root, childPath);
-    if (!statePath.startsWith(`${root}${sep}`)) {
-      throw new Error(`GoalBuddy board tree path escapes the goal root: ${childPath}`);
-    }
+  for (const declaredChildPath of childPaths) {
+    const { path: childPath, statePath } = resolveContainedChildState(root, declaredChildPath);
     let stateBefore;
     try {
       stateBefore = readFileSync(statePath, "utf8");
@@ -400,7 +415,9 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     || rawTasks.find((task) => resumeText(task?.status) === "active")
     || null;
   const activeTask = activeRaw
-    ? projectResumeTask(activeRaw, normalizedTasks.get(resumeText(activeRaw.id)))
+    ? projectResumeTask(activeRaw, normalizedTasks.get(resumeText(activeRaw.id)), {
+      includeBrief: options.frontier === true,
+    })
     : null;
   const nextFreeTaskId = findNextFreeTaskId(rawTasks);
   const completionEligible = isCompletionEligible({
@@ -422,6 +439,7 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     .map((task) => projectQueuedTask(task, rawTasks, stateDigest, {
       boardPath: statePath,
       sourceTaskId: activeTask?.id || null,
+      includeFrontierFacts: options.frontier === true,
     }));
   const goal = document.goal && typeof document.goal === "object" ? document.goal : {};
   const oracle = goal.oracle && typeof goal.oracle === "object" ? goal.oracle : {};
@@ -432,7 +450,7 @@ function createResumeProjection(goalDir, checker, boardSnapshots, options = {}) 
     : {};
   const path = displayGoalPath(root);
   const activeLanes = boardSnapshots
-    .map((snapshot) => projectActiveLane(snapshot))
+    .map((snapshot) => projectActiveLane(snapshot, { includeBrief: options.frontier === true }))
     .filter(Boolean);
 
   return {
@@ -546,7 +564,7 @@ function findNextFreeTaskId(tasks) {
   throw new Error("Root task ID namespace exhausted: every ID from T000 through T999 is already in use.");
 }
 
-function projectActiveLane(snapshot) {
+function projectActiveLane(snapshot, options = {}) {
   const document = parseGoalStateText(snapshot.text, { allowFallback: false });
   const board = normalizeGoalBoard(document, dirname(snapshot.state_path));
   const rawTasks = Array.isArray(document.tasks) ? document.tasks : [];
@@ -555,7 +573,7 @@ function projectActiveLane(snapshot) {
     || null;
   if (!activeRaw) return null;
   const normalized = board.tasks.find((task) => task.id === resumeText(activeRaw.id));
-  const activeTask = projectResumeTask(activeRaw, normalized);
+  const activeTask = projectResumeTask(activeRaw, normalized, options);
   return {
     kind: snapshot.path === "state.yaml" ? "root" : "child",
     path: snapshot.path,
@@ -568,8 +586,8 @@ function projectActiveLane(snapshot) {
   };
 }
 
-function projectResumeTask(raw, normalized) {
-  return {
+function projectResumeTask(raw, normalized, { includeBrief = false } = {}) {
+  const task = {
     id: resumeText(raw.id),
     type: resumeText(raw.type || normalized?.type || "pm"),
     assignee: resumeText(raw.assignee || normalized?.assignee),
@@ -584,6 +602,17 @@ function projectResumeTask(raw, normalized) {
     stop_if: resumeList(raw.stop_if || normalized?.stopIf),
     transition_evidence: projectTransitionEvidence(raw.transition_evidence),
   };
+  if (includeBrief) task.brief = projectBriefBinding(raw.brief);
+  return task;
+}
+
+function projectBriefBinding(value) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const path = resumeText(value.path);
+  const sha256 = resumeText(value.sha256);
+  if (!path || !sha256) return null;
+  return { path, sha256 };
 }
 
 export function projectTransitionEvidence(evidence) {
@@ -687,7 +716,11 @@ function projectBlockedTask(task, tasks) {
   };
 }
 
-function projectQueuedTask(task, tasks, stateDigest, { boardPath, sourceTaskId }) {
+function projectQueuedTask(task, tasks, stateDigest, {
+  boardPath,
+  sourceTaskId,
+  includeFrontierFacts = false,
+}) {
   const dependencies = resumeList(task.depends_on);
   const statusById = new Map(tasks.map((candidate) => [resumeText(candidate.id), resumeText(candidate.status)]));
   const blockedBy = dependencies.filter((id) => statusById.get(id) !== "done");
@@ -699,7 +732,7 @@ function projectQueuedTask(task, tasks, stateDigest, { boardPath, sourceTaskId }
     : unhydratedWorker
       ? buildApplyHydrationCommand({ boardPath, taskId: sourceTaskId, stateDigest, hydrateTaskId: taskId })
       : buildApplyReceiptCommand({ boardPath, taskId: sourceTaskId, stateDigest, activateTaskId: taskId });
-  return {
+  const projected = {
     id: taskId,
     type: resumeText(task.type || "pm"),
     objective: boundedResumeText(task.objective, 60).text,
@@ -709,6 +742,8 @@ function projectQueuedTask(task, tasks, stateDigest, { boardPath, sourceTaskId }
     gate: projectGate(task),
     next_transition: nextTransition,
   };
+  if (includeFrontierFacts) projected.needs_hydration = unhydratedWorker;
+  return projected;
 }
 
 function blockerIds(task, tasks) {

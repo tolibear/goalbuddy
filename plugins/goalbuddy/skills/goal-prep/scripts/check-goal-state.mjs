@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "n
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { isCodexServiceTier, isCodexSolReasoningEffort, isCodexThreadId } from "./codex-exec-contract.mjs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseGoalStateText } from "../surfaces/local-goal-board/scripts/lib/goal-board.mjs";
 import { equalBriefBindings, verifyBrief } from "./brief-binding.mjs";
 import {
@@ -24,6 +24,7 @@ import {
   validateTaskReceipt,
 } from "./receipt-contract.mjs";
 import { completionEligibility } from "./completion-eligibility.mjs";
+import { resolveContainedChildState } from "./child-board-path.mjs";
 import { collectRequiredReviewPaths } from "./completion-review-scope.mjs";
 import { validateFinalReviewContract } from "./final-review-contract.mjs";
 
@@ -837,13 +838,9 @@ function validatePersistedTerminalReview(task) {
   for (const candidate of strictDocument.tasks || []) {
     const childPath = candidate?.subgoal?.path;
     if (typeof childPath !== "string" || childPath.length === 0) continue;
-    const childStatePath = resolve(root, childPath);
-    const rootPath = resolve(root);
-    if (!childStatePath.startsWith(`${rootPath}${sep}`)) {
-      throw new Error(`terminal review child board path escapes the goal root: ${childPath}`);
-    }
+    const { path: normalizedChildPath, statePath: childStatePath } = resolveContainedChildState(root, childPath);
     boardSnapshots.push({
-      path: childPath,
+      path: normalizedChildPath,
       state_path: childStatePath,
       text: readFileSync(childStatePath, "utf8"),
     });
@@ -1176,18 +1173,20 @@ function validateSubgoal(task) {
     return;
   }
 
-  const rootPath = resolve(root);
-  const childStatePath = resolve(rootPath, task.subgoal.path);
-  if (childStatePath !== rootPath && !childStatePath.startsWith(`${rootPath}${sep}`)) {
-    errors.push(`task ${task.id} subgoal.path must stay inside the goal root: ${task.subgoal.path}`);
-    return;
-  }
-  if (basename(childStatePath) !== "state.yaml") {
-    errors.push(`task ${task.id} subgoal.path must point to a state.yaml file`);
-    return;
-  }
-  if (!existsSync(childStatePath)) {
-    errors.push(`task ${task.id} subgoal state file not found: ${task.subgoal.path}`);
+  let childStatePath;
+  try {
+    ({ statePath: childStatePath } = resolveContainedChildState(root, task.subgoal.path));
+  } catch (error) {
+    const detail = String(error?.message || "");
+    if (/escapes the goal root|must be relative|symlink components/.test(detail)) {
+      errors.push(`task ${task.id} subgoal.path must stay inside the goal root without symlink components: ${task.subgoal.path}`);
+    } else if (/unavailable at .*ENOENT|does not exist/.test(detail)) {
+      errors.push(`task ${task.id} subgoal state file not found: ${task.subgoal.path}`);
+    } else if (/must name state\.yaml|reuse the root state\.yaml|regular state\.yaml file/.test(detail)) {
+      errors.push(`task ${task.id} subgoal.path must point to a regular state.yaml file`);
+    } else {
+      errors.push(`task ${task.id} subgoal.path is invalid`);
+    }
     return;
   }
 

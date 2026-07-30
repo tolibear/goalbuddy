@@ -403,6 +403,39 @@ test("Milestone 2 policy owners require durable provenance and exact terminal pr
   assert.doesNotMatch(stateTemplate, /^\s+receipt_provenance:/m);
 });
 
+test("Milestone 3 semantic frontier remains a shadow-only checked projection", () => {
+  const projection = readFileSync("goalbuddy/scripts/frontier-projection.mjs", "utf8");
+  const adapter = readFileSync("goalbuddy/scripts/frontier.mjs", "utf8");
+  const cli = readFileSync("internal/cli/goal-maker.mjs", "utf8");
+  const pluginProjection = readFileSync(
+    "plugins/goalbuddy/skills/goal-prep/scripts/frontier-projection.mjs",
+    "utf8",
+  );
+  const pluginAdapter = readFileSync(
+    "plugins/goalbuddy/skills/goal-prep/scripts/frontier.mjs",
+    "utf8",
+  );
+
+  assert.match(projection, /export function createSemanticFrontier/);
+  assert.match(projection, /goalbuddy_frontier_v1/);
+  assert.doesNotMatch(projection, /^import /m);
+  assert.match(adapter, /createCheckedResumeProjection/);
+  assert.match(cli, /frontier <docs\/goals\/slug> --json/);
+  assert.match(cli, /frontier is shadow-only/);
+  assert.equal(pluginProjection, projection);
+  assert.equal(pluginAdapter, adapter);
+
+  for (const text of [
+    canonicalExecution,
+    canonicalSkill,
+    canonicalGoalTemplate,
+    claudeGoalCommand,
+  ]) {
+    assert.match(text, /resume-board\.mjs/);
+    assert.doesNotMatch(text, /goalbuddy frontier|scripts\/frontier(?:-projection)?\.mjs/);
+  }
+});
+
 test("adaptive execution strategy governs quality routing in contract and charter", () => {
   const canonicalGoalTemplate = readFileSync("goalbuddy/templates/goal.md", "utf8");
   const pluginGoalTemplate = readFileSync("plugins/goalbuddy/skills/goal-prep/templates/goal.md", "utf8");

@@ -173,6 +173,13 @@ async function main() {
       }
       await resume();
       break;
+    case "frontier":
+      if (wantsHelp()) {
+        usage();
+        break;
+      }
+      await frontier();
+      break;
     case "dispatch":
       if (wantsHelp()) {
         usage();
@@ -355,6 +362,7 @@ Usage:
   ${canonicalCliName} board <docs/goals/slug> [--host <host>] [--port <port>] [--once] [--json]
   ${canonicalCliName} init <slug> [--title "<Goal title>"] [--json]
   ${canonicalCliName} resume [docs/goals/slug] [--planning] [--json]
+  ${canonicalCliName} frontier <docs/goals/slug> --json
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code --expected-state-digest <sha256> [--task T###] [--model <name>] [--reasoning-effort low|medium|high|xhigh|max|ultra] [--service-tier fast|default|flex] [--brief <path> --brief-sha256 <sha256>] [--resume-session <uuid> --confirmed-not-live] [--timeout <seconds>] [--allow-immutable-history] [--json]
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> --expected-state-digest <sha256> --activate T### [--add-tasks <json-file> | --hydrate-task T### [--task-card <json-file> --task-card-sha256 <hex>]] [--allow-immutable-history] [--json]
   ${canonicalCliName} hold <docs/goals/slug> --task T### --source <file> [--origin-artifact <rejected-dispatch.json>] --expected-state-digest <sha256> [--json]
@@ -366,6 +374,9 @@ Usage:
   ${canonicalCliName} parallel-plan <docs/goals/slug> --expected-state-digest <sha256> --expected-board-tree-digest <sha256> [--json]
 
 Targets: install/update transactionally prepares both Codex (~/.codex) and Claude Code (~/.claude). Use --target codex or --target claude to limit the transaction.
+
+Shadow evaluation:
+  ${canonicalCliName} frontier is shadow-only. Installed /goal continues to use the checked resume projection until frontier promotion.
 
 Default:
   ${canonicalCliName}                  Shows this help without changing runtime state.
@@ -1959,6 +1970,19 @@ function dispatchCli() {
 
 async function resume() {
   const script = join(skillSource, "scripts", "resume-board.mjs");
+  const result = spawnSync(process.execPath, [script, ...args.slice(1)], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
+
+async function frontier() {
+  const script = join(skillSource, "scripts", "frontier.mjs");
   const result = spawnSync(process.execPath, [script, ...args.slice(1)], {
     cwd: process.cwd(),
     encoding: "utf8",
