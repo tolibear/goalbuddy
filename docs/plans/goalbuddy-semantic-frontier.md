@@ -4,7 +4,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 This plan must be maintained in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`. It builds on the completed interface work recorded in `docs/plans/goalbuddy-interface-simplification.md` and the Worker-continuity work recorded in `docs/plans/goalbuddy-fable-efficiency-stabilization.md`, but it is self-contained: an implementer should be able to execute it without reading those earlier plans.
 
-Status: **Canonical active GoalBuddy ExecPlan — reconciled, independently approved, and owner-authorized for implementation through the isolated-worktree milestones. Activation remains separately gated.**
+Status: **Canonical active GoalBuddy ExecPlan — reconciled, independently approved, and owner-authorized for the durability commit, isolated worktree, and Milestone 0 implementation. Milestones 1-5 and activation remain separately gated.**
 
 ## Purpose / Big Picture
 
@@ -25,9 +25,10 @@ The observable success case is a material slice in which Fable needs one healthy
 - [x] (2026-07-30) Retired the receipt-index proposal, the large-autonomous-product profile and broad paid evaluation program, and the monitor milestone; transferred only the task-level brief binding and bounded runtime-correctness findings into this plan.
 - [x] (2026-07-30) Replaced the false unique-report premise with explicit receipt provenance and made accepted deviations plus exact-final-review proof first-class completion requirements.
 - [x] (2026-07-30) Obtained independent Goal Judge approval after resolving durable held-evidence ownership, unavailable-transport extraction, the closed final-review union, milestone sequencing, and Git-durability findings.
-- [x] (2026-07-30) Obtained explicit owner approval for the reviewed-plan durability commit, isolated implementation worktree, and implementation milestones; activation remains separately gated.
+- [x] (2026-07-30) Obtained explicit owner approval for the reviewed-plan durability commit, isolated implementation worktree, and Milestone 0 implementation; Milestones 1-5 and activation remain separately gated.
 - [x] (2026-07-30) Completed a ChatGPT Pro Milestone 0 collaboration review and local source adjudication; accepted the full bounded JSON-safe inverse, complete reserialized-receipt expectation coverage, shared completion eligibility, blocked-sibling parity, exact task-ID scanning, and positional-help wording corrections without changing the milestone architecture.
-- [ ] Implement Milestone 0: strict candidate projectability, exact receipt round-trip, exact completion projection, next-free task ID, and positional help.
+- [x] (2026-07-30) Committed the reviewed plan at `ab867f1`, created clean isolated branch `codex/goalbuddy-semantic-frontier-m0`, and established the isolated baseline: 250 Node tests and 49 Python tests passed; `npm pack --dry-run` produced a 147-file, 12.8 MB package preview.
+- [ ] Implement Milestone 0: strict candidate projectability, exact receipt round-trip, exact completion projection, next-free task ID, and positional help. (In progress: durability gate and isolated baseline complete; red public fixtures and implementation remain.)
 - [ ] Implement Milestone 1: automatic task-level JIT brief binding and early closed-object validation for `worker_package`.
 - [ ] Implement Milestone 2: durable applied provenance and held-receipt evidence, deviation-set acceptance, and exact-final-review contracts.
 - [ ] Implement Milestone 3: a provenance-aware semantic frontier in shadow mode and repair every decision-relevant omission.
@@ -73,6 +74,9 @@ The observable success case is a material slice in which Fable needs one healthy
 
 - Observation: A transition can reserialize receipt evidence it did not freshly author.
   Evidence: task addition requires `receipt: null`; session binding rewrites an existing `transition_evidence` subtree; and reply rewrites prior exact-human reply evidence before adding the newest `wait_receipt`. Exact comparison must cover every receipt-semantic value reserialized by the current transition, not only the newly supplied top-level receipt.
+
+- Observation: The owner-authorized implementation baseline is green in the isolated worktree.
+  Evidence: on branch `codex/goalbuddy-semantic-frontier-m0` at `ab867f1`, `npm run check` passed 250 Node tests and 49 Python tests, while `npm run pack:dry-run` previewed 147 files, 12.8 MB packed and 14.2 MB unpacked, without changing the worktree.
 
 ## Decision Log
 
@@ -503,4 +507,4 @@ It does not remove Fable from material planning, Codex prompt authoring or appro
 
 2026-07-30: Hardened the reconciled plan after independent Goal Judge review. The applied-provenance fields are now orthogonal and a digest-bound `hold` transition is the only durable source of recoverable held receipts; transport-unavailable dispatch output is consumed directly without a Fable-authored receipt copy; final review is a closed union that distinguishes exact current proof from an owner-accepted missing requirement; evidence schemas precede the shadow frontier; and a pre-worktree Git durability gate prevents implementation from starting from an untracked plan.
 
-2026-07-30: Recorded owner implementation authorization and the adjudicated ChatGPT Pro Milestone 0 findings. The architecture is unchanged, but the implementation oracle now explicitly covers the complete bounded JSON-safe serializer/parser inverse, every reserialized receipt-semantic subtree, shared completion eligibility including blocked-sibling parity, exact `T000` through `T999` allocation, and accurate positional-help wording.
+2026-07-30: Recorded owner authorization for the durability commit, isolated worktree, and Milestone 0 only, together with the adjudicated ChatGPT Pro findings. The architecture is unchanged, but the Milestone 0 oracle now explicitly covers the complete bounded JSON-safe serializer/parser inverse, every reserialized receipt-semantic subtree, shared completion eligibility including blocked-sibling parity, exact `T000` through `T999` allocation, and accurate positional-help wording. Milestones 1-5 and activation still require separate authorization.
