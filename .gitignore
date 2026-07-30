@@ -14,3 +14,6 @@ docs/*
 !docs/releases/**
 !docs/spec/
 !docs/spec/**
+!docs/plans/
+docs/plans/*
+!docs/plans/goalbuddy-semantic-frontier.md

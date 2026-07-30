@@ -1,5 +1,7 @@
 # Stabilize GoalBuddy deterministic workflow boundaries
 
+Status: **Closed historical record (2026-07-30).** The interrupted T003 path was superseded; the later T004/T009 continuation and corrective successors delivered and verified the intended runtime outcome. The two exact T003 steps remain honestly retired below rather than being presented as work to resume.
+
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds. Maintain this document in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`.
 
 ## Purpose / Big Picture
@@ -15,8 +17,8 @@ GoalBuddy must preserve a Worker or Judge receipt exactly enough that the task i
 - [x] (2026-07-13 00:48Z) Removed receipt capture and product authority semantics while preserving the neutral multiline parser repair.
 - [x] (2026-07-13 00:48Z) Implemented receipt identity, closed decisions/capabilities, digest-bound atomic rollback, recovery and wait-boundary regressions, truthful runtime reporting, and task-card schema cleanup.
 - [x] (2026-07-13 00:48Z) Synchronized tracked GoalBuddy mirrors and rebuilt the compiler archive.
-- [ ] Run every literal verification command and update this plan with the evidence (completed: first three commands passed; blocked: the fourth command hung twice in the linked-child SSE regression and was interrupted; remaining commands were not run after the stop condition fired).
-- [ ] Create exactly one scoped GoalBuddy commit and one scoped codex-goal-compiler commit (not attempted because verification failed twice).
+- [ ] (Retired historical T003 step; do not resume.) Run every literal verification command and update this plan with the evidence. T003 stopped after the fourth command hung twice; the later T004/T009 and corrective successor entries below establish the delivered verification through a different continuation.
+- [ ] (Retired historical T003 step; do not resume.) Create exactly one scoped GoalBuddy commit and one scoped codex-goal-compiler commit. T003 did not attempt this exact commit shape; the later scoped and corrective commits below establish the delivered outcome.
 - [x] (2026-07-13 01:10Z) T004 resumed the same warm Worker, verified the exact inherited GoalBuddy/compiler and preservation fingerprints, and authorized the two local-board runtime paths needed for the SSE repair.
 - [x] (2026-07-13 01:12Z) Repaired watcher registration by installing the complete replacement watcher set before closing the previous set and scheduling an immediate post-registration reconciliation.
 - [x] (2026-07-13 01:20Z) Ran the focused SSE replay, plan/capture/mirror gates, combined 133-test stabilization lane, and full 154-test GoalBuddy check successfully.
@@ -214,3 +216,5 @@ Revision note (2026-07-13 02:45Z): Recorded T009 implementation, durable evidenc
 Revision note (2026-07-13 04:45Z): Recorded the normal Council concurrency finding, the serialized persistence-boundary correction, deterministic two-writer proof, and complete successor verification without reopening the closed board.
 
 Revision note (2026-07-13 05:08Z): Recorded the exact cloud-board compatibility evidence, explicit immutable-history admission, typed runtime rebind, Keeper integration, legacy-dialect proof, and final full-suite results before the corrective commit.
+
+Revision note (2026-07-30): Archived as a completed historical implementation record. Corrected the two stale T003-era checkboxes because the later T004/T009 continuation and successor commits completed their verification and scoped-delivery intent.

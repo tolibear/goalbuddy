@@ -1,5 +1,7 @@
 # Make board compilation focused and execution quiet
 
+Status: **Closed historical record (2026-07-30).** The quiet-control-plane half shipped and remains relevant. The compile-only public interface was deliberately superseded by the GoalBuddy 0.5 router cutover; do not rerun this plan as written.
+
 This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must stay current as implementation proceeds. It follows `/Users/danielalnajjar/.agents/resources/plans.md`.
 
 ## Purpose / Big Picture
@@ -133,3 +135,5 @@ Baseline evidence before refactoring:
 ## Interfaces and Dependencies
 
 The stable public skill remains `codex-goal-compiler`. Its only artifact is `docs/goals/<slug>/` and its only schema dependency is the selected installed Goal Prep skill after `check_goalbuddy_runtime.py` validates GoalBuddy compiler contract v1. GoalBuddy remains the sole owner of board schema, checker, templates, agents, and execution. Python 3 runs the deterministic compiler validators; Node runs GoalBuddy's official checker and package tests. No network, credential, external service, or live-harness mutation is required for this implementation.
+
+Revision note (2026-07-30): Archived as a partially superseded historical record. Preserve the quiet-control-plane decisions, but use the later 0.5 final cutover as authority for the public compiler/router interface.

@@ -1,5 +1,7 @@
 # Complete the GoalBuddy 0.5 Product Cutover
 
+Status: **Closed historical record (2026-07-30).** GoalBuddy 0.5 shipped and was activated; this file is retained as the final cutover and activation record.
+
 This ExecPlan is a living document. It follows `/Users/danielalnajjar/.agents/resources/plans.md` and must remain current as implementation and activation proceed.
 
 ## Purpose / Big Picture
@@ -104,3 +106,5 @@ Mirror synchronization and tests are deterministic. Source changes remain isolat
 `codex-goal-compiler` remains the public skill name. Its routing reference chooses direct work, planning, standalone native goal, GoalBuddy, Omega, or recurring execution. The native compiler writes `docs/codex-goals/<slug>/goal.md`. The GoalBuddy backend writes a new `docs/goals/<slug>/` through the installed Goal Prep skill after `check_goalbuddy_runtime.py` validates compiler contract v1. GoalBuddy owns every board schema and runtime operation. Python 3 runs compiler validators; Node runs GoalBuddy scripts and tests. No new package dependency, daemon, compatibility shim, board schema, or secondary ledger is introduced.
 
 Revision note (2026-07-16): Created this final activation ExecPlan to supersede the compile-only interface decision after owner review established that one routing front door is a required workflow capability.
+
+Revision note (2026-07-30): Archived as a completed cutover record. No remaining implementation or activation work should be resumed from this plan.

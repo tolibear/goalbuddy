@@ -1,5 +1,7 @@
 # Remove Fable's dispatch-report materialization step
 
+Status: **Closed historical record (2026-07-30).** Implemented, verified, and activated; retained as the delivery record for Git-local dispatch-report transport and closeout.
+
 This ExecPlan is a living document and follows `/Users/danielalnajjar/.agents/resources/plans.md`. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must remain current while implementation proceeds.
 
 ## Purpose / Big Picture
@@ -131,3 +133,5 @@ Revision note 2026-07-19: Initial plan created after live source inspection show
 Revision note 2026-07-19: Updated after implementation to record compact successful stdout, Git-local full-report transport, command-template generation, cleanup safety, linked-worktree coverage, and full-suite results.
 
 Revision note 2026-07-19: Updated after the quiescent transactional activation to record the committed two-harness refresh, clean doctors, and byte-exact canonical/Codex/Claude runtime hashes.
+
+Revision note 2026-07-30: Archived as a completed implementation and activation record. The current runtime owns this behavior; this plan has no open execution tranche.

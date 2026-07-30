@@ -1,0 +1,506 @@
+# Put GoalBuddy Bookkeeping Below the Fable Interface
+
+This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
+
+This plan must be maintained in accordance with `/Users/danielalnajjar/.agents/resources/plans.md`. It builds on the completed interface work recorded in `docs/plans/goalbuddy-interface-simplification.md` and the Worker-continuity work recorded in `docs/plans/goalbuddy-fable-efficiency-stabilization.md`, but it is self-contained: an implementer should be able to execute it without reading those earlier plans.
+
+Status: **Canonical active GoalBuddy ExecPlan — reconciled, independently approved, and owner-authorized for implementation through the isolated-worktree milestones. Activation remains separately gated.**
+
+## Purpose / Big Picture
+
+GoalBuddy already preserves valuable safety facts: one active writing frontier per board, exact Codex Worker identity, atomic transitions, checked receipts, bounded write authority, immutable history, and recovery evidence. The remaining problem is that Claude/Fable can still spend attention operating those mechanisms instead of operating the software project.
+
+After this change, a healthy GoalBuddy run should present Fable with one compact semantic frontier: the current product objective, the current slice and just-in-time plan or brief, Worker status, consequential product evidence, unresolved decisions, and the small set of semantic actions Fable may take. Digests, receipt paths, checker invocations, command templates, session identifiers, and successful transition narration remain durable and auditable but normally stay below the model-facing interface.
+
+This work must not make Fable less involved in software quality. For every material slice, Fable continues to choose the slice strategy, author or approve the just-in-time implementation plan, author or approve the Codex operator prompt, inspect the full product diff, adjudicate independent review, personally inspect decisive screenshots for user-visible changes, decide scope changes, and accept or reject the slice. The runtime may compose bookkeeping around those decisions; it may not make them.
+
+The observable success case is a material slice in which Fable needs one healthy-start frontier call, performs its normal planning and review judgments, then supplies one closeout decision and either an explicit receipt source or a previously persisted held-receipt handle. GoalBuddy preserves that source's provenance, validates and installs the exact receipt, hydrates and activates the chosen successor when needed, and returns the next frontier without asking Fable to copy or interpret a digest. Final completion distinguishes exact satisfaction from an owner-accepted deviation, and any required final review is bound to the exact current commit or content snapshot rather than inferred from a green checker. A shadow-mode acceptance period proves that the compact frontier omits no fact that changes Fable's judgment before it replaces the current projection.
+
+## Progress
+
+- [x] (2026-07-21) Re-read the current GoalBuddy repository contract, current resume projection, compact dispatch outcome, receipt applier, CLI routing, policy tests, and prior implementation plans.
+- [x] (2026-07-21) Confirmed that the current runtime already implements compact resume output, Git-local dispatch-report transport, one-shot exact-session receipt repair, just-in-time hydration, exact Codex session binding, adaptive quality ladders, and a quiet-control-plane policy.
+- [x] (2026-07-21) Authored this isolated ExecPlan without changing runtime code, installed skills, plugins, active boards, or user-level configuration.
+- [x] (2026-07-30) Reconciled the five GoalBuddy design threads, the completed unattended GoalBuddy run, all twelve local ExecPlans, the compiled owner-doctrine board, current source, and current Claude/Omega task behavior.
+- [x] (2026-07-30) Retired the receipt-index proposal, the large-autonomous-product profile and broad paid evaluation program, and the monitor milestone; transferred only the task-level brief binding and bounded runtime-correctness findings into this plan.
+- [x] (2026-07-30) Replaced the false unique-report premise with explicit receipt provenance and made accepted deviations plus exact-final-review proof first-class completion requirements.
+- [x] (2026-07-30) Obtained independent Goal Judge approval after resolving durable held-evidence ownership, unavailable-transport extraction, the closed final-review union, milestone sequencing, and Git-durability findings.
+- [x] (2026-07-30) Obtained explicit owner approval for the reviewed-plan durability commit, isolated implementation worktree, and implementation milestones; activation remains separately gated.
+- [x] (2026-07-30) Completed a ChatGPT Pro Milestone 0 collaboration review and local source adjudication; accepted the full bounded JSON-safe inverse, complete reserialized-receipt expectation coverage, shared completion eligibility, blocked-sibling parity, exact task-ID scanning, and positional-help wording corrections without changing the milestone architecture.
+- [ ] Implement Milestone 0: strict candidate projectability, exact receipt round-trip, exact completion projection, next-free task ID, and positional help.
+- [ ] Implement Milestone 1: automatic task-level JIT brief binding and early closed-object validation for `worker_package`.
+- [ ] Implement Milestone 2: durable applied provenance and held-receipt evidence, deviation-set acceptance, and exact-final-review contracts.
+- [ ] Implement Milestone 3: a provenance-aware semantic frontier in shadow mode and repair every decision-relevant omission.
+- [ ] Implement Milestone 4: explicit-source-or-held-handle `advance` over the existing atomic receipt transition without scanning or receipt normalization.
+- [ ] Implement Milestone 5: promote the compact healthy path only after retained-fixture and fresh material/UI canaries preserve Fable's decisions.
+- [ ] Run the complete package, mirror, isolated-install, doctor, deterministic journey, and existing-board compatibility gates.
+- [ ] Obtain separate explicit approval before activating the new interface. Activation is not part of implementation.
+
+## Surprises & Discoveries
+
+- Observation: The current runtime is already much closer to the target architecture than the conversational description suggested.
+  Evidence: `goalbuddy/scripts/resume-board.mjs` already returns a compact checked projection; `goalbuddy/scripts/dispatch-task.mjs` already stores the authoritative full report under Git metadata and returns a compact outcome; `goalbuddy/references/goal-execution.md` already says not to load Goal Prep, the compiler, raw `state.yaml`, or the exceptional reference on a healthy start.
+
+- Observation: A separate standalone `prepare` operation is unnecessary and would weaken the existing atomic boundary.
+  Evidence: `apply-receipt.mjs` already closes the source task, optionally hydrates the exact successor from a digest-bound task card, validates the candidate, and activates that successor under one board lock. The new public closeout operation should compose this existing transition instead of introducing another hydration state.
+
+- Observation: The current resume projection mixes semantic information with recovery instructions, raw control tokens, and command templates.
+  Evidence: `createResumeProjection()` returns the active objective and oracle together with state and tree digests, session IDs, recovery policy, and several digest-bound commands. A pure semantic projection can be derived without changing board truth.
+
+- Observation: Exact Worker identity is durable, but current runtime liveness is deliberately unknown after the dispatcher process is no longer present.
+  Evidence: the projection reports `worker_liveness: "unknown"`, and the bound session record warns that session identity does not prove liveness. This plan preserves that honest recovery state and does not attempt a monitoring or clean-start optimization.
+
+- Observation: A successful Git-local dispatch report is only one receipt-source case, not the universal closeout source.
+  Evidence: the current applier accepts either an authoritative dispatch wrapper or a bare receipt; dispatch transport can be unavailable; and retained real runs include rejected dispatches followed by explicit PM-authored blocked closeout receipts and held receipts that were not yet applied.
+
+- Observation: The original `advance` design would have failed on the real T013 and T019 recovery paths and encouraged silent proof rewriting.
+  Evidence: those retained runs used explicit bare blocked receipts after rejected dispatches. One receipt was rewritten after schema rejection, and another was reconstructed from rejected-dispatch output. The replacement contract preserves the rejected artifact and permits only a separately authored PM blocked closeout that cannot claim Worker proof.
+
+- Observation: GoalBuddy currently cannot record the completion doctrine its own instructions require.
+  Evidence: `goalbuddy/references/goal-execution.md` assigns material-ladder deviations to PM phase/final receipts, while `goalbuddy/scripts/receipt-contract.mjs` forbids `deviations` on both PM and Judge receipts. `full_outcome_complete: true` can therefore erase an owner-accepted shortfall instead of representing it honestly.
+
+- Observation: Final-review freshness is prose-only.
+  Evidence: the execution kernel says reviews bind to the artifact, workflow version, base/current identity, and completeness, but no completion receipt field or validator proves that the reviewed identity equals the current commit or content snapshot.
+
+- Observation: A receipt index would add output without reducing the lead's real evidence work.
+  Evidence: the retired proposal kept the complete receipt beside a new top-level index. The semantic frontier and explicit drill-down references are the correct navigation layer; receipt evidence stays lossless and singular.
+
+- Observation: The highest-cost observed waste sits outside this plan.
+  Evidence: the unattended run lost work to a wrong-scope review workflow, unavailable Omega role registration, and host overload. Native Claude tasks are useful as an ephemeral run projection but do not repair those failures or replace GoalBuddy's durable board. Omega preflight, workflow base/head/scope admission, and host-load gating require a separate plan in the owning repository.
+
+- Observation: The two named YAML regressions are only the visible edge of the admitted receipt domain.
+  Evidence: `receipt-contract.mjs` admits arbitrary JSON-safe strings, finite numbers, arrays, and plain objects with string keys, while the current serializer/parser pair also changes numeric-looking strings, exponent-form finite numbers, negative zero, nested arrays, unsafe mapping keys, and `__proto__` own-property semantics. Milestone 0 must repair this bounded inverse without becoming a general YAML implementation.
+
+- Observation: A transition can reserialize receipt evidence it did not freshly author.
+  Evidence: task addition requires `receipt: null`; session binding rewrites an existing `transition_evidence` subtree; and reply rewrites prior exact-human reply evidence before adding the newest `wait_receipt`. Exact comparison must cover every receipt-semantic value reserialized by the current transition, not only the newly supplied top-level receipt.
+
+## Decision Log
+
+- Decision: Preserve board version 2, task roles, historical receipts, exact session binding, scope enforcement, and the existing atomic transition boundary; permit only the narrow additive receipt fields required for honest completion proof.
+  Rationale: Most of the durability model is sound, but accepted deviations and exact-final-review freshness cannot be enforced through prose alone. New fields apply prospectively; historical boards are not migrated or rewritten.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Treat the semantic frontier as a pure projection over existing authoritative state and evidence, never as a second ledger.
+  Rationale: A second persisted truth would create reconciliation work and repeat the bureaucracy this change is meant to remove.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Build and evaluate the frontier in shadow mode before using it as Fable's execution interface.
+  Rationale: The highest-cost failure is not a malformed field; it is a compact packet silently omitting a weak signal that would have changed Fable's plan, prompt, review, visual judgment, or acceptance decision.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Remove Fable from bookkeeping, not from epistemic seams.
+  Rationale: Fable's highest-value work is interpreting intent, integrating current repository facts, shaping implementation, reviewing diffs, adjudicating independent findings, inspecting visual evidence, and accepting semantic outcomes.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Add one closeout-and-advance operation plus one narrow held-receipt transition rather than a generic semantic-action framework.
+  Rationale: The observed repeated sequence is receipt validation, digest relay, atomic application, optional successor hydration, checker execution, and next projection. One deep operation removes that burden; the separate `hold` transition exists only to make an exact unapplied candidate recoverable across interruption and cannot apply or semantically accept it.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Require `advance` to receive an explicit receipt source or exact held-receipt handle plus orthogonal transport, dispatch, authority, and applied provenance; never discover a supposedly unique report by scanning.
+  Rationale: Clean Git-local reports, bare terminal receipts, rejected dispatch closeouts, unavailable transport, and held receipts differ on more than one axis. A single class conflated transport, dispatch outcome, closeout authority, and application state and could not preserve clean-Worker provenance after report cleanup.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Never normalize, reconstruct, or silently convert Worker proof.
+  Rationale: A rejected dispatch remains rejected. If policy permits a PM to stop that task, it authors a new blocked-only PM closeout that points to the rejected artifact; it does not edit the Worker receipt, claim passing commands, or relabel the dispatch.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Introduce `completion_disposition`, `accepted_deviations`, and `final_review` on prospective final Judge/PM receipts.
+  Rationale: `full_outcome_complete` needs a machine-checkable meaning. Exact completion and completion against an explicitly amended owner-approved oracle are both honest terminal states; missing or stale proof without acceptance is not.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Absorb task-level JIT brief binding but retire receipt indexing.
+  Rationale: Automatically binding one approved repository-local brief removes a demonstrated manual digest relay. A second description of the already-present receipt adds bytes and authority ambiguity without replacing evidence inspection.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Close strict candidate projectability, receipt round-trip, completion-command, task-ID, and positional-help gaps before the semantic interface.
+  Rationale: A compact frontier cannot be trusted if the checker can admit bytes that strict resume rejects or if it gives the lead an incomplete or invalid next action.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Make the Milestone 0 receipt oracle cover the full currently admitted JSON-safe domain and every receipt-semantic subtree reserialized by a transition.
+  Rationale: Checking only two fixtures or only the newly supplied source receipt would leave silent type changes, nested-array failures, unsafe-key corruption, prior copied wait-receipt corruption, and required null receipt slots outside the proof. The installer remains semantics-blind: callers identify stable task-relative receipt paths and expected values, while the shared gate strictly parses, normalizes, and deep-compares them before rename.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Keep full evidence available through explicit drill-down references and never replace the full diff or decisive screenshots with summaries.
+  Rationale: Compression can save context but can also suppress evidence. The frontier is a navigation and decision packet, not the sole evidence store.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Remove Worker monitoring from this plan.
+  Rationale: Monitoring does not address the proven waste, current liveness remains deliberately unknown, and adding a monitor would enlarge the release before the semantic and completion boundaries are correct. Existing Ledger recovery remains unchanged.
+  Date/Author: 2026-07-30 / Codex
+
+- Decision: Do not add Smithers, Restate, a daemon, a lease service, a new durable registry, or another event database in this plan.
+  Rationale: The first release can be implemented as pure projection plus composition of existing GoalBuddy operations. A larger durable substrate remains a separately justified future decision.
+  Date/Author: 2026-07-21 / Codex
+
+- Decision: Retire the large-autonomous-product compiler profile and broad paid semantic-evaluation program.
+  Rationale: They duplicate the existing adaptive execution strategy, expose held-out fixtures to the implementation lane, and add expensive generation volume without measuring the observed wrong-scope, convergence, provenance, or overload failures. Only the bounded runtime-correctness prerequisite survives here.
+  Date/Author: 2026-07-30 / Codex
+
+## Outcomes & Retrospective
+
+No runtime implementation exists yet. Plan reconciliation is complete: this is the only surviving GoalBuddy implementation plan; the useful task-level brief-binding and runtime-correctness work has been absorbed; the receipt index, owner profile/evaluation program, and monitor have been retired; and the closeout design now matches actual run provenance. At the end of Milestone 3, record whether the shadow frontier preserved every fact that changed Fable's judgment. At the end of Milestone 5, record the change in Fable-visible GoalBuddy calls and input volume together with plan, prompt, review, screenshot, scope, deviation, and completion decisions. Final completion requires reduced mechanical burden, truthful terminal semantics, exact-current-review proof when required, and no evidence of reduced product quality.
+
+## Context and Orientation
+
+The repository root is `/Users/danielalnajjar/Code/goalbuddy`. `goalbuddy/` is the canonical execution skill installed into Codex and Claude Code; `plugins/goalbuddy/skills/goal-prep/` is its byte-exact plugin mirror. The canonical files must be edited first, then synchronized through `npm run sync:plugin`.
+
+A GoalBuddy board is a repository-backed goal directory containing a human-readable charter in `goal.md` and machine-valid execution state in `state.yaml`. The board remains the recovery identity for one product-writing frontier. This plan preserves board version 2 and every historical field. It prospectively adds one optional Worker `brief` binding and final Judge/PM completion fields; existing boards require no migration and completed receipts are never revalidated or rewritten.
+
+The lead model is called Fable in this plan because the user's normal orchestrator is Claude/Fable in Claude Code. Fable owns semantic judgment. A Worker is the bounded implementation agent, normally an exact resumable Codex Exec session. A material slice is a unit of work whose decision risk or execution risk warrants just-in-time planning and independent review. A just-in-time plan or brief is current-slice implementation memory created from current repository truth rather than fully predicted when the long-running board is first compiled.
+
+The current checked projection is produced in `goalbuddy/scripts/resume-board.mjs`. Its `createResumeProjection()` function returns valuable semantic fields, including the charter oracle, active task, recent receipt, last verification, approval gates, and planning inventory. It also returns state and board-tree digests, session identifiers, recovery instructions, and command templates. Those mechanical fields are necessary for the runtime but need not dominate Fable's context.
+
+`goalbuddy/scripts/dispatch-task.mjs` admits the exact current task, renders its Worker prompt, launches or resumes the selected harness, captures the exact Codex thread identifier, checks the observed write frontier, validates the role-specific receipt, and stores the authoritative full report under `.git/goalbuddy/dispatch-reports/`. Its public success result is already compact and exposes only the apply-receipt operation. This plan preserves those boundaries.
+
+`goalbuddy/scripts/apply-receipt.mjs` is the atomic mutation owner. Its exported `applyReceipt()` function validates the current receipt and successor under the board lock, optionally adds tasks or hydrates the successor, runs the checker against the candidate, atomically installs valid bytes, and deletes the consumed Git-local report only after success. The new closeout operation must call this implementation rather than reproduce it.
+
+`goalbuddy/references/goal-execution.md` is the normative prepared-board execution kernel. `plugins/goalbuddy/commands/goal.md` is the Claude `/goal` entrypoint. `goalbuddy/SKILL.md` owns the broader installed skill contract. These instruction surfaces already contain quiet-control-plane and adaptive-execution rules; this plan should replace or sharpen existing wording rather than repeat another long policy block.
+
+The current receipt boundary has two relevant defects. First, `apply-receipt.mjs` can serialize candidate bytes that pass the tolerant checker but fail the strict parser later used by resume; candidate installation does not yet prove strict reparse and exact receipt round-trip. Second, `receipt-contract.mjs` reserves `deviations` away from PM and Judge even though the execution kernel requires PM-owned deviation evidence. The first defect must be closed before any compact projection is trusted. The second requires a prospective, role-specific completion contract rather than reusing the Worker's separate `deviations` list.
+
+Receipt provenance means how an exact terminal receipt reached the transition boundary and why that receipt may close the task. Do not compress this into one overloaded class. The durable applied record uses orthogonal closed fields: `receipt_transport` says whether the applying receipt came from a Git-local report or explicit repository file; `report_transport` says whether Git-local report transport was ready, unavailable, or inapplicable; `dispatch_disposition` says whether the related dispatch was accepted, rejected, or inapplicable; and `closeout_authority` says whether the original role receipt or an explicit PM blocked closeout supplied terminal meaning. Applied provenance always has `application_state: applied`. A separately typed held-receipt record, written by a narrow typed transition below, preserves an exact unapplied candidate across compaction without pretending it is task status or applied provenance.
+
+The phrase semantic frontier means the compact information Fable needs to make the next product decision. It is not a user interface board and not new persistence. The phrase control envelope means the digests, exact command arguments, report paths, session identities, and checker facts the runtime needs to execute safely. The control envelope remains available in debug and recovery output but is not part of the normal frontier.
+
+## Plan of Work
+
+### Milestone 0: Make every installed candidate resumable and every projected next action exact
+
+Strengthen the existing atomic installation path before building a smaller read model. After candidate YAML is serialized but before it is renamed over `state.yaml`, strict-parse and normalize the exact candidate bytes through the same parser used by resume. Deep-compare every receipt written or replaced by the transition with the exact JSON-safe parsed receipt value. The tolerant checker still runs, but a checker-green candidate that cannot be strictly resumed or that changes receipt meaning is rejected before mutation with the original board digest and bytes preserved.
+
+Add red-then-green fixtures for colon-bearing keys in additive receipt mappings, nested mappings inside sequence-item mappings, and the retained checker-green/resume-red historical class. Do not replace the YAML parser generally, change the receipt grammar, or rewrite historical boards. Repair only the serializer/parser cases required to make currently supported JSON-safe receipt values round-trip exactly.
+
+Extend the checked resume/planning projection with `complete_goal` only when the active receipt-free task is a final Judge or PM task mechanically eligible for completion. Add `next_free_task_id` as the lowest unused valid `T###`; with `T999` already occupied it returns another free three-digit ID and never suggests `T1000`. Namespace exhaustion fails explicitly. Make direct-script help enumerate the existing positional modes `receipt`, `wait`, `reply`, `complete`, and `rebind` without adding aliases or a second grammar.
+
+The milestone is accepted when the historical failure shape is checker-green and strict-resume-green after a successful transition, deliberate projection failure leaves the original digest and bytes unchanged, completion appears only when mechanically legal, and every projected task ID is valid and unused.
+
+### Milestone 1: Bind one approved JIT brief to the Worker task
+
+Create `goalbuddy/scripts/brief-binding.mjs` as the sole owner of repository-relative path normalization, safe regular-file opening, exact byte hashing, persisted-shape validation, and binding equality. A PM-owned task card may contain one path-only ingress field:
+
+    "brief": "docs/goals/<slug>/notes/<slice>-execplan.md"
+
+During the existing locked hydration transition, resolve the repository root, reject absolute paths, backslashes, traversal, globs, symlinks, missing files, non-regular files, and out-of-root targets, then persist only:
+
+    brief:
+      path: docs/goals/<slug>/notes/<slice>-execplan.md
+      sha256: <64 lowercase hex>
+
+The field is optional and Worker-only. A Judge `worker_package` cannot grant it. Export the shared `worker_package` validator and make it reject every key outside `objective`, `allowed_files`, `verify`, and `stop_if` at receipt admission rather than later hydration.
+
+Dispatch automatically consumes the task binding, verifies it while constructing the dispatch contract, and re-hashes the same file immediately before harness launch. Preserve the current manual `--brief` and `--brief-sha256` path for historical tasks and explicit direct dispatch. If task and CLI bindings are both present, they must match exactly; a partial pair, disagreement, stale bytes, unsafe path, or session-binding mismatch fails before launch and leaves board and product bytes unchanged.
+
+The milestone is accepted through public hydration, dispatch, exact-resume, and rejection fixtures. It adds no receipt index, public prompt dump, resume-projection copy of the brief contents, or second planning authority.
+
+### Milestone 2: Persist provenance and make terminal proof machine-checkable
+
+Create a dependency-free provenance helper and extend the atomic receipt transition so every newly applied receipt stores one `goalbuddy_receipt_provenance_v1` object at `task.transition_evidence.receipt_provenance` before any successful report cleanup. The receipt itself remains byte-for-byte equivalent as parsed JSON data; provenance is adjacent transition evidence, not an injected receipt field.
+
+The exact prospective applied-provenance shape is:
+
+    kind: goalbuddy_receipt_provenance_v1
+    receipt_transport: git_local_report | explicit_file
+    report_transport: ready | unavailable | not_applicable
+    dispatch_disposition: accepted | rejected | not_applicable
+    closeout_authority: original_role | pm_blocked_closeout
+    application_state: applied
+    receipt_artifact:
+      root: git_common_dir | repository
+      path: <normalized path below that root>
+      sha256: <64 lowercase hex>
+      retention_policy: cleanup_eligible | retained
+    origin_artifact: null | {
+      root: git_common_dir | repository,
+      path: <normalized path below that root>,
+      sha256: <64 lowercase hex>
+    }
+    receipt_value_sha256: <64 lowercase hex>
+
+Paths must resolve to safely opened, non-symlink regular files below the declared root. `receipt_value_sha256` is SHA-256 over a dependency-free canonical JSON encoding that recursively sorts object keys, preserves array order and scalar values, and accepts only the existing JSON-safe receipt domain. A clean Git-local report may remain cleanup-eligible because its path, source digest, exact receipt digest, and authority survive atomically in the board. A bare receipt, rejected dispatch artifact, transport-unavailable dispatch output, or PM closeout source is retained. The record describes cleanup policy, not a cleanup outcome it cannot know before installation.
+
+Add one separate prospective held-receipt collection at `task.transition_evidence.held_receipts`. Each entry has the exact closed shape:
+
+    kind: goalbuddy_held_receipt_v1
+    handle: <64 lowercase hex>
+    task_id: T###
+    application_state: held
+    receipt_transport: git_local_report | explicit_file
+    report_transport: ready | unavailable | not_applicable
+    dispatch_disposition: accepted | rejected | not_applicable
+    source_artifact: {
+      root: git_common_dir | repository,
+      path: <normalized path below that root>,
+      sha256: <64 lowercase hex>
+    }
+    origin_artifact: null | {
+      root: git_common_dir | repository,
+      path: <normalized path below that root>,
+      sha256: <64 lowercase hex>
+    }
+    receipt_value_sha256: <64 lowercase hex>
+
+`handle` is the canonical-JSON SHA-256 of every other field in the entry. Create `goalbuddy/scripts/goal-operation.mjs` in this milestone with `holdReceipt()` and the digest-bound typed transition `goalbuddy hold <goal-root> --task T004 --source <exact-path> [--origin-artifact <exact-path>] --expected-state-digest <sha256> --json`, before frontier work. The PM/Fable lane alone chooses to hold. The runtime safely opens and fully validates the same source/origin combinations later accepted by `advance`, derives the embedded or direct exact receipt and all transport fields, verifies current board/task identity and receipt admissibility, and atomically appends the nonduplicate entry through the existing board lock and candidate installer without applying a receipt or changing task status. It returns the handle and the next checked projection.
+
+`advance` accepts either a new `--source` plus optional `--origin-artifact`, or one mutually exclusive `--held-receipt <handle>`. For the held form it resolves exactly one persisted entry on the active task, reopens and rehashes every referenced artifact, revalidates the derived receipt and current board/task identity, and atomically removes that entry only in the same successful installation that applies the receipt. Missing, changed, stale-task, duplicate, malformed, or already-consumed handles fail without board mutation. Resume and frontier project these checked persisted entries; no transcript, process memory, directory scan, or native task list is an authoritative held-evidence source.
+
+Do not add PM conversion in this release. A rejected dispatch may close only through `pm_blocked_closeout`: a new PM-authored blocked receipt for the active source task with `result: blocked`, exact task and board identity, `authored_by: pm`, nonempty `summary`, `blocked_reason`, `remaining_blockers`, and evidence references. It may not claim passing commands, successful scope, or Worker authorship. The original rejected artifact is preserved as `origin_artifact`. Original role receipts continue through the existing role validator. The shared validator receives both source-task role and receipt-author role so this one cross-role blocked shape is explicit rather than masquerading as a Worker receipt.
+
+Extend prospective final Judge and PM receipts with a completion disposition, a canonical deviation set, a deviation-set acceptance locator, and an exact final-review binding:
+
+    completion_disposition: exact | accepted_deviation
+    accepted_deviations:
+      - requirement_id: <unique stable nonempty string>
+        requirement: <nonempty string>
+        observed_shortfall: <nonempty string>
+        reason: <nonempty string>
+        evidence: [<nonempty evidence references>]
+    deviation_acceptance: null | {
+      kind: goalbuddy_deviation_acceptance_v1,
+      accepted_by: owner,
+      task_id: T###,
+      reply_index: <nonnegative integer>,
+      deviation_set_sha256: <64 lowercase hex>
+    }
+    final_review:
+      # Closed discriminated union; status selects one exact branch.
+      status: complete
+      artifact:
+        path: <canonical repository-relative regular JSON file>
+        sha256: <64 lowercase hex>
+      workflow_version: <nonempty workflow identity>
+      scope:
+        kind: goalbuddy_review_scope_v1
+        patterns: [<closed dispatch-scope patterns>]
+      base_identity: { kind: git_commit | content_sha256, value: <identity> }
+      reviewed_identity: { kind: git_commit | content_sha256, value: <identity> }
+      completeness_status: complete
+
+    # Or, only when exact-final-review is in the accepted deviation set:
+    final_review:
+      status: accepted_deviation
+      requirement_id: exact-final-review
+      deviation_set_sha256: <same digest as deviation_acceptance>
+      observed_artifact: null | {
+        path: <canonical repository-relative regular file>,
+        sha256: <64 lowercase hex>,
+        observed_failure: stale_identity | incomplete_scope | incomplete_review | unresolved_blockers | invalid_schema
+      }
+
+Compute `deviation_set_sha256` over the canonical JSON encoding of the complete ordered `accepted_deviations` array. One owner reply accepts the complete set, not an individual entry. Before requesting approval, the PM enters the existing exact-human wait with the exact required reply `approve GoalBuddy deviation set <sha256>`. Completion locates `task_id` and `reply_index` in persisted `transition_evidence.exact_human_replies`, verifies that the stored wait receipt contains that exact phrase for the recomputed set digest, and verifies the existing exact-match hashes. Reordering, adding, removing, or changing a deviation invalidates the approval. A Judge may cite this persisted acceptance but may not create one.
+
+For `completion_disposition: exact`, `accepted_deviations` is empty and `deviation_acceptance` is null. For `accepted_deviation`, the set is nonempty and the acceptance locator passes the exact binding above. Worker `deviations` keeps its existing separate meaning: in-scope engineering choices against task text.
+
+For the `complete` branch, the review artifact is a safely opened repository-relative `goalbuddy_final_review_v1` JSON object. It repeats `workflow_version`, the exact closed scope, base identity, reviewed identity, `completeness_status`, decision, and unresolved blocking findings. The receipt's artifact digest must match exact file bytes, and every repeated field must deep-equal the artifact. Review scope reuses the existing dispatch-scope grammar and manifest rules: exact repository-relative paths and bounded terminal `/**` trees only, with the same path-kind, symlink, mode, and content evidence. Immediately before completion, recompute current identity over that exact scope. Use Git `HEAD` only when the scoped product state exactly matches the clean reviewed commit; otherwise use the deterministic content-manifest SHA-256. `reviewed_identity` must match current bytes, completeness must be `complete`, and unresolved blocking findings must be empty.
+
+For the `accepted_deviation` branch, the validator recomputes the complete deviation-set digest, requires the same digest in `deviation_acceptance` and `final_review`, requires exactly one entry in that set with stable `requirement_id: exact-final-review`, and verifies the exact owner reply. Other separately identified deviations may remain in the same whole-set approval. The branch does not require or permit the complete branch's `workflow_version`, `scope`, identities, or `completeness_status`. A stale or otherwise unusable review may be retained only as optional `observed_artifact`; the runtime safely hashes it and derives `observed_failure`, while the accepted deviation's `observed_shortfall`, `reason`, and evidence remain the semantic explanation. If no usable file exists, `observed_artifact` is null. This branch records an owner-approved missing requirement; it never represents the review as current or complete.
+
+Every GoalBuddy final completion requires the `complete` branch unless the exact-final-review deviation and its exact owner acceptance satisfy the `accepted_deviation` branch. There is no self-asserted `not_required` state. A green checker, test suite, Worker claim, or non-current review cannot substitute.
+
+Update the execution kernel, task template, receipt specification, role examples, shared validator, checker completion rules, provenance serialization, and public tests together. `full_outcome_complete: true` then means the oracle is satisfied exactly or as formally amended by the exact accepted deviation set. Historical receipts and completed boards remain untouched. Accept this milestone only after clean provenance, transport-unavailable, rejected-dispatch PM closeout, source-digest mismatch, exact completion, deviation-set mutation, unrelated exact reply, stale review, dirty-snapshot review, wrong scope, replay, and byte-preservation fixtures pass.
+
+### Milestone 3: Prove a provenance-aware semantic frontier in shadow mode
+
+Create `goalbuddy/scripts/frontier-projection.mjs` as a pure, dependency-free projection module. Export `createSemanticFrontier({ resumeProjection, repositoryEvidence })`. The function reads and writes no files; its inputs are already validated facts and its output is one `goalbuddy_frontier_v1` object. Checked held-receipt entries come only through `resumeProjection`; there is no caller-supplied held-evidence side channel.
+
+The frontier contains the goal and oracle; current slice identity, objective, inputs, constraints, expected output, stop conditions, and bound brief reference; Worker state; changed paths and verification; durable applied provenance and explicit held-evidence handles; review identities, round yield, and scope anomalies; decisive browser evidence; accepted deviations and their exact acceptance; owner gates; unresolved decisions; and drill-down references. Every summarized claim names its source as a board task, stored receipt, transition provenance, explicit held artifact, plan or note path, diff identity, review artifact, or screenshot artifact. Missing proof is `unavailable` or an explicit anomaly, never inferred success.
+
+The normal frontier excludes raw state and tree digests, raw receipt JSON, checker logs, command templates, exact Worker UUIDs, internal report paths Fable does not need to inspect, and unchanged polling events. A separate debug form may retain control fields for deterministic tests and recovery. The frontier is navigation, not a second ledger or replacement for the full diff, review, receipt, or decisive screenshots.
+
+Refactor `goalbuddy/scripts/resume-board.mjs` only enough to reuse its checked projection builder and project validated `transition_evidence.held_receipts`. Add `goalbuddy frontier <goal-root> --json` as an explicit shadow-only route; installed `/goal` continues to use the current projection until Milestone 5.
+
+Retained or faithful fixtures must cover a material Worker awaiting dispatch; applied clean provenance after report cleanup; transport-unavailable success; an explicit terminal receipt; a rejected dispatch followed by `pm_blocked_closeout`; a held/unapplied artifact; a wrong-scope workflow; an early review round with many accepted findings; a later diminishing-return review; a blocked product decision; a scope anomaly; a bound brief; unknown exact-session liveness; an exact deviation-set acceptance; stale and exact final-review identities; a UI slice with decisive screenshots; and a queued placeholder needing hydration.
+
+The milestone is accepted only when an independent fresh-context Fable reviewer makes the same planning, operator-prompt, review-selection, finding-adjudication, screenshot, scope, repair, deviation, and acceptance decisions from the frontier plus drill-down as from the full current materials. Every decision-changing omission is a frontier defect. Token reduction alone is not acceptance.
+
+### Milestone 4: Compose explicit-source closeout and successor activation
+
+Extend the Milestone 2 `goalbuddy/scripts/goal-operation.mjs` with its second and only other public operation, `advance`, consuming a held-receipt entry when requested. Do not create a generic action dispatcher or semantic workflow language. The `advance` CLI shape is:
+
+    goalbuddy advance <goal-root> \
+      --task T004 \
+      (--source <exact-path> [--origin-artifact <exact-path>] | \
+       --held-receipt <handle>) \
+      --closeout-authority original_role | pm_blocked_closeout \
+      --activate T005 \
+      [--task-card <path>] \
+      [--json]
+
+Fable chooses the exact applying source or persisted held handle, closeout authority, successor, and optional approved task card. `--source` and `--held-receipt` are mutually exclusive; `--origin-artifact` is legal only with a new source. GoalBuddy derives and validates the orthogonal transport and dispatch fields from the exact artifacts; neither Fable nor the runtime guesses a class, and the operation never scans Git metadata or a build directory for a unique candidate. A held receipt remains held until Fable supplies its exact handle to a later legal `advance`.
+
+For a clean report, validate its successful authoritative wrapper, task and board identities, admitted digest, clean scope, embedded receipt, and source digest. For a bare terminal receipt, validate the explicit file and apply no report-cleanup policy. For report-transport-unavailable success, accept the retained exact dispatch-output artifact itself as `--source`; validate `ok: true`, task and board identities, admitted digest, clean scope, `report_transport.status: unavailable`, and the embedded exact receipt, then derive that receipt without asking Fable to copy or reconstruct a second JSON file. For a rejected dispatch, allow only a `pm_blocked_closeout` source and require the rejected origin artifact; never copy fields into a faux successful report, invent command status, or relabel scope.
+
+When a task card is supplied, compute its digest inside `advance` and pass exact path and digest into the existing atomic hydration transition. Call the extended `applyReceipt()` behavior under its one board lock so receipt, provenance, optional hydration, source closeout, and successor activation install together. Do not create another lock or write board bytes directly. After success, only a provenance-recorded, GoalBuddy-owned clean report with `retention_policy: cleanup_eligible` may be removed. The provenance record and receipt digest survive.
+
+Every wrong task, authority mismatch, stale board, illegal successor, malformed source, missing or mismatched origin, scope failure, receipt failure, hydration failure, checker failure, or retry after successful application has a bounded truthful result. Rejection preserves board bytes and every source artifact. A crash after atomic installation but before output recovers through checked resume and cannot replay the receipt.
+
+The milestone is accepted when Fable no longer relays a digest, extracts an embedded receipt, or reconstructs closeout JSON, but still explicitly chooses the reviewed source or held handle, legal authority, successor, and optional approved task card.
+
+### Milestone 5: Promote the frontier while pinning Fable's quality responsibilities
+
+Update `goalbuddy/references/goal-execution.md`, `goalbuddy/SKILL.md`, `plugins/goalbuddy/commands/goal.md`, and `goalbuddy/templates/goal.md` by replacing the current healthy-path mechanics with `frontier` and explicit-source `advance`. Keep the execution kernel normative and remove superseded wording in the same cutover.
+
+The normative language retains these Fable-owned seams for material work: slice strategy; current-repository research when useful; JIT ExecPlan authoring and hardening; Codex operator-prompt authoring or approval; full product-diff review; independent-review selection and adjudication; direct decisive-screenshot inspection for UI-visible work; unexpected-write and scope decisions; review convergence judgment; accepted-deviation judgment; and final acceptance. A green checker, test result, Worker completion claim, receipt, or native task completion is evidence, not semantic completion.
+
+A healthy prepared `/goal` start loads only the charter, compact execution kernel, and semantic frontier. It does not load Goal Prep, the compiler, raw `state.yaml`, or exceptional reference material unless compilation, structural amendment, or a named recovery trigger requires them. Genuine new-session or post-compaction uncertainty still invokes the existing Ledger audit. Claude's native task list may mirror the active run for visibility, ownership, and dependency release, but it is optional ephemeral projection and never a second authoritative ledger.
+
+Add policy tests that fail if installed surfaces omit the Fable-owned seams, auto-accept semantic work, expose raw control fields in the normal frontier, load compiler/prep material during healthy execution, route ordinary closeout through Keeper, or treat a native task list as board truth. Keep plugin mirrors byte-exact.
+
+Promotion requires retained-fixture parity plus two fresh-harness journeys. The non-UI material journey shows Fable authoring or approving the plan and operator prompt, inspecting the full diff, adjudicating independent review, recording exact final-review identity, and advancing once. The UI journey shows Fable directly inspecting decisive screenshots before advance. Both preserve exact receipts and valid board state. Activation remains a separate owner-approved transaction.
+
+## Concrete Steps
+
+Before implementation, obtain the independent plan review and explicit owner start approval recorded in `Progress`. Commit this reviewed file together with the narrow `.gitignore` allowlist on the current branch. Verify `git ls-files --error-unmatch docs/plans/goalbuddy-semantic-frontier.md` succeeds and the commit contains the exact reviewed plan. Do not create an implementation worktree from an untracked or merely allowlisted plan.
+
+Then work only in an isolated GoalBuddy branch and worktree. Do not edit `/Users/danielalnajjar/Code/goalbuddy` directly if it is serving installed runtime work. From `/Users/danielalnajjar/Code/goalbuddy`, create a dedicated worktree and branch using a descriptive name such as `codex/goalbuddy-semantic-frontier`. Confirm the new worktree contains this plan and is clean before editing.
+
+Before implementation, run the current baseline:
+
+    cd /path/to/isolated/goalbuddy-worktree
+    npm run check
+    npm run pack:dry-run
+
+Record the exact baseline test totals in `Progress` and `Surprises & Discoveries`. Do not hard-code the current count from an older plan because this repository changes frequently.
+
+For Milestone 0, first preserve red fixtures for the checker-green/resume-red class, additive colon-bearing keys, nested mappings in sequence items, missing completion projection, and `T999` with a lower free ID. Then strengthen candidate admission and the compact projection. Run focused apply, strict-parser, resume, controller-command, checker, and CLI tests after each coherent change.
+
+For Milestone 1, add the brief-binding module and integrate it through locked hydration, shared receipt admission, task checking, dispatch, and exact resume. Use a marker harness to prove every stale or unsafe binding fails before launch. Do not edit the plugin mirror by hand.
+
+For Milestone 2, create `goal-operation.mjs` with only `holdReceipt()`, then add canonical JSON hashing, durable applied provenance, the typed held-receipt transition and collection, the PM blocked-closeout shape, deviation-set acceptance, the closed final-review union, and exact-current scoped identity. Update all prospective receipt, transition-evidence, checker, template, CLI, and spec owners together. Replay historical fixtures read-only.
+
+For Milestone 3, add the pure frontier module and shadow-only CLI route over the validated Milestone 2 evidence shapes. Run focused frontier, resume, and policy tests. Generate comparison artifacts only under a disposable temporary directory or ignored test-fixture root; never write them into live board directories.
+
+For Milestone 4, extend the existing operation module with `advanceGoal()` and add the explicit-source-or-held-handle CLI route. Reuse exports from `apply-receipt.mjs`; if a helper must be exported, export the narrow existing implementation rather than copy it. Run operation, receipt, dispatch, linked-worktree, checker, provenance, cleanup, and retry tests. Inspect `git status --short` after each failure-path test to prove cleanup and byte preservation.
+
+For Milestone 5, edit canonical instruction surfaces and synchronize plugin mirrors:
+
+    npm run sync:plugin
+    npm run check
+    npm run pack:dry-run
+
+Build isolated Codex and Claude homes, install the candidate into both, run `goalbuddy contract --json`, and run both target doctors. Record installed-path checksums or byte-exact doctor evidence, but do not activate the candidate in the user's live homes.
+
+At every stopping point, update `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective`. Commit coherent milestones on the isolated branch. Do not push, install live, migrate boards, or alter user configuration without a separate explicit request.
+
+## Validation and Acceptance
+
+Run `npm run check` from the isolated GoalBuddy worktree and require every Node and Python test to pass. Run `npm run pack:dry-run` and inspect the package contents for the new canonical scripts and mirrored skill files. Run the byte-exact mirror tests after every canonical skill edit.
+
+The runtime-correctness acceptance fixture must prove strict reparse and exact JSON-safe receipt equality before install, byte-identical rejection on deliberate projection failure, legal `complete_goal` projection only at an eligible final audit, the lowest unused valid `next_free_task_id`, explicit namespace exhaustion, and accurate positional help.
+
+The task-brief acceptance fixture must prove path-only ingress, atomic `{path, sha256}` persistence, automatic dispatch consumption, exact CLI agreement, historical manual dispatch, exact-session resumption, shared rejection of extra `worker_package` keys, and no harness launch or board mutation on missing, unsafe, symlinked, stale, partial, or contradictory bindings.
+
+The terminal-evidence acceptance fixture must prove orthogonal provenance fields, canonical receipt digest stability, source and origin artifact containment/digests, durable clean-Worker provenance after eligible report cleanup, digest-bound held-receipt persistence and checked consumption, rejected-dispatch PM blocked closeout without Worker claims, refusal of any PM done conversion, exact deviation-set approval, rejection of an unrelated exact reply, both branches of the closed final-review union, review-artifact digest and metadata equality, closed-scope identity recomputation, and unchanged historical receipts.
+
+The semantic frontier acceptance fixture must demonstrate all of the following observable behavior:
+
+- A healthy material task returns the product objective, plan or brief pointer, consequential evidence, unresolved decisions, and drill-down references.
+- The normal JSON contains no raw state digest, board-tree digest, exact Worker UUID, raw receipt object, or low-level command template.
+- A blocked task, held receipt, provenance change, wrong-scope review, diminishing review yield, accepted deviation, stale review, failed verification, missing review artifact, or unavailable screenshot is explicit rather than summarized as healthy.
+- A fresh reviewer can request the full diff, complete review, or decisive screenshot without reading raw board state.
+- The frontier command does not change any repository or board byte.
+
+The `advance` acceptance fixture must demonstrate that Fable supplies the reviewed source task, either an exact source path or exact held-receipt handle, legal closeout authority, selected successor, and optional approved task card. GoalBuddy derives and validates transport and dispatch disposition, atomically installs receipt, provenance, held-entry removal when applicable, and optional hydration, and returns the next frontier. Exercise clean report, bare receipt, unavailable report transport, retained T013/T019-style rejected-dispatch PM closeout, and held evidence. Every stale source, stale or changed held artifact, mismatched handle, malformed source, illegal PM closeout, scope failure, or checker rejection leaves the board byte-identical and preserves all evidence.
+
+The completion acceptance fixture must prove exact completion, whole-set owner-accepted deviation, mutation or reordering after acceptance, missing or unrelated exact-human acceptance, Judge citation of an existing acceptance, stale Git review, stale dirty-snapshot review, review-artifact digest mismatch, artifact/receipt metadata disagreement, incomplete review, wrong closed scope, clean current review, accepted `exact-final-review` deviation, replay rejection, and byte preservation. A green checker or test suite without a matching final-review binding cannot complete a goal.
+
+The fresh-Fable quality acceptance must compare the compact path with the current path on at least two material slices. Record Fable-visible GoalBuddy calls and input volume, retries, manual digest or receipt manipulation, plan quality, operator-prompt quality, diff-review findings, independent-review yield by round, screenshot adjudication, scope decisions, accepted deviations, final-review identity, and reopened or post-acceptance defects. The target is a substantial reduction in mechanical work with no missing constraint or weaker decision. Any quality regression blocks promotion even if token use improves.
+
+The final compatibility gate must exercise an existing 0.5 board without migration. It must resume, dispatch or use a retained dispatch fixture, advance, and recover while preserving every historical receipt byte and all existing board semantics. The new completion fields are prospective and additive; they may not reinterpret completed history.
+
+## Idempotence and Recovery
+
+The frontier is read-only and can be regenerated safely. Shadow artifacts are disposable and must never become authority. Re-running `frontier` against unchanged board and repository evidence must produce semantically identical output except for explicitly non-authoritative timestamps, which should be avoided if possible.
+
+`advance` is intentionally not silently idempotent after success: once a receipt has been consumed and the successor activated, repeating the same command must report that the source task is no longer current rather than applying it twice. A failure before atomic installation leaves the board unchanged and the dispatch report available. A crash after atomic installation but before printing the frontier is recovered through the normal checked projection; it must not replay the receipt.
+
+If shadow evaluation reveals that the frontier omits decision-relevant information, expand the frontier schema and fixtures before changing `/goal`. If the frontier cannot remain compact without hiding evidence, preserve the current projection and document the failed experiment.
+
+If exact receipt provenance cannot be established but the candidate artifact is valid enough for the typed held contract, use the digest-bound `goalbuddy hold` transition and escalate; otherwise preserve the file outside board authority and report that it could not be held. Do not infer missing transport, dispatch, or authority fields. If current artifact identity cannot be reproduced, completion fails closed. If the deviation-set approval does not bind the exact current set, the goal remains incomplete.
+
+Activation is a separate transaction. Existing live sessions may retain old instructions, so activate only after checking live Worker quiescence and following the repository's isolated install and doctor procedure. Existing boards are not rewritten as part of activation.
+
+## Artifacts and Notes
+
+Keep shadow comparison artifacts under a disposable or explicitly ignored test-fixture location. The minimum comparison record for each seam should contain the source fixture identifier, current resume output path, semantic frontier output path, decision-relevant facts used by the reviewer, omissions found, and disposition. Do not store full Worker transcripts in Fable-facing artifacts.
+
+At completion, add a short evidence record to this section containing the final branch and commit, test totals, package dry-run result, Codex and Claude doctor results, strict-projectability proof, provenance fixture disposition, accepted-deviation and exact-review proof, shadow-comparison disposition, and fresh-Fable journey disposition.
+
+Expected healthy behavior should resemble:
+
+    Fable receives goalbuddy_frontier_v1.
+    Fable plans, prompts, and reviews the material slice.
+    Fable invokes goalbuddy advance with the exact source, legal closeout authority, and successor.
+    GoalBuddy returns the accepted product outcome and the next goalbuddy_frontier_v1.
+
+The user-facing conversation should discuss product progress, review status, blockers, and decisions. It should not narrate successful digest relay, receipt transport, checker invocation, report cleanup, or successor installation.
+
+## Interfaces and Dependencies
+
+The implementation remains dependency-free and uses Node.js standard-library modules already permitted by the repository.
+
+In `goalbuddy/scripts/frontier-projection.mjs`, define a pure export with this conceptual shape:
+
+    export function createSemanticFrontier({
+      resumeProjection,
+      repositoryEvidence = null,
+    }) -> goalbuddy_frontier_v1
+
+The returned object must have stable top-level sections named `goal`, `slice`, `worker`, `evidence`, `reviews`, `deviations`, `decisions`, and `drill_down`. Exact nested fields may be refined during shadow evaluation, but no raw control field may silently migrate into the semantic form.
+
+In `goalbuddy/scripts/goal-operation.mjs`, define the Milestone 2 export with this conceptual shape:
+
+    export function holdReceipt({
+      goalRoot,
+      taskId,
+      sourcePath,
+      originArtifactPath = "",
+      expectedStateDigest,
+    }) -> { ok, handle, projection } | public failure
+
+In Milestone 4, extend that same module with the narrow closeout export:
+
+    export function advanceGoal({
+      goalRoot,
+      taskId,
+      sourcePath = "",
+      heldReceipt = "",
+      closeoutAuthority,
+      originArtifactPath = "",
+      activateTaskId,
+      taskCardPath = "",
+    }) -> { ok, outcome, frontier } | public failure
+
+`holdReceipt()` uses the existing board lock and candidate installer; it writes only the exact checked held-receipt entry. `advanceGoal()` requires exactly one of `sourcePath` or `heldReceipt`, derives orthogonal provenance from the exact artifacts, validates the selected closeout authority, calls existing dispatch-report and role-receipt validation as applicable, then reuses `applyReceipt()` behavior. Neither export scans for sources, reconstructs proof, or writes board bytes directly.
+
+In `goalbuddy/scripts/brief-binding.mjs`, expose narrow operations equivalent to:
+
+    export function bindBrief({ goalRoot, path }) -> { path, sha256 }
+    export function verifyBrief({ goalRoot, binding }) -> { path, sha256 }
+
+Both functions operate on one safely opened regular file inside the repository and return no file contents.
+
+In a focused provenance module, expose canonical JSON hashing, contained artifact identity, provenance derivation, and provenance validation. Extend `applyReceipt()` with one internal provenance parameter and serialize that exact validated record beside the receipt under the existing board lock. Public low-level receipt application derives `original_role` provenance from its exact file; `advance` supplies the richer validated descriptor.
+
+Add one dependency-free current-artifact identity helper used only by final-review validation. For a clean Git state it returns the exact current commit identity. For a dirty or intentionally uncommitted reviewed scope it returns a deterministic SHA-256 over a sorted manifest containing path, file kind, mode, and content digest. It must reuse the closed scope compiler plus path/file-kind rules in `goalbuddy/scripts/dispatch-scope-manifest.mjs`. The review-artifact loader safely opens the declared repository-relative JSON file, verifies its byte digest and exact schema, and deep-compares every duplicated receipt field before recomputing current identity.
+
+Add the CLI route `hold` in Milestone 2 and routes `frontier` and `advance` in their later milestones in `internal/cli/goal-maker.mjs`. Keep the existing `resume`, `dispatch`, `receipt`, and typed transition surfaces for recovery and compatibility. Do not create aliases beyond the canonical command names.
+
+`receipt-contract.mjs` remains the shared role boundary. Prospectively allow `completion_disposition`, `accepted_deviations`, `deviation_acceptance`, and `final_review` only on final Judge/PM receipts. Add the separately named blocked-only PM closeout validator for a rejected source task; do not disguise it as the source task's role receipt. Reject all terminal-completion fields on Worker and Scout receipts. Keep Worker `deviations` as a string array with its existing task-local meaning. `receipt_provenance` belongs to transition evidence and is validated by both the checker and transition code, never accepted from an untrusted receipt.
+
+## Explicitly Out of Scope
+
+This plan does not add a receipt index, `large-autonomous-product` profile, broad or paid semantic-evaluation program, Worker monitor, daemon, lease, registry, second ledger, native-task authority graph, deterministic semantic scheduler, visual board, Smithers/Restate runtime, or general workflow engine.
+
+It does not automate reviewer selection or semantic acceptance; normalize, reconstruct, or silently convert a receipt; migrate active boards; rewrite historical receipts; weaken `allowed_files`; remove the checker; replace exact Codex session binding; merge Worker transcripts into Fable context; activate an installed runtime; or repair OmegaCode role registration, workflow base/head/scope admission, review convergence, or host-load gating. Those Omega concerns belong to a separate owner-repository plan.
+
+It does not remove Fable from material planning, Codex prompt authoring or approval, full-diff review, independent-review selection and adjudication, decisive screenshot inspection, scope decisions, accepted-deviation judgment, or final acceptance. Any implementation that does so violates the purpose even if all deterministic tests pass.
+
+## Revision Note
+
+2026-07-21: Initial plan created after inspecting the current GoalBuddy 0.5 source. The inspection narrowed the conversational proposal in two important ways: the runtime already contains most low-level safety and compact-transport features, and successor hydration already belongs inside the atomic receipt transition. The plan therefore adds a shadow-tested semantic projection and one deep closeout operation before considering monitoring, rather than creating a new orchestration architecture.
+
+2026-07-30: Reconciled the five GoalBuddy design threads, the completed unattended run, twelve ExecPlans, the compiled owner-doctrine board, current source contracts, and current Claude/Omega task behavior. This revision makes Semantic Frontier the sole surviving implementation plan; absorbs task-level brief binding and the bounded Slice 0 runtime-correctness work; replaces unique-report discovery with explicit receipt provenance; adds honest accepted-deviation and exact-final-review completion semantics; and retires the receipt index, owner profile/evaluation program, and monitor because they do not address the observed failure modes.
+
+2026-07-30: Hardened the reconciled plan after independent Goal Judge review. The applied-provenance fields are now orthogonal and a digest-bound `hold` transition is the only durable source of recoverable held receipts; transport-unavailable dispatch output is consumed directly without a Fable-authored receipt copy; final review is a closed union that distinguishes exact current proof from an owner-accepted missing requirement; evidence schemas precede the shadow frontier; and a pre-worktree Git durability gate prevents implementation from starting from an untracked plan.
+
+2026-07-30: Recorded owner implementation authorization and the adjudicated ChatGPT Pro Milestone 0 findings. The architecture is unchanged, but the implementation oracle now explicitly covers the complete bounded JSON-safe serializer/parser inverse, every reserialized receipt-semantic subtree, shared completion eligibility including blocked-sibling parity, exact `T000` through `T999` allocation, and accurate positional-help wording.

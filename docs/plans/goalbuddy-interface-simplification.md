@@ -1,5 +1,7 @@
 # Make GoalBuddy quiet and exact at the execution boundary
 
+Status: **Closed historical record (2026-07-30).** Milestones 1-7 shipped and activation occurred later through successor work. The unchecked approval item below correctly records that activation was outside this implementation run; it is not an open task in this plan.
+
 This ExecPlan is a living document. Keep `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` current as implementation proceeds.
 
 This plan follows `/Users/danielalnajjar/.agents/resources/plans.md`. It is intentionally separate from `docs/plans/goalbuddy-fable-efficiency-stabilization.md`. That earlier plan records the dispatcher, ignored-path, adaptive-brief, and exact Codex-session work already implemented. This plan begins from the resulting current runtime and addresses a different problem: Fable-facing instruction weight, receipt-contract drift, digest handoff friction, planning projection ergonomics, and truthful recovery output.
@@ -16,7 +18,7 @@ This is an interface-deepening pass, not a new workflow system. It adds no daemo
 
 ## Artifact Status
 
-**Implemented and verified in isolation. Activation is not authorized by this plan.** Implementation occurred only in `/Users/danielalnajjar/Code/.worktrees/goalbuddy-interface-simplification` on branch `codex/goalbuddy-interface-simplification`, based on local `main` commit `ab3724c940507836abc71a24f5436ca5dc6b5206`. Live Codex and Claude installations, active project boards, and project worktrees stay untouched until a separate activation decision after all acceptance gates pass and no GoalBuddy-dispatched Worker is live.
+**Closed historical record.** This plan was implemented and verified in isolation in `/Users/danielalnajjar/Code/.worktrees/goalbuddy-interface-simplification` on branch `codex/goalbuddy-interface-simplification`, based on local `main` commit `ab3724c940507836abc71a24f5436ca5dc6b5206`. Activation was correctly outside this plan and occurred later through successor cutover work; live runtime truth no longer depends on the unchecked approval item below.
 
 ## Progress
 
@@ -478,3 +480,5 @@ Use only Node built-ins and existing GoalBuddy modules. Do not add a runtime dep
 2026-07-17: Amended after Fable identified a scope-proof bypass in a PM-facing receipt-repair command. Replaced it with one bounded in-dispatcher exact-session repair that retains the original manifest, verifies authority before repair, forbids all repair-turn writes, discloses the original malformed receipt and repair outcome, and never persists recovery machinery. Added optional self-authored harness provenance and an explicit `resume --planning` versus `parallel-plan` boundary.
 
 2026-07-17: Amended acceptance after implementation to use Claude Opus—not Fable—for fresh-lead interface validation and to keep adversarial malformed-receipt/scope cases in exact public-surface tests. The external-model journey validates comprehension and context economy; deterministic tests validate runtime failure semantics.
+
+2026-07-30: Archived as a completed implementation record. Later activation does not rewrite the original scope boundary, so the approval checkbox remains unchanged as historical truth.
