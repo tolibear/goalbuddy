@@ -315,6 +315,16 @@ For execution goals, completion also requires implementation evidence. A final a
 
 For continuous execution goals, the final audit receipt must include `full_outcome_complete: true`. If the receipt only proves that the current work package or tranche is complete, keep the goal active and queue or activate the next safe Worker/PM task. Add a Judge only when the next decision is a phase, risk, ambiguity, rejected verification, or final completion review.
 
+Before the PM ends the host turn, run the machine-checkable exit gate:
+
+```bash
+node <skill-path>/scripts/check-can-stop.mjs docs/goals/<slug>
+```
+
+Exit code `0` means the board is valid and either the full outcome is complete or the exact terminal approval-wait shape is recorded. Any nonzero result means the PM must keep working or repair the board. A healthy local board server is only a viewer signal and never proves that an executor is running.
+
+`apply-receipt.mjs` returns the same verdict as `stop_allowed`, `continuation_required`, and `next_action` immediately after a receipt transition. When activating the next task, treat that response as the continuation handoff: activation records intent, while dispatch or continued PM execution performs the work.
+
 Queued or active Worker tasks block `goal.status: done`. If a Worker is no longer required, mark it blocked with a receipt explaining why, remove it during PM board maintenance, or replace it with the actual required Worker task before completion.
 
 Default final task:

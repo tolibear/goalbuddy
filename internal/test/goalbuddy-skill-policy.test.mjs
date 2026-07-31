@@ -74,6 +74,9 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Board Health Stewardship/);
     assert.match(text, /Do not auto-spawn a separate always-on steward by default/);
     assert.match(text, /node <skill-path>\/scripts\/check-goal-state\.mjs docs\/goals\/<slug>/);
+    assert.match(text, /node <skill-path>\/scripts\/check-can-stop\.mjs docs\/goals\/<slug>/);
+    assert.match(text, /stop_allowed/);
+    assert.match(text, /continuation_required/);
     assert.match(text, /Repair only GoalBuddy control files/);
     assert.match(text, /Never edit product implementation files during board-health work/);
     assert.match(text, /goalbuddy_receipt_v1/);

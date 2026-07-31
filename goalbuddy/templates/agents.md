@@ -1,4 +1,5 @@
 # GoalBuddy Agents
+updated: 2026-07-26
 
 Use three generic agents. The main `/goal` thread remains PM and owns the board.
 

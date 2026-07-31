@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2: Honest Continuation State (2026-07-31)
+
+- **Machine-checkable stop decisions.** `goalbuddy can-stop <goal>` fails closed while a valid active task remains and permits exit only for a receipt-backed complete outcome or the exact validated terminal approval wait.
+- **Receipt transitions expose the continuation contract.** `goalbuddy receipt` now returns `stop_allowed`, `continuation_required`, and `next_action` immediately after activating the next task, closing the handoff gap that left FL Donate active but unattended.
+- **The board no longer impersonates an executor.** The local surface identifies itself as a state viewer and reports executor status as `Not observed` unless the goal is complete or waiting. A healthy viewer is no longer presented as evidence that work is running.
+- **Regression coverage.** Tests cover active-work stop rejection, complete and approval-wait exits, receipt-to-next-task continuation, and honest board semantics. The canonical and plugin payloads remain byte-identical.
+
 ## 0.4.1: Installed Contract Fixes (2026-07-18)
 
 - **npm installs include the full execution contract.** The package now ships the canonical `goalbuddy/` directory as one boundary, including `references/goal-execution.md`. A packed-artifact regression test compares the canonical and plugin skill trees and performs a clean Claude Code install from the generated tarball.

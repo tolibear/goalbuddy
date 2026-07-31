@@ -16,6 +16,11 @@ if (isDirectRun()) {
       console.log(JSON.stringify(report, null, 2));
     } else if (report.ok) {
       console.log(`Recorded ${report.task_id} as ${report.status}; active_task is now ${report.active_task}.`);
+      if (report.continuation_required) {
+        console.log(`Continuation required: ${report.next_action}`);
+      } else {
+        console.log(`Stop allowed: ${report.stop_reason}.`);
+      }
     } else {
       console.log(`Transition rejected and reverted. Checker errors:\n- ${report.checker_errors.join("\n- ")}`);
     }
@@ -87,7 +92,27 @@ export function applyReceipt(options) {
     writeAtomic(statePath, original);
     return { ok: false, task_id: options.taskId, status, active_task: nextActive, reverted: true, checker_errors: checkerReport.errors || [] };
   }
-  return { ok: true, task_id: options.taskId, status, active_task: nextActive, reverted: false, checker_warnings: checkerReport.warnings || [] };
+  const stopCheck = spawnSync(process.execPath, [join(scriptDir, "check-can-stop.mjs"), statePath, "--json"], { encoding: "utf8" });
+  let stopReport = null;
+  try {
+    stopReport = JSON.parse(stopCheck.stdout || stopCheck.stderr);
+  } catch {
+    stopReport = { can_stop: false, reason: "stop_gate_unreadable" };
+  }
+  return {
+    ok: true,
+    task_id: options.taskId,
+    status,
+    active_task: nextActive,
+    reverted: false,
+    checker_warnings: checkerReport.warnings || [],
+    stop_allowed: stopReport.can_stop === true,
+    continuation_required: stopReport.can_stop !== true,
+    stop_reason: stopReport.reason || "unknown",
+    next_action: stopReport.can_stop === true
+      ? "The host turn may end."
+      : stopReport.next || `Continue active task ${nextActive}; activation alone is not execution.`,
+  };
 }
 
 function loadReceipt(receiptPath) {

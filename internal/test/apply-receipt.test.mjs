@@ -73,6 +73,9 @@ test("apply-receipt records a done receipt and activates the next task atomicall
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
     assert.equal(report.ok, true);
+    assert.equal(report.stop_allowed, false);
+    assert.equal(report.continuation_required, true);
+    assert.match(report.next_action, /Continue the active task T999/i);
 
     const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
     assert.match(state, /active_task: T999/);
@@ -109,6 +112,9 @@ test("apply-receipt accepts a dispatch report and defaults status from the recei
     const dispatchReport = { ok: true, harness: "codex", receipt: DONE_RECEIPT, scope_check: { status: "clean" } };
     const result = runApply(root, ["--task", "T001", "--activate", "T999"], dispatchReport);
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.continuation_required, true);
+    assert.equal(report.active_task, "T999");
     const state = readFileSync(join(goalDir, "state.yaml"), "utf8");
     assert.match(state, /active_task: T999/);
     assert.match(state, /summary: "widget adjusted"/);

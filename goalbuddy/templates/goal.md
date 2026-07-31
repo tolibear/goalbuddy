@@ -105,6 +105,6 @@ On every `/goal` continuation:
 9. If safe local work remains, choose the next largest reversible Worker package and continue unless blocked.
 10. If a problem, suggestion, or follow-up should become a repo artifact, create an approved issue/PR or ask the operator whether to create one.
 11. Review at phase, risk, rejected-verification, ambiguity, or final-completion boundaries; do not review every small Worker by habit.
-12. Finish only with a Judge/PM audit receipt that maps receipts and verification back to the original user outcome and records `full_outcome_complete: true`.
+12. Before ending the host turn, run `node <skill-path>/scripts/check-can-stop.mjs docs/goals/<slug>`. A nonzero result means safe work remains and the PM must continue. Finish only when this gate passes and a Judge/PM audit receipt maps receipts and verification back to the original user outcome with `full_outcome_complete: true`, or when the checker validates the exact terminal approval-wait shape.
 
 Issue and PR handoffs are supporting artifacts. `state.yaml` remains authoritative, and every external artifact decision must be recorded in a task receipt.

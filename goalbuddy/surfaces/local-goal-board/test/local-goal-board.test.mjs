@@ -13,6 +13,7 @@ test("normalizes a dense goal into local board columns", () => {
 
   assert.equal(payload.goal.title, "Local Goal Board Surface");
   assert.equal(payload.goal.activeTask, "");
+  assert.equal(payload.executor.status, "not-observed");
   assert.equal(payload.counts.total, 14);
   assert.equal(payload.counts.todo, 0);
   assert.equal(payload.counts.inProgress, 0);
@@ -78,6 +79,8 @@ tasks:
 
     const payload = createBoardPayload(goalDir);
     assert.equal(payload.goal.activeTask, "T001");
+    assert.equal(payload.executor.status, "not-observed");
+    assert.match(payload.executor.detail, /does not prove that an executor is running/i);
     assert.equal(payload.counts.inProgress, 2);
     assert.deepEqual(
       payload.columns.find((column) => column.id === "in-progress").tasks.map((task) => task.id),

@@ -159,6 +159,13 @@ async function main() {
       }
       receiptCli();
       break;
+    case "can-stop":
+      if (wantsHelp()) {
+        usage();
+        break;
+      }
+      canStopCli();
+      break;
     case "init":
       if (wantsHelp()) {
         usage();
@@ -301,6 +308,7 @@ Usage:
   ${canonicalCliName} resume [docs/goals/slug] [--json]
   ${canonicalCliName} dispatch <docs/goals/slug> --to codex|claude-code [--task T###] [--model <name>] [--timeout <seconds>] [--json]
   ${canonicalCliName} receipt <docs/goals/slug> --task T### --receipt <file> [--status done|blocked] [--activate T###|none] [--json]
+  ${canonicalCliName} can-stop <docs/goals/slug> [--json]
   ${canonicalCliName} prompt <docs/goals/slug> [--task T###] [--board <path/to/state.yaml>] [--json]
   ${canonicalCliName} parallel-plan <docs/goals/slug> [--json]
 
@@ -1260,6 +1268,16 @@ function initGoal() {
 function receiptCli() {
   const script = join(skillSource, "scripts", "apply-receipt.mjs");
   const result = spawnSync(process.execPath, [script, ...args.slice(1)], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    env: process.env,
+  });
+  process.exit(result.status ?? 1);
+}
+
+function canStopCli() {
+  const script = join(skillSource, "scripts", "check-can-stop.mjs");
+  const result = spawnSync(process.execPath, [script, ...resolveChildGoalArgs(args.slice(1))], {
     cwd: process.cwd(),
     stdio: "inherit",
     env: process.env,

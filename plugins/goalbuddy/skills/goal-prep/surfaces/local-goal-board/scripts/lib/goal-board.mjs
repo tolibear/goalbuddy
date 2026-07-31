@@ -61,6 +61,7 @@ export function createBoardPayload(goalDir, options = {}) {
       tranche: board.tranche,
       activeTask: board.activeTask,
     },
+    executor: executorObservation(board),
     counts: {
       total: tasks.length,
       todo: columns.find((column) => column.id === "todo").tasks.length,
@@ -71,6 +72,21 @@ export function createBoardPayload(goalDir, options = {}) {
     columns,
     tasks,
     notes: Object.values(noteIndex).map(({ path, title, mtimeMs }) => ({ path, title, mtimeMs })),
+  };
+}
+
+function executorObservation(board) {
+  if (board.status === "done") {
+    return { status: "complete", label: "Complete", observed: false };
+  }
+  if (board.status === "blocked") {
+    return { status: "waiting", label: "Waiting", observed: false };
+  }
+  return {
+    status: "not-observed",
+    label: "Not observed",
+    observed: false,
+    detail: "The local board displays state. It does not prove that an executor is running.",
   };
 }
 
@@ -828,13 +844,14 @@ function boardHtml() {
   <main class="shell">
     <section class="goal-header" aria-labelledby="goal-title">
       <div>
-        <p class="eyebrow">Local board</p>
+        <p class="eyebrow">Local state viewer</p>
         <h1 id="goal-title">GoalBuddy Board</h1>
         <p id="goal-tranche" class="goal-tranche"></p>
       </div>
       <dl class="goal-meta">
         <div><dt>Status</dt><dd id="goal-status">Unknown</dd></div>
         <div><dt>Active</dt><dd id="goal-active">None</dd></div>
+        <div><dt>Executor</dt><dd id="goal-executor">Not observed</dd></div>
         <div><dt>Updated</dt><dd id="goal-updated">Waiting</dd></div>
       </dl>
     </section>
@@ -2088,6 +2105,8 @@ function renderBoard(board) {
   document.getElementById("goal-tranche").textContent = board.goal.tranche || "";
   document.getElementById("goal-status").textContent = board.goal.status;
   document.getElementById("goal-active").textContent = board.goal.activeTask || "None";
+  document.getElementById("goal-executor").textContent = board.executor?.label || "Not observed";
+  document.getElementById("goal-executor").title = board.executor?.detail || "";
   document.getElementById("goal-updated").textContent = new Date(board.generatedAt).toLocaleTimeString();
 
   if (board.error) {
