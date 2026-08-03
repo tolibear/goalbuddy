@@ -1,6 +1,6 @@
 {
   "name": "goalbuddy",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A /goal operating loop for Codex and Claude Code: goal oracles, local boards, receipts, and verification.",
   "type": "module",
   "bin": {

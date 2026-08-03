@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3: Durable Subagent Waits (2026-08-03)
+
+- **Timeouts are observation windows, not failure verdicts.** After each `wait_agent` timeout, GoalBuddy checks delivered messages and actual agent state, then continues bounded waits while execution is still live.
+- **Role-aware liveness policy.** Scout and Judge work is read-only, so allowed-file changes are never used as their progress signal. The contract protects Scout/Judge work for 20 minutes and Worker work for 30 minutes unless there is concrete failure evidence.
+- **No premature fallback.** PM fallback now requires proven failure; interruption needs a terminal error, confirmed unavailability, scope violation, or multiple observation windows plus evidence of no execution. Long waits include short owner updates, and external Claude Opus architecture reviews wait at least 1200 seconds.
+- **Regression coverage.** Canonical and generated plugin contracts plus rendered task prompts assert the durable wait rules and reject the old one-timeout instruction.
+
 ## 0.4.2: Honest Continuation State (2026-07-31)
 
 - **Machine-checkable stop decisions.** `goalbuddy can-stop <goal>` fails closed while a valid active task remains and permits exit only for a receipt-backed complete outcome or the exact validated terminal approval wait.

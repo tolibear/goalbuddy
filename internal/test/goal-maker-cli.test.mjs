@@ -352,7 +352,15 @@ checks:
     assert.match(human.stdout, /Codex spawn_agent agent_type: goal_worker/);
     assert.match(human.stdout, /Claude Code Agent tool subagent_type: goal-worker/);
     assert.match(human.stdout, /Do not substitute generic scout, worker, judge, Explore, or general-purpose agents/);
-    assert.match(human.stdout, /After one wait_agent timeout/);
+    assert.match(human.stdout, /One wait_agent timeout ends only that observation window/);
+    assert.match(human.stdout, /inspect actual agent_status and delivered messages/);
+    assert.match(human.stdout, /Scout and Judge are read-only/);
+    assert.match(human.stdout, /before 20 minutes or a Worker before 30 minutes/);
+    assert.match(human.stdout, /multiple observation windows plus evidence of no execution/);
+    assert.match(human.stdout, /Never use PM fallback without proven failure/);
+    assert.match(human.stdout, /at least 1200 seconds for external Claude Opus architecture reviews/);
+    assert.match(human.stdout, /short user updates during long waits/);
+    assert.doesNotMatch(human.stdout, /After one wait_agent timeout/);
     assert.match(human.stdout, /goal_oracle/);
     assert.match(human.stdout, /slice_policy/);
   } finally {
