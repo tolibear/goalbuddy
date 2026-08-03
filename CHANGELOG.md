@@ -6,6 +6,7 @@
 - **Receipt transitions expose the continuation contract.** `goalbuddy receipt` now returns `stop_allowed`, `continuation_required`, and `next_action` immediately after activating the next task, closing the handoff gap that left FL Donate active but unattended.
 - **The board no longer impersonates an executor.** The local surface identifies itself as a state viewer and reports executor status as `Not observed` unless the goal is complete or waiting. A healthy viewer is no longer presented as evidence that work is running.
 - **Regression coverage.** Tests cover active-work stop rejection, complete and approval-wait exits, receipt-to-next-task continuation, and honest board semantics. The canonical and plugin payloads remain byte-identical.
+- **Native waits no longer abandon live agents.** `wait_agent` uses bounded, role-aware observation windows and never treats missing file changes as Scout or Judge failure. External CLI timeouts remain hard failures, and timeout reports now include scope evidence for partial writes before fallback.
 
 ## 0.4.1: Installed Contract Fixes (2026-07-18)
 

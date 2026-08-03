@@ -280,7 +280,7 @@ function receiptSchema(role) {
   };
 }
 
-export function formatPrompt(payload) {
+export function formatPrompt(payload, { includePmObservationContract = true } = {}) {
   const lines = [
     "GoalBuddy task prompt",
     "",
@@ -315,7 +315,14 @@ export function formatPrompt(payload) {
     `- Claude Code Agent tool subagent_type: ${payload.metadata.required_claude_subagent_type || "do not spawn; run as PM"}`,
     "- Do not substitute generic scout, worker, judge, Explore, or general-purpose agents for GoalBuddy agents.",
     "- If the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or install agents.",
-    "- After one wait_agent timeout with no visible allowed-file changes, stop waiting and recover deterministically.",
+  );
+  if (includePmObservationContract) {
+    lines.push(
+      "- Native wait_agent timeouts are non-terminal 60-second observation windows; after each one, inspect delivered messages and the live agent list or status (Codex: list_agents).",
+      "- Scout and Judge are read-only, so file changes are never their progress signal. Escalate after 20 windows for Scout/Judge or 30 for Worker with one status request and at most five more windows; then interrupt and use PM fallback only if there is still no reply or execution evidence.",
+    );
+  }
+  lines.push(
     "",
     "Task:",
     `- id: ${payload.task.id}`,

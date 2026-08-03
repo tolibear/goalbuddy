@@ -65,7 +65,7 @@ export function dispatchTask(options) {
   const rendered = renderTaskPrompt({ goalRoot: options.goalRoot, taskId: options.taskId, json: false });
   const role = rendered.payload.task.type;
   const prompt = [
-    formatPrompt(rendered.payload),
+    formatPrompt(rendered.payload, { includePmObservationContract: false }),
     "",
     "Dispatch notes:",
     `- Work only inside the current directory: ${process.cwd()}`,
@@ -75,10 +75,19 @@ export function dispatchTask(options) {
 
   const before = gitChangedFiles();
   const run = runHarness(to, prompt, { model: options.model, sandbox: rendered.payload.metadata.sandbox, role, timeoutSeconds: options.timeoutSeconds });
-  if (run.error) return failure(run.error, { task_id: task.id, harness: to });
-
   const after = gitChangedFiles();
   const scope = scopeCheck({ before, after, role, allowedFiles: rendered.payload.task.allowed_files });
+  if (run.error) {
+    return failure(run.error, {
+      task_id: task.id,
+      harness: to,
+      role,
+      exit_status: run.status ?? null,
+      timeout_semantics: run.timedOut ? "hard_execution_deadline" : null,
+      scope_check: scope,
+    });
+  }
+
   const receipt = extractReceipt(`${run.stdout}\n${run.stderr}`);
   if (receipt && !receipt.harness) receipt.harness = to;
 
@@ -116,7 +125,11 @@ function runHarness(to, prompt, { model, sandbox, role, timeoutSeconds }) {
     return { error: `The ${to} CLI ("${command.file}") was not found on PATH. Install it or choose another --to target.` };
   }
   if (result.error?.code === "ETIMEDOUT") {
-    return { error: `The ${to} CLI timed out after ${timeoutSeconds}s.` };
+    return {
+      error: `The ${to} CLI hit its hard execution timeout after ${timeoutSeconds}s. Inspect the scope check and working tree for partial writes before fallback.`,
+      status: result.status,
+      timedOut: true,
+    };
   }
   if (result.error) return { error: result.error.message };
   return { status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
