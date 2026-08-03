@@ -2,7 +2,6 @@
 
 Historical release notes live next to this process doc:
 
-- [0.4.3: Durable Subagent Waits](0.4.3.md)
 - [0.4.2: Honest Continuation State](0.4.2.md)
 - [0.4.1: Installed Contract Fixes](0.4.1.md)
 - [0.4.0: Cross-Harness Goals](0.4.0.md)
@@ -57,7 +56,7 @@ node internal/cli/check-publish-version.mjs
 ```
 
 3. Commit and push the version change.
-4. Create and publish a GitHub release whose tag matches the package version, for example `v0.4.3`. The workflow refuses to publish when the release tag and `package.json` version differ.
+4. Create and publish a GitHub release whose tag matches the package version, for example `v0.4.2`. The workflow refuses to publish when the release tag and `package.json` version differ.
 5. Confirm the GitHub Actions workflow `Publish npm package` completed.
 6. Verify npm:
 

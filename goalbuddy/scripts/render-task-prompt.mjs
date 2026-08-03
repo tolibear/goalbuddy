@@ -280,7 +280,7 @@ function receiptSchema(role) {
   };
 }
 
-export function formatPrompt(payload) {
+export function formatPrompt(payload, { includePmObservationContract = true } = {}) {
   const lines = [
     "GoalBuddy task prompt",
     "",
@@ -315,9 +315,14 @@ export function formatPrompt(payload) {
     `- Claude Code Agent tool subagent_type: ${payload.metadata.required_claude_subagent_type || "do not spawn; run as PM"}`,
     "- Do not substitute generic scout, worker, judge, Explore, or general-purpose agents for GoalBuddy agents.",
     "- If the required GoalBuddy agent is unavailable, stop spawning and continue as PM fallback or install agents.",
-    "- One wait_agent timeout ends only that observation window: inspect actual agent_status and delivered messages, then continue bounded waits while it is running.",
-    "- Scout and Judge are read-only, so file changes are never their progress signal; do not interrupt them before 20 minutes or a Worker before 30 minutes absent explicit error, confirmed unavailability, scope violation, or help request.",
-    "- Interrupt only for terminal error, confirmed unavailability, scope violation, or multiple observation windows plus evidence of no execution. Never use PM fallback without proven failure. Use wait timeouts of at least 1200 seconds for external Claude Opus architecture reviews, and give short user updates during long waits.",
+  );
+  if (includePmObservationContract) {
+    lines.push(
+      "- Native wait_agent timeouts are non-terminal 60-second observation windows; after each one, inspect delivered messages and the live agent list or status (Codex: list_agents).",
+      "- Scout and Judge are read-only, so file changes are never their progress signal. Escalate after 20 windows for Scout/Judge or 30 for Worker with one status request and at most five more windows; then interrupt and use PM fallback only if there is still no reply or execution evidence.",
+    );
+  }
+  lines.push(
     "",
     "Task:",
     `- id: ${payload.task.id}`,

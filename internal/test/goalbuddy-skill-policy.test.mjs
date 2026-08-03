@@ -99,15 +99,18 @@ test("the execution contract carries the /goal runtime rules", () => {
     assert.match(text, /Agent tool with that exact `subagent_type` \(`goal-scout`, `goal-worker`, or `goal-judge`\)/);
     assert.match(text, /Do not substitute `Explore`, `general-purpose`, or another generic agent/);
     assert.match(text, /`unknown` is not evidence that the agent is unavailable/);
-    assert.match(text, /Durable Subagent Wait Contract/);
-    assert.match(text, /One `wait_agent` timeout ends only that observation window/);
-    assert.match(text, /inspect the actual `agent_status` and delivered messages/);
-    assert.match(text, /Scout and Judge are read-only: file changes are never their progress signal/);
-    assert.match(text, /Scout or Judge before 20 minutes, or a Worker before 30 minutes/);
-    assert.match(text, /multiple observation windows plus evidence of no execution/);
-    assert.match(text, /Never replace a still-running agent with PM fallback merely because one wait timed out/);
-    assert.match(text, /at least 1200 seconds/);
-    assert.match(text, /short update during long waits/);
+    assert.match(text, /Native Codex Subagent Wait Contract/);
+    assert.match(text, /native `wait_agent` timeout ends only a non-terminal observation window/);
+    assert.match(text, /Observe in 60-second windows/);
+    assert.match(text, /for Codex, `list_agents`/);
+    assert.match(text, /static `agent_statuses` installation report/);
+    assert.match(text, /Scout and Judge are read-only, so file changes are never their progress signal/);
+    assert.match(text, /Scout or Judge up to 20 observation windows and a native Worker up to 30/);
+    assert.match(text, /allow at most five more 60-second windows/);
+    assert.match(text, /record bounded-wait exhaustion/);
+    assert.match(text, /external `--timeout` is a hard execution deadline, not an observation window/);
+    assert.match(text, /Inspect the returned scope check and the working tree for partial writes/);
+    assert.match(text, /at least `--timeout 1200`/);
     assert.doesNotMatch(text, /After one `wait_agent` timeout with no visible allowed-file changes/);
   }
 });

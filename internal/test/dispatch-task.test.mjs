@@ -76,7 +76,7 @@ function runDispatch(root, bin, extraArgs = []) {
 test("dispatch runs an external worker and reports a clean scope", () => {
   const root = makeProject();
   try {
-    const bin = fakeHarnessBin(root, "codex", `echo "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
+    const bin = fakeHarnessBin(root, "codex", `if printf '%s\\n' "$@" | grep -q 'Native wait_agent timeouts'; then exit 42; fi\necho "export const widget = 2;" > src/widget.mjs\necho '${RECEIPT}'`);
     const result = runDispatch(root, bin);
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const report = JSON.parse(result.stdout);
@@ -166,10 +166,10 @@ test("dispatch rejects unsupported harness targets", () => {
   }
 });
 
-test("dispatch times out hung harness CLIs", () => {
+test("external dispatch timeout is terminal and still reports partial writes", () => {
   const root = makeProject();
   try {
-    const bin = fakeHarnessBin(root, "codex", "sleep 30");
+    const bin = fakeHarnessBin(root, "codex", "echo 'partial external write' >> README.md\nwhile :; do :; done");
     const result = spawnSync(process.execPath, [dispatcher, "docs/goals/one", "--to", "codex", "--timeout", "1", "--json"], {
       cwd: root,
       encoding: "utf8",
@@ -177,7 +177,11 @@ test("dispatch times out hung harness CLIs", () => {
     });
     assert.equal(result.status, 1, result.stdout);
     const report = JSON.parse(result.stdout);
-    assert.match(report.error, /timed out after 1s/);
+    assert.match(report.error, /hard execution timeout after 1s/);
+    assert.equal(report.timeout_semantics, "hard_execution_deadline");
+    assert.equal(report.scope_check.status, "violations");
+    assert.deepEqual(report.scope_check.violations, ["README.md"]);
+    assert.equal(report.receipt, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
