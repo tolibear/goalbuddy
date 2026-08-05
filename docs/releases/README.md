@@ -4,6 +4,8 @@ The repository has one canonical, running release history: [CHANGELOG.md](../../
 
 This directory contains the release process only. Published GitHub Releases remain immutable public snapshots and should use the matching section of `CHANGELOG.md` as their source copy.
 
+Keep every changelog section and GitHub Release body client-safe. Describe the observed behavior generically and never include client, customer, company, donor, or private project names. Public contributor attribution is allowed.
+
 GoalBuddy publishes the `goalbuddy` npm package from GitHub Actions using npm trusted publishing. This avoids long-lived npm write tokens and lets npm generate provenance for future releases.
 
 ## One-Time npm Setup
