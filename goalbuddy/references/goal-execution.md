@@ -1,16 +1,17 @@
-# GoalBuddy `/goal` Execution Contract
+# GoalBuddy Execution Contract
 
-This document governs `/goal` runs: the execution mode. Board preparation (`$goal-prep` in Codex, `/goal-prep` in Claude Code) is governed by `SKILL.md` in this skill directory; do not mix the modes. Shared foundations — the intake compiler, slice sizing policy, four primitives, control files, board schema, seed boards, and agent availability states — are defined in `SKILL.md` and apply here unchanged.
+This document governs Codex `/goal` and Claude Code `/goalbuddy` runs: the execution mode. Board preparation (`$goal-prep` in Codex, `/goal-prep` in Claude Code) is governed by `SKILL.md` in this skill directory; do not mix the modes. Shared foundations, including the intake compiler, slice sizing policy, four primitives, control files, board schema, seed boards, and agent availability states, are defined in `SKILL.md` and apply here unchanged.
 
 The run command is:
 
 ```text
-/goal Follow docs/goals/<slug>/goal.md.
+Codex:      /goal Follow docs/goals/<slug>/goal.md.
+Claude Code: /goalbuddy Follow docs/goals/<slug>/goal.md.
 ```
 
-## Direct `/goal` Entry
+## Direct Execution Entry
 
-When `/goal` is invoked with raw user intent instead of an existing `docs/goals/<slug>/goal.md` path, run the Intake Compiler (see `SKILL.md`) before doing implementation work. The PM should not treat raw `/goal` text as an execution plan until it has:
+When `/goal` or `/goalbuddy` is invoked with raw user intent instead of an existing `docs/goals/<slug>/goal.md` path, run the Intake Compiler (see `SKILL.md`) before doing implementation work. The PM should not treat raw command text as an execution plan until it has:
 
 - classified the input shape;
 - preserved any existing plan facts;
@@ -20,7 +21,7 @@ When `/goal` is invoked with raw user intent instead of an existing `docs/goals/
 - selected the safest first active task;
 - either asked the required guided intake question or written `goal.md` and `state.yaml` from a sufficiently clear intake.
 
-When running the Intake Compiler inside a `/goal` run, apply its extraction and diagnostic logic, but skip the prep-turn terminal steps: do not print the `/goal` command and stop. Once the board is written, continue directly into execution.
+When running the Intake Compiler inside an execution run, apply its extraction and diagnostic logic, but skip the prep-turn terminal steps: do not print another execution command and stop. Once the board is written, continue directly into execution.
 
 If the raw input is detailed and already contains a plan, the first board task should validate and operationalize that plan rather than rediscovering from scratch. If the raw input is vague, run the diagnostic intake before creating the board unless the user explicitly says to use defaults. If the raw input is blocked by authority, policy, destructive action, credentials, or ambiguous completion proof, ask one guided question with options or create the smallest safe read-only task only after the user chooses to proceed.
 
@@ -50,9 +51,9 @@ Rules for external dispatch:
 
 ## `/goal` Default Bias: Users Want Work Done
 
-This section applies after the user starts `/goal Follow docs/goals/<slug>/goal.md.` It does not apply to the initial `$goal-prep` board-preparation turn.
+This section applies after the user starts Codex `/goal Follow docs/goals/<slug>/goal.md.` or Claude Code `/goalbuddy Follow docs/goals/<slug>/goal.md.` It does not apply to the initial `$goal-prep` board-preparation turn.
 
-Unless the user explicitly asks for planning only, treat a `/goal` run as a request for work to happen.
+Unless the user explicitly asks for planning only, treat a `/goal` or `/goalbuddy` run as a request for work to happen.
 
 Planning, Scout findings, Judge decisions, and a queued Worker task are not terminal outcomes when the user's original ask is for a working capability, automation, fix, cleanup, or backend/frontend behavior. They are setup for execution.
 
@@ -62,7 +63,7 @@ For execution goals, the default run is continuous:
 Discover enough evidence, choose the largest reversible local work package, implement it, verify it, review only at risk or phase boundaries, then immediately choose and execute the next work package until the full original outcome is complete.
 ```
 
-If the first `/goal` run reaches a Judge decision that names a safe Worker task with `allowed_files`, `verify`, and `stop_if`, the PM should activate that Worker and continue in the same run unless a stop condition applies.
+If the first execution run reaches a Judge decision that names a safe Worker task with `allowed_files`, `verify`, and `stop_if`, the PM should activate that Worker and continue in the same run unless a stop condition applies.
 
 After a verified Worker package, do not mark the thread goal complete merely because that package passed. For broad automation or product goals, continue by reopening or advancing the board to the next safe Worker package until the full owner outcome is complete.
 

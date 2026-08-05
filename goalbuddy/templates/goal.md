@@ -87,7 +87,8 @@ If this charter and `state.yaml` disagree, `state.yaml` wins for task status, ac
 ## Run Command
 
 ```text
-/goal Follow docs/goals/<slug>/goal.md.
+Codex: /goal Follow docs/goals/<slug>/goal.md.
+Claude Code: /goalbuddy Follow docs/goals/<slug>/goal.md.
 ```
 
 ## PM Loop

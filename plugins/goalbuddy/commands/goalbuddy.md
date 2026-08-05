@@ -2,7 +2,7 @@
 description: Run the GoalBuddy execution loop against a prepared goal board
 ---
 
-Run the GoalBuddy `/goal` execution loop.
+Run the GoalBuddy execution loop.
 
 Goal: $ARGUMENTS
 

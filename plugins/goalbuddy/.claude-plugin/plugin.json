@@ -1,7 +1,7 @@
 {
   "name": "goalbuddy",
-  "version": "0.4.2",
-  "description": "Turn broad Codex and Claude Code work into pressured /goal runs with oracles, local boards, receipts, and verification.",
+  "version": "0.4.3",
+  "description": "Turn broad Codex and Claude Code work into pressured goal runs with oracles, local boards, receipts, and verification.",
   "author": {
     "name": "tolibear",
     "email": "support@tolibear.com",
