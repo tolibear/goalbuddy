@@ -163,7 +163,51 @@ function promptWarnings(board, task) {
     }
   }
   warnings.push(...microSliceWarnings(board, task));
+  warnings.push(...processHeavyWarnings(board.tasks.filter(Boolean), board.activeTask || null, board.goal.status));
   return warnings;
+}
+
+// Process-heavy board heuristics. Advisory only: they never fail a board and never ask to
+// rewrite completed history; only future work should be consolidated. Tuning knobs:
+// - largeUnfinished: unfinished (non-done) cards at/above this count warn, including on
+//   blocked boards with no active task.
+// - ratioMinTasks / processToWorkerRatio: once the board has ratioMinTasks cards, warn when
+//   process cards (pm + judge + scout) exceed processToWorkerRatio x Worker cards.
+// - processRun: warn after this many consecutive dispatched (non-queued) process cards
+//   since the last Worker card, because repeated planning/audit adds no new capability.
+// Keep this function byte-identical to processHeavyWarnings in scripts/check-goal-state.mjs
+// so warning conditions and messages stay in sync across the checker and the prompt renderer.
+function processHeavyWarnings(tasks, activeTaskId, goalStatus) {
+  const PROCESS_HEAVY_THRESHOLDS = {
+    largeUnfinished: 12,
+    ratioMinTasks: 12,
+    processToWorkerRatio: 2,
+    processRun: 4,
+  };
+  const { largeUnfinished, ratioMinTasks, processToWorkerRatio, processRun } = PROCESS_HEAVY_THRESHOLDS;
+  const found = [];
+  const consolidate = "Preserve completed history and consolidate only future work into roughly 3-7 outcome-sized phases. Duration alone is not a reason to use GoalBuddy; native Goal may fit a long single-owner sequential run better.";
+  const isWorker = (task) => task.type?.toLowerCase() === "worker";
+  const unfinished = tasks.filter((task) => task.status !== "done");
+  if (unfinished.length >= largeUnfinished) {
+    const stalled = goalStatus !== "active" && !activeTaskId ? " on a blocked board with no active task" : "";
+    found.push(`Board is process-heavy: ${unfinished.length} unfinished tasks${stalled}. ${consolidate}`);
+  }
+  const workerCount = tasks.filter(isWorker).length;
+  const processCount = tasks.length - workerCount;
+  if (tasks.length >= ratioMinTasks && processCount > processToWorkerRatio * Math.max(workerCount, 1)) {
+    found.push(`Board is process-heavy: ${processCount} PM/Judge/Scout tasks vs ${workerCount} Worker tasks. One task should normally include implementation, targeted tests, CI/readback, and proof when authority and risk stay the same. Reserve Scout for material uncertainty and Judge for phase, risk, rejected-verification, or final boundaries.`);
+  }
+  const dispatched = tasks.filter((task) => task.status !== "queued");
+  let run = 0;
+  for (let index = dispatched.length - 1; index >= 0; index -= 1) {
+    if (isWorker(dispatched[index])) break;
+    run += 1;
+  }
+  if (run >= processRun) {
+    found.push(`Board is process-heavy: ${run} consecutive planning, audit, or process-only tasks since the last Worker task added no new verifiable capability. ${consolidate}`);
+  }
+  return found;
 }
 
 function microSliceWarnings(board, task) {
