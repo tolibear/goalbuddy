@@ -4,6 +4,8 @@ This is GoalBuddy's single, running release history. New releases go at the top.
 
 Dates are public npm publication dates. Historical entries describe the product as it behaved in that release, with explicit notes where a later release superseded the behavior.
 
+Release history must describe product behavior with anonymized evidence. Never include client, customer, company, donor, or private project names. Public contributor handles may appear only for attribution.
+
 ## 0.4.3: Restore Claude's Native `/goal` (2026-08-05)
 
 - **Claude Code keeps its native `/goal`.** GoalBuddy now installs its execution loop as `/goalbuddy`, removing the namespace collision introduced in 0.4.0.

@@ -14,6 +14,8 @@ test("release history stays in one running changelog", () => {
   const changelog = readFileSync("CHANGELOG.md", "utf8");
   assert.match(changelog, /single, running release history/);
   assert.match(changelog, /Do not create separate versioned changelog files/);
+  assert.match(changelog, /Never include client, customer, company, donor, or private project names/);
+  assert.doesNotMatch(changelog, /FL Donate/i);
 
   for (const version of [
     "0.4.3", "0.4.2", "0.4.1", "0.4.0",
