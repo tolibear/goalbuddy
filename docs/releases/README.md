@@ -1,15 +1,8 @@
 # Release Process
 
-Historical release notes live next to this process doc:
+The repository has one canonical, running release history: [CHANGELOG.md](../../CHANGELOG.md). Add every future release to the top of that file. Do not create a separate `docs/releases/<version>.md` file.
 
-- [0.4.3: Restore Claude's Native /goal](0.4.3.md)
-- [0.4.2: Honest Continuation State](0.4.2.md)
-- [0.4.1: Installed Contract Fixes](0.4.1.md)
-- [0.4.0: Cross-Harness Goals](0.4.0.md)
-- [0.3.9: Marketplace and Board Runtime Polish](0.3.9.md)
-- [0.3.8: Board Hub Guardrails](0.3.8.md)
-- [0.3.7: Goalmaxxed](0.3.7.md)
-- [0.3.5: Subgoals, Parallel Agents, and Dark Mode](0.3.5.md)
+This directory contains the release process only. Published GitHub Releases remain immutable public snapshots and should use the matching section of `CHANGELOG.md` as their source copy.
 
 GoalBuddy publishes the `goalbuddy` npm package from GitHub Actions using npm trusted publishing. This avoids long-lived npm write tokens and lets npm generate provenance for future releases.
 
@@ -47,7 +40,7 @@ Starting in `0.3.0`, the installer is target-aware: `npx goalbuddy` installs int
 
 ## Release Flow
 
-1. Update `package.json` version.
+1. Update `package.json` and both plugin manifest versions, then add the new release section to the top of `CHANGELOG.md`.
 2. Run local checks:
 
 ```bash
@@ -56,8 +49,8 @@ npm run pack:dry-run
 node internal/cli/check-publish-version.mjs
 ```
 
-3. Commit and push the version change.
-4. Create and publish a GitHub release whose tag matches the package version, for example `v0.4.3`. The workflow refuses to publish when the release tag and `package.json` version differ.
+3. Commit and push the version and changelog changes together.
+4. Create and publish a GitHub release whose tag matches the package version, for example `v0.4.3`, using the matching `CHANGELOG.md` section as its release body. The workflow refuses to publish when the release tag and `package.json` version differ.
 5. Confirm the GitHub Actions workflow `Publish npm package` completed.
 6. Verify npm:
 

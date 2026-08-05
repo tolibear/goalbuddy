@@ -178,7 +178,7 @@ Multiple local boards reuse one readable `goalbuddy.localhost` hub with an in-he
 
 Custom external integrations should be built as ordinary repo work with a concrete implementation plan, not installed from a GoalBuddy catalog.
 
-See [GoalBuddy 0.4.3: Restore Claude's Native /goal](docs/releases/0.4.3.md) for the latest release notes.
+See the [running changelog](CHANGELOG.md) for the complete release history. The latest published snapshot is [GoalBuddy 0.4.3: Restore Claude's Native /goal](https://github.com/tolibear/goalbuddy/releases/tag/v0.4.3).
 
 <p align="center">
   <img src="internal/assets/goalbuddy-live-board.jpg" alt="GoalBuddy local live board open next to Codex while Scout, Judge, and Worker tasks populate." width="100%">
