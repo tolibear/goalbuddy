@@ -167,16 +167,12 @@ function promptWarnings(board, task) {
   return warnings;
 }
 
-// Process-heavy board heuristics. Advisory only: they never fail a board and never ask to
-// rewrite completed history; only future work should be consolidated. Tuning knobs:
-// - largeUnfinished: unfinished (non-done) cards at/above this count warn, including on
-//   blocked boards with no active task.
-// - ratioMinTasks / processToWorkerRatio: once the board has ratioMinTasks cards, warn when
-//   process cards (pm + judge + scout) exceed processToWorkerRatio x Worker cards.
-// - processRun: warn after this many consecutive dispatched (non-queued) process cards
-//   since the last Worker card, because repeated planning/audit adds no new capability.
-// Keep this function byte-identical to processHeavyWarnings in scripts/check-goal-state.mjs
-// so warning conditions and messages stay in sync across the checker and the prompt renderer.
+// Advisory process-heavy heuristics: they never fail a board and never rewrite completed
+// history; only future work should be consolidated. Tune via PROCESS_HEAVY_THRESHOLDS:
+// largeUnfinished (unfinished cards, including blocked boards with no active task),
+// ratioMinTasks + processToWorkerRatio (PM/Judge/Scout cards vs Worker cards), and processRun
+// (consecutive dispatched process-only cards since the last Worker card). Keep this function
+// byte-identical to processHeavyWarnings in scripts/check-goal-state.mjs.
 function processHeavyWarnings(tasks, activeTaskId, goalStatus) {
   const PROCESS_HEAVY_THRESHOLDS = {
     largeUnfinished: 12,
