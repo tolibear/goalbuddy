@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3: Restore Claude's Native /goal (2026-08-05)
+
+- **Claude Code keeps its native `/goal`.** GoalBuddy now installs its execution loop as `/goalbuddy`, removing the namespace collision introduced in 0.4.0.
+- **Safe migration.** Install and update remove the old `~/.claude/commands/goal.md` only when the file is GoalBuddy-authored. User-authored files are preserved and reported as a collision for the owner to resolve.
+- **Harness-specific handoffs.** Goal Prep, `init`, and `resume` now print Codex `/goal` and Claude Code `/goalbuddy` commands explicitly while both harnesses continue to share the same repo-native board.
+- **Regression coverage.** Tests verify fresh installs, owned-command migration, preservation of user files, doctor collision detection, packed npm contents, and the split continuation commands.
+
 ## 0.4.2: Honest Continuation State (2026-07-31)
 
 - **Machine-checkable stop decisions.** `goalbuddy can-stop <goal>` fails closed while a valid active task remains and permits exit only for a receipt-backed complete outcome or the exact validated terminal approval wait.

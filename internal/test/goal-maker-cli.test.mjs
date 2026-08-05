@@ -1167,6 +1167,8 @@ test("default command installs Codex and Claude Code when both homes are provide
     assert.equal(existsSync(join(codexHome, "config.toml")), true);
     assert.equal(existsSync(join(claudeHome, "skills", "goal-prep", "SKILL.md")), true);
     assert.equal(existsSync(join(claudeHome, "agents", "goal-worker.md")), true);
+    assert.equal(existsSync(join(claudeHome, "commands", "goalbuddy.md")), true);
+    assert.equal(existsSync(join(claudeHome, "commands", "goal.md")), false);
     assert.equal(existsSync(join(claudeHome, "commands", "goal-prep.md")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1382,19 +1384,70 @@ test("installs the Claude skill as goal-prep and migrates the legacy directory",
   }
 });
 
-test("installs the /goal command for Claude Code", () => {
+test("installs /goalbuddy without shadowing Claude Code's native /goal", () => {
   const root = mkdtempSync(join(tmpdir(), "goalbuddy-goal-command-"));
   try {
     const claudeHome = join(root, "claude");
     const result = runGoalMaker(["install", "--target", "claude", "--claude-home", claudeHome, "--json"]);
     assert.equal(result.status, 0, result.stderr);
-    const command = readFileSync(join(claudeHome, "commands", "goal.md"), "utf8");
+    const command = readFileSync(join(claudeHome, "commands", "goalbuddy.md"), "utf8");
     assert.match(command, /GoalBuddy/);
     assert.match(command, /state\.yaml/);
+    assert.equal(existsSync(join(claudeHome, "commands", "goal.md")), false);
 
     const doctor = runGoalMaker(["doctor", "--target", "claude", "--claude-home", claudeHome]);
     assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
-    assert.equal(JSON.parse(doctor.stdout).goal_command_present, true);
+    const report = JSON.parse(doctor.stdout);
+    assert.equal(report.goal_command_present, true);
+    assert.equal(report.native_goal_available, true);
+    assert.equal(report.legacy_goal_command_present, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("install removes an old GoalBuddy-owned /goal command", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-goal-command-migration-"));
+  try {
+    const claudeHome = join(root, "claude");
+    const legacyCommand = join(claudeHome, "commands", "goal.md");
+    mkdirSync(join(claudeHome, "commands"), { recursive: true });
+    const legacyBody = readFileSync("plugins/goalbuddy/commands/goalbuddy.md", "utf8")
+      .replace("Run the GoalBuddy execution loop.\n", "Run the GoalBuddy `/goal` execution loop.\n");
+    writeFileSync(legacyCommand, legacyBody);
+
+    const result = runGoalMaker(["install", "--target", "claude", "--claude-home", claudeHome, "--json"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.legacy_goal_command_cleanup.removed, true);
+    assert.equal(existsSync(legacyCommand), false);
+    assert.equal(existsSync(join(claudeHome, "commands", "goalbuddy.md")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("install preserves a user-authored /goal command and doctor reports the collision", () => {
+  const root = mkdtempSync(join(tmpdir(), "goalbuddy-user-goal-command-"));
+  try {
+    const claudeHome = join(root, "claude");
+    const legacyCommand = join(claudeHome, "commands", "goal.md");
+    mkdirSync(join(claudeHome, "commands"), { recursive: true });
+    writeFileSync(legacyCommand, "My private GoalBuddy helper.\n");
+
+    const result = runGoalMaker(["install", "--target", "claude", "--claude-home", claudeHome, "--json"]);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.legacy_goal_command_cleanup.preserved, true);
+    assert.match(report.warnings.join("\n"), /native \/goal may remain shadowed/);
+    assert.equal(readFileSync(legacyCommand, "utf8"), "My private GoalBuddy helper.\n");
+
+    const doctor = runGoalMaker(["doctor", "--target", "claude", "--claude-home", claudeHome]);
+    assert.equal(doctor.status, 1, doctor.stderr || doctor.stdout);
+    const doctorReport = JSON.parse(doctor.stdout);
+    assert.equal(doctorReport.native_goal_available, false);
+    assert.equal(doctorReport.legacy_goal_command_present, true);
+    assert.equal(doctorReport.legacy_goal_command_owned, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1475,8 +1528,10 @@ test("resume lists boards and prints the handoff command for active goals", () =
     assert.match(result.stdout, /one goal/);
     assert.match(result.stdout, /two goal/);
     assert.match(result.stdout, /T001 \(worker\) Fix the widget in one\./);
-    assert.match(result.stdout, /Resume in any harness \(Codex or Claude Code\)/);
+    assert.match(result.stdout, /Resume in Codex/);
+    assert.match(result.stdout, /Resume in Claude Code/);
     assert.match(result.stdout, /\/goal Follow docs\/goals\/one\/goal\.md\./);
+    assert.match(result.stdout, /\/goalbuddy Follow docs\/goals\/one\/goal\.md\./);
     assert.doesNotMatch(result.stdout, /\/goal Follow docs\/goals\/two\/goal\.md\./);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1495,6 +1550,7 @@ test("resume --json returns structured boards", () => {
     assert.equal(report.boards[0].status, "active");
     assert.equal(report.boards[0].active_task.id, "T001");
     assert.equal(report.boards[0].run_command, "/goal Follow docs/goals/one/goal.md.");
+    assert.equal(report.boards[0].claude_run_command, "/goalbuddy Follow docs/goals/one/goal.md.");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1536,6 +1592,7 @@ test("init scaffolds a working board from the bundled templates", () => {
     const report = JSON.parse(created.stdout);
     assert.equal(report.slug, "ship-widgets");
     assert.equal(report.run_command, "/goal Follow docs/goals/ship-widgets/goal.md.");
+    assert.equal(report.claude_run_command, "/goalbuddy Follow docs/goals/ship-widgets/goal.md.");
     const state = readFileSync(join(root, "docs", "goals", "ship-widgets", "state.yaml"), "utf8");
     assert.match(state, /version: 2/);
     assert.match(state, /slug: "ship-widgets"/);

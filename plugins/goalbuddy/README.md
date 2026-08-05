@@ -2,15 +2,16 @@
 
 GoalBuddy packages the canonical `goal-prep` skill as a plugin so teams can install the reusable workflow in **Codex** and **Claude Code**, while keeping the npm CLI for local setup, doctor checks, and the built-in local board surface.
 
-Version 0.3.9 keeps the Goalmaxxed core and hardens marketplace installs, local board rendering, and PM runtime guidance for approval waits and board-health checks.
+Version 0.4.3 preserves Claude Code's native `/goal` command and installs GoalBuddy execution as `/goalbuddy`.
 
 ## What It Contains
 
 - `.codex-plugin/plugin.json`: Codex plugin manifest and Codex UI copy.
 - `.claude-plugin/plugin.json`: Claude Code plugin manifest.
-- `skills/goalbuddy/`: the installable GoalBuddy skill payload (shared by both platforms).
+- `skills/goal-prep/`: the installable GoalBuddy skill payload (shared by both platforms).
 - `agents/`: Claude Code subagent definitions (`goal-scout.md`, `goal-judge.md`, `goal-worker.md`).
-- `skills/goalbuddy/SKILL.md`: canonical `$goal-prep` / `/goal-prep` entry point.
+- `commands/goalbuddy.md`: Claude Code's GoalBuddy execution command, kept separate from native `/goal`.
+- `skills/goal-prep/SKILL.md`: canonical `$goal-prep` / `/goal-prep` entry point.
 - `assets/goalbuddy-icon.svg`: lightweight plugin icon.
 
 ## Local Testing
@@ -29,7 +30,7 @@ npx goalbuddy check-update
 npx goalbuddy
 ```
 
-This installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill and Scout/Judge/Worker subagents into `~/.claude/`. The skill surfaces `/goal-prep` in Claude Code.
+This installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill, `/goalbuddy` command, and Scout/Judge/Worker subagents into `~/.claude/`. The skill surfaces `/goal-prep` in Claude Code.
 
 ## Install One Target
 
@@ -43,6 +44,8 @@ This installs the GoalBuddy skill and the three Scout/Judge/Worker subagents int
 ```text
 /goal-prep
 ```
+
+After Goal Prep creates a board, start it with Codex `/goal` or Claude Code `/goalbuddy`, as printed by the tool.
 
 Or install the npm package globally:
 

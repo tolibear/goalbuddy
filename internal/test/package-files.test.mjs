@@ -61,10 +61,12 @@ test("the packed npm artifact installs the Claude contract and role agents", () 
       report.agents.map((agent) => agent.file).sort(),
       ["goal-judge.md", "goal-scout.md", "goal-worker.md"],
     );
+    assert.equal(existsSync(join(claudeHome, "commands", "goalbuddy.md")), true);
+    assert.equal(existsSync(join(claudeHome, "commands", "goal.md")), false);
 
     const installedContract = join(claudeHome, "skills", "goal-prep", "references", "goal-execution.md");
     assert.equal(existsSync(installedContract), true);
-    assert.match(readFileSync(installedContract, "utf8"), /governs `\/goal` runs/);
+    assert.match(readFileSync(installedContract, "utf8"), /governs Codex `\/goal` and Claude Code `\/goalbuddy` runs/);
     for (const file of ["goal-judge.md", "goal-scout.md", "goal-worker.md"]) {
       assert.equal(existsSync(join(claudeHome, "agents", file)), true);
     }

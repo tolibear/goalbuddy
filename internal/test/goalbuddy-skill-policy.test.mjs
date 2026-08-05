@@ -29,7 +29,8 @@ function fakeCodexBin(root) {
 
 test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
   for (const text of [canonicalSkill, pluginSkill]) {
-    assert.match(text, /\$goal-prep`: prepare intake, `goal\.md`, `state\.yaml`, and the starter `\/goal` command, then stop/);
+    assert.match(text, /\$goal-prep` or `\/goal-prep`: prepare intake, `goal\.md`, `state\.yaml`, and the starter execution commands, then stop/);
+    assert.match(text, /Claude Code `\/goalbuddy Follow docs\/goals\/<slug>\/goal\.md\.`/);
     assert.match(text, /During a `\$goal-prep` turn, do not perform the user's requested work/);
     assert.match(text, /Do not refresh or load named skills/);
     assert.match(text, /Do not load that skill, browse that repo, or generate those assets during `\$goal-prep`/);
@@ -60,14 +61,14 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
   }
 });
 
-test("the execution contract carries the /goal runtime rules", () => {
+test("the execution contract carries the harness-specific runtime rules", () => {
   for (const text of [canonicalExecution, pluginExecution]) {
-    assert.match(text, /governs `\/goal` runs/);
+    assert.match(text, /governs Codex `\/goal` and Claude Code `\/goalbuddy` runs/);
     assert.match(text, /node <skill-path>\/scripts\/render-task-prompt\.mjs docs\/goals\/<slug>/);
     assert.match(text, /node <skill-path>\/scripts\/parallel-plan\.mjs docs\/goals\/<slug>/);
     assert.match(text, /Operator Escalation/);
     assert.match(text, /ask the operator one concise question before creating the external artifact/);
-    assert.match(text, /This section applies after the user starts `\/goal Follow docs\/goals\/<slug>\/goal\.md\.`/);
+    assert.match(text, /This section applies after the user starts Codex `\/goal Follow docs\/goals\/<slug>\/goal\.md\.` or Claude Code `\/goalbuddy Follow docs\/goals\/<slug>\/goal\.md\.`/);
     assert.match(text, /exact human approval phrase is the only remaining blocker/);
     assert.match(text, /waiting_for_user_approval: true/);
     assert.match(text, /required_reply: "<exact phrase>"/);

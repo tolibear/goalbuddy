@@ -24,6 +24,9 @@ const canonicalSkillName = "goal-prep";
 const canonicalSkillDirectory = "goalbuddy";
 const legacyCliName = "goal-maker";
 const legacySkillName = "goal-maker";
+const legacyClaudeGoalCommandHashes = new Set([
+  "586a0839302239858cce64f954666e8690c5ddef036e397adfd9456eed4738e2",
+]);
 const skillSource = join(packageRoot, canonicalSkillDirectory);
 const claudePluginSource = join(packageRoot, "plugins", "goalbuddy");
 const packageInfo = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
@@ -382,6 +385,10 @@ function legacyClaudeCommandPath() {
   return join(claudeHome(), "commands", "goal-prep.md");
 }
 
+function legacyClaudeGoalCommandPath() {
+  return join(claudeHome(), "commands", "goal.md");
+}
+
 function installClaudeSkill({ quiet = false } = {}) {
   const target = claudeSkillRoot();
   if (!existsSync(skillSource)) {
@@ -446,11 +453,11 @@ function installClaudeAgents({ quiet = false } = {}) {
 }
 
 function claudeGoalCommandPath() {
-  return join(claudeHome(), "commands", "goal.md");
+  return join(claudeHome(), "commands", "goalbuddy.md");
 }
 
 function installClaudeGoalCommand({ quiet = false } = {}) {
-  const source = join(claudePluginSource, "commands", "goal.md");
+  const source = join(claudePluginSource, "commands", "goalbuddy.md");
   const target = claudeGoalCommandPath();
   if (!existsSync(source)) return { status: "missing_source", path: target };
   const sourceHash = sha256(readFileSync(source));
@@ -460,6 +467,30 @@ function installClaudeGoalCommand({ quiet = false } = {}) {
   const status = previousHash ? previousHash === sourceHash ? "unchanged" : "updated" : "installed";
   if (!quiet) console.log(`installed ${target}`);
   return { status, path: target };
+}
+
+function cleanupLegacyClaudeGoalCommand({ quiet = false } = {}) {
+  const legacyPath = legacyClaudeGoalCommandPath();
+  if (!existsSync(legacyPath)) {
+    return { removed: false, preserved: false, owned_by_goalbuddy: false, path: legacyPath };
+  }
+
+  const ownedByGoalBuddy = fileIsLegacyGoalBuddyCommand(legacyPath);
+  if (!ownedByGoalBuddy) {
+    return { removed: false, preserved: true, owned_by_goalbuddy: false, path: legacyPath };
+  }
+
+  rmSync(legacyPath, { force: true });
+  if (!quiet) console.log(`removed legacy ${legacyPath} (GoalBuddy now uses /goalbuddy)`);
+  return { removed: true, preserved: false, owned_by_goalbuddy: true, path: legacyPath };
+}
+
+function fileIsLegacyGoalBuddyCommand(path) {
+  try {
+    return legacyClaudeGoalCommandHashes.has(sha256(readFileSync(path)));
+  } catch {
+    return false;
+  }
 }
 
 function cleanupLegacyClaudeCommands({ quiet = false } = {}) {
@@ -483,11 +514,17 @@ async function buildClaudeInstallReport() {
     skill: installClaudeSkill({ quiet }),
     agents: installClaudeAgents({ quiet }),
     goal_command: installClaudeGoalCommand({ quiet }),
+    legacy_goal_command_cleanup: cleanupLegacyClaudeGoalCommand({ quiet }),
     legacy_commands_cleanup: cleanupLegacyClaudeCommands({ quiet }),
     warnings: [],
   };
 
   report.package.previous_version = report.skill.previous_version;
+  if (report.legacy_goal_command_cleanup.preserved) {
+    report.warnings.push(
+      `Preserved ${report.legacy_goal_command_cleanup.path} because it is not GoalBuddy-authored. Claude Code's native /goal may remain shadowed until you rename or remove that file.`,
+    );
+  }
   return report;
 }
 
@@ -558,6 +595,9 @@ function doctorClaude() {
   const legacySkillPresent = existsSync(legacySkillPath);
   const goalCommandPath = claudeGoalCommandPath();
   const goalCommandPresent = existsSync(goalCommandPath);
+  const legacyGoalCommandPath = legacyClaudeGoalCommandPath();
+  const legacyGoalCommandPresent = existsSync(legacyGoalCommandPath);
+  const legacyGoalCommandOwned = legacyGoalCommandPresent && fileIsLegacyGoalBuddyCommand(legacyGoalCommandPath);
 
   console.log(JSON.stringify({
     target: "claude",
@@ -569,13 +609,17 @@ function doctorClaude() {
     stale_agents: staleAgents,
     goal_command_present: goalCommandPresent,
     goal_command_path: goalCommandPath,
+    native_goal_available: !legacyGoalCommandPresent,
+    legacy_goal_command_present: legacyGoalCommandPresent,
+    legacy_goal_command_owned: legacyGoalCommandOwned,
+    legacy_goal_command_path: legacyGoalCommandPath,
     legacy_command_present: legacyCommandPresent,
     legacy_command_path: legacyCommandPath,
     legacy_skill_present: legacySkillPresent,
     legacy_skill_path: legacySkillPath,
   }, null, 2));
 
-  const installOk = installed && missingAgents.length === 0 && staleAgents.length === 0 && goalCommandPresent && !legacyCommandPresent && !legacySkillPresent;
+  const installOk = installed && missingAgents.length === 0 && staleAgents.length === 0 && goalCommandPresent && !legacyGoalCommandPresent && !legacyCommandPresent && !legacySkillPresent;
   process.exit(installOk ? 0 : 1);
 }
 
@@ -589,10 +633,14 @@ function printClaudeInstallReport(report) {
   console.log("");
   console.log(`Skill: ${report.skill.status} at ${report.skill.path}`);
   console.log(`Agents: ${summarizeStatuses(report.agents)}`);
-  console.log(`Command: /goal ${report.goal_command.status} at ${report.goal_command.path}`);
+  console.log(`Command: /goalbuddy ${report.goal_command.status} at ${report.goal_command.path}`);
+  if (report.legacy_goal_command_cleanup?.removed) {
+    console.log(`Removed legacy GoalBuddy command: ${report.legacy_goal_command_cleanup.path}`);
+  }
   if (report.legacy_commands_cleanup?.removed) {
     console.log(`Removed legacy command: ${report.legacy_commands_cleanup.path}`);
   }
+  for (const warning of report.warnings) console.log(`Warning: ${warning}`);
   console.log("");
   console.log("Next:");
   console.log(`  Restart Claude Code, then run: /goal-prep`);
@@ -665,7 +713,7 @@ When invoked through $${legacySkillName}:
 
 1. Tell the user Goal Maker has been rebranded to GoalBuddy.
 2. Show the canonical command: $${canonicalSkillName}.
-3. If the user wants to continue immediately, follow the same workflow as $${canonicalSkillName}: run diagnostic intake, create or repair \`docs/goals/<slug>/goal.md\` and \`state.yaml\`, preserve one active task, and print \`/goal Follow docs/goals/<slug>/goal.md.\` without starting \`/goal\` automatically.
+3. If the user wants to continue immediately, follow the same workflow as $${canonicalSkillName}: run diagnostic intake, create or repair \`docs/goals/<slug>/goal.md\` and \`state.yaml\`, preserve one active task, and print the matching execution commands for Codex (\`/goal Follow docs/goals/<slug>/goal.md.\`) and Claude Code (\`/goalbuddy Follow docs/goals/<slug>/goal.md.\`) without starting either automatically.
 
 This alias has the same invocation boundary as \`$${canonicalSkillName}\`: prepare the board only. Do not use or refresh named skills, inspect implementation files, browse references, research, generate assets, or perform the requested work until the user starts the printed \`/goal\` command.
 `;
@@ -1256,13 +1304,15 @@ function initGoal() {
     .replaceAll("<slug>", slug));
 
   const runCommand = `/goal Follow docs/goals/${slug}/goal.md.`;
+  const claudeRunCommand = `/goalbuddy Follow docs/goals/${slug}/goal.md.`;
   if (hasFlag("--json")) {
-    printJson({ created: goalDir, slug, title, run_command: runCommand });
+    printJson({ created: goalDir, slug, title, run_command: runCommand, claude_run_command: claudeRunCommand });
     return;
   }
   console.log(`Created GoalBuddy board: docs/goals/${slug}/`);
   console.log("Next: refine the charter and intake with $goal-prep (Codex) or /goal-prep (Claude Code),");
-  console.log(`or start execution: ${runCommand}`);
+  console.log(`or start execution in Codex: ${runCommand}`);
+  console.log(`or start execution in Claude Code: ${claudeRunCommand}`);
 }
 
 function receiptCli() {
@@ -1319,8 +1369,10 @@ async function resume() {
     console.log(`${board.title} — ${board.status} (${board.path})`);
     if (board.active_task) {
       console.log(`  Active task: ${board.active_task.id} (${board.active_task.type}) ${board.active_task.objective}`);
-      console.log("  Resume in any harness (Codex or Claude Code):");
+      console.log("  Resume in Codex:");
       console.log(`    ${board.run_command}`);
+      console.log("  Resume in Claude Code:");
+      console.log(`    ${board.claude_run_command}`);
       console.log(`  Full task prompt: npx ${canonicalCliName} prompt ${board.path}`);
     } else {
       console.log("  No active task.");
@@ -1351,9 +1403,10 @@ function describeBoard(goalDir, createBoardPayload) {
       status: payload.goal.status,
       active_task: activeTask ? { id: activeTask.id, type: activeTask.type, objective: activeTask.objective } : null,
       run_command: `/goal Follow ${path}/goal.md.`,
+      claude_run_command: `/goalbuddy Follow ${path}/goal.md.`,
     };
   } catch (error) {
-    return { path, slug: "", title: path, status: "unreadable", active_task: null, run_command: "", error: error.message };
+    return { path, slug: "", title: path, status: "unreadable", active_task: null, run_command: "", claude_run_command: "", error: error.message };
   }
 }
 
@@ -1565,9 +1618,14 @@ function printEverywhereInstallReport(report) {
   } else if (report.claude) {
     console.log(`Claude Code: skill ${report.claude.skill.status} at ${report.claude.skill.path}`);
     console.log(`Claude Code agents: ${summarizeStatuses(report.claude.agents)}`);
+    console.log(`Claude Code command: /goalbuddy ${report.claude.goal_command.status} at ${report.claude.goal_command.path}`);
+    if (report.claude.legacy_goal_command_cleanup?.removed) {
+      console.log(`Claude Code: removed legacy GoalBuddy command at ${report.claude.legacy_goal_command_cleanup.path}`);
+    }
     if (report.claude.legacy_commands_cleanup?.removed) {
       console.log(`Claude Code: removed legacy command at ${report.claude.legacy_commands_cleanup.path}`);
     }
+    for (const warning of report.claude.warnings || []) console.log(`Claude Code warning: ${warning}`);
   }
 
   if (report.errors.length) {

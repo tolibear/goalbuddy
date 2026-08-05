@@ -5,7 +5,7 @@ description: Goal Prep for GoalBuddy. Use for broad, long-running, stalled, vagu
 
 # Goal Prep
 
-`$goal-prep` (Codex) or `/goal-prep` (Claude Code) prepares a GoalBuddy board. It does not start `/goal` automatically, but the board and starter `/goal` command must be shaped so the next run continues into safe execution by default.
+`$goal-prep` (Codex) or `/goal-prep` (Claude Code) prepares a GoalBuddy board. It does not start execution automatically, but the board and harness-specific starter command must be shaped so the next run continues into safe execution by default.
 
 GoalBuddy is for autonomous, long-running Codex or Claude Code work where the PM thread may need to discover the work, define tasks, sequence them, delegate them, execute them, verify them, and keep going without the human decomposing every step.
 
@@ -27,12 +27,12 @@ No oracle, no serious goal. A goal oracle is the observable signal that tells th
 
 There are two different modes:
 
-- `$goal-prep`: prepare intake, `goal.md`, `state.yaml`, and the starter `/goal` command, then stop.
-- `/goal Follow docs/goals/<slug>/goal.md.`: execute the board, including Scout/Judge/Worker work.
+- `$goal-prep` or `/goal-prep`: prepare intake, `goal.md`, `state.yaml`, and the starter execution commands, then stop.
+- Codex `/goal Follow docs/goals/<slug>/goal.md.` or Claude Code `/goalbuddy Follow docs/goals/<slug>/goal.md.`: execute the board, including Scout/Judge/Worker work.
 
 This boundary is strict. `$goal-prep` is not a lightweight `/goal`; it is a board compiler.
 
-This document is the prep-mode contract plus the shared board model. The `/goal` execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every `/goal` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; exactly one active task unless disjoint write scopes are proven; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
+This document is the prep-mode contract plus the shared board model. The execution contract lives in `references/goal-execution.md` next to this file; read it at the start of every Codex `/goal` or Claude Code `/goalbuddy` run. If it cannot be read, these execution invariants still hold: `state.yaml` is board truth; exactly one active task unless disjoint write scopes are proven; Scout and Judge tasks are read-only; Worker tasks write only inside `allowed_files` and run their `verify` commands; every completed, blocked, or escalated task gets a receipt; the goal completes only through a final Judge or PM audit that maps receipts and verification back to the original outcome (recording `full_outcome_complete: true` for continuous execution goals).
 
 During a `$goal-prep` turn, do not perform the user's requested work, even if the work looks read-only, preparatory, or obviously useful. Do not refresh or load named skills, inspect implementation files, browse reference repos, research design inspiration, generate design plans, generate images/assets, run app-specific checks, or edit product files. Put those actions into Scout, Judge, Worker, or PM tasks for the later `/goal` run.
 
@@ -44,8 +44,8 @@ Allowed `$goal-prep` actions:
 - create and open the built-in local GoalBuddy board surface for the goal unless the user opts out;
 - optionally run the GoalBuddy board checker against that `state.yaml`;
 - verify GoalBuddy agent availability, if this can be done without touching implementation work, and record `installed`, `bundled_not_installed`, `missing`, or `unknown` truthfully;
-- print exactly `/goal Follow docs/goals/<slug>/goal.md.`;
-- ask whether to start `/goal`, refine the board, or stop.
+- print both exact execution commands: Codex `/goal Follow docs/goals/<slug>/goal.md.` and Claude Code `/goalbuddy Follow docs/goals/<slug>/goal.md.`;
+- ask whether to start execution, refine the board, or stop.
 
 If the prompt names another skill or tool, such as "use the taste skill", "refresh the taste skill", "look at this repo", "use browser", or "generate assets", record that requirement in the charter and seed tasks. Do not load that skill, browse that repo, or generate those assets during `$goal-prep`.
 
@@ -175,7 +175,7 @@ Do:
 - seed a role-tagged task board that matches the input shape;
 - make the first active task safe;
 - verify Scout, Worker, and Judge agent availability or record an explicit truthful state;
-- print the exact command `/goal Follow docs/goals/<slug>/goal.md.`;
+- print the exact Codex command `/goal Follow docs/goals/<slug>/goal.md.` and Claude Code command `/goalbuddy Follow docs/goals/<slug>/goal.md.`;
 - ask whether to start now, refine `goal.md`, or stop.
 
 Do not:
@@ -380,10 +380,11 @@ A task's `assignee` determines the agent. The task card is the order. The receip
 
 Only the main `/goal` PM may choose the active task, update the board, mark tasks done, or mark the goal complete. The PM thinking policy and the execution quality commands (including the subagent dispatch rules) live in `references/goal-execution.md`.
 
-## Default `/goal` Shape
+## Default Execution Shape
 
 ```text
-/goal Follow docs/goals/<slug>/goal.md.
+Codex:      /goal Follow docs/goals/<slug>/goal.md.
+Claude Code: /goalbuddy Follow docs/goals/<slug>/goal.md.
 ```
 
 When that command runs, the PM follows `references/goal-execution.md`.
