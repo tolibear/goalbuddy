@@ -1,106 +1,260 @@
-# Changelog
+# GoalBuddy Changelog
 
-## 0.4.3: Restore Claude's Native /goal (2026-08-05)
+This is GoalBuddy's single, running release history. New releases go at the top. Do not create separate versioned changelog files under `docs/releases/`; that directory contains the release process only.
+
+Dates are public npm publication dates. Historical entries describe the product as it behaved in that release, with explicit notes where a later release superseded the behavior.
+
+## 0.4.3: Restore Claude's Native `/goal` (2026-08-05)
 
 - **Claude Code keeps its native `/goal`.** GoalBuddy now installs its execution loop as `/goalbuddy`, removing the namespace collision introduced in 0.4.0.
-- **Safe migration.** Install and update remove the old `~/.claude/commands/goal.md` only when the file is GoalBuddy-authored. User-authored files are preserved and reported as a collision for the owner to resolve.
+- **Safe migration.** Install and update remove the old `~/.claude/commands/goal.md` only when its hash exactly matches the GoalBuddy-authored 0.4.0 through 0.4.2 command. Modified and user-authored files are preserved and reported as collisions for the owner to resolve.
 - **Harness-specific handoffs.** Goal Prep, `init`, and `resume` now print Codex `/goal` and Claude Code `/goalbuddy` commands explicitly while both harnesses continue to share the same repo-native board.
-- **Regression coverage.** Tests verify fresh installs, owned-command migration, preservation of user files, doctor collision detection, packed npm contents, and the split continuation commands.
+- **Regression coverage.** Tests verify fresh installs, exact owned-command migration, user-file preservation, doctor collision detection, packed npm contents, and split continuation commands.
+- **Published proof.** Node 18 and Node 24 CI passed, the trusted-publishing workflow completed, and npm promoted `goalbuddy@0.4.3` to `latest`.
 
-## 0.4.2: Honest Continuation State (2026-07-31)
+Release: [v0.4.3](https://github.com/tolibear/goalbuddy/releases/tag/v0.4.3)
+
+## 0.4.2: Honest Continuation State (2026-08-03)
 
 - **Machine-checkable stop decisions.** `goalbuddy can-stop <goal>` fails closed while a valid active task remains and permits exit only for a receipt-backed complete outcome or the exact validated terminal approval wait.
-- **Receipt transitions expose the continuation contract.** `goalbuddy receipt` now returns `stop_allowed`, `continuation_required`, and `next_action` immediately after activating the next task, closing the handoff gap that left FL Donate active but unattended.
-- **The board no longer impersonates an executor.** The local surface identifies itself as a state viewer and reports executor status as `Not observed` unless the goal is complete or waiting. A healthy viewer is no longer presented as evidence that work is running.
-- **Regression coverage.** Tests cover active-work stop rejection, complete and approval-wait exits, receipt-to-next-task continuation, and honest board semantics. The canonical and plugin payloads remain byte-identical.
-- **Native waits no longer abandon live agents.** `wait_agent` uses bounded, role-aware observation windows and never treats missing file changes as Scout or Judge failure. External CLI timeouts remain hard failures, and timeout reports now include scope evidence for partial writes before fallback.
+- **Receipt transitions expose the continuation contract.** `goalbuddy receipt` returns `stop_allowed`, `continuation_required`, and `next_action` immediately after activating the next task.
+- **The board no longer impersonates an executor.** The local surface identifies itself as a state viewer and reports executor status as `Not observed` unless the goal is complete or waiting. A healthy viewer is not evidence that work is running.
+- **Native waits are durable and bounded.** A native `wait_agent` timeout is an observation window, not task failure. Role-aware windows keep live Scout, Judge, and Worker agents attached.
+- **External deadlines remain terminal.** External CLI `dispatch --timeout` still terminates the child, reports failure, and includes post-timeout scope evidence so partial writes can be inspected safely.
+- **Regression coverage.** Tests cover active-work stop rejection, complete and approval-wait exits, receipt-to-next-task continuation, honest board semantics, and the difference between native observation and external termination.
+
+Release: [v0.4.2](https://github.com/tolibear/goalbuddy/releases/tag/v0.4.2)
 
 ## 0.4.1: Installed Contract Fixes (2026-07-18)
 
-- **npm installs include the full execution contract.** The package now ships the canonical `goalbuddy/` directory as one boundary, including `references/goal-execution.md`. A packed-artifact regression test compares the canonical and plugin skill trees and performs a clean Claude Code install from the generated tarball.
-- **Claude Code prompts name the exact GoalBuddy roles.** Rendered task prompts now include exact Claude Code `subagent_type` values alongside Codex `agent_type` values. The execution contract forbids generic `Explore` or `general-purpose` substitution, and an `unknown` agent state now requires one exact-role attempt before PM fallback.
-- **Cross-harness routing stays mechanically aligned.** Tests cover Scout, Worker, Judge, and PM prompt metadata and human-readable spawn instructions, while the generated plugin skill remains byte-identical to the canonical payload.
+- **Complete npm skill payload.** The package ships the entire canonical `goalbuddy/` directory, including `references/goal-execution.md`, so npm and marketplace installs receive the same execution contract.
+- **Packed-artifact verification.** Tests inspect npm's real packed file list, compare the canonical and plugin skill trees, install the tarball into a clean Claude home, and verify the contract is present.
+- **Exact Claude Code role routing.** Prompts carry Codex `agent_type` and Claude Code `subagent_type` values for Scout, Worker, Judge, and PM. Generic `Explore` and `general-purpose` agents are not treated as substitutes.
+- **Honest unknown state.** An `unknown` agent state requires one attempt with the exact harness-specific role before PM fallback.
 
-## 0.4.0 — Cross-Harness Goals (2026-07-06)
+Contributor thanks: `floke75` for reporting the npm omission and `Xpos587` for tracing Claude Code role routing.
 
-- **Goals now move between Codex and Claude Code.** The board has always been repo-native (`state.yaml` is the only truth), and 0.4.0 makes the handoff real: start a goal in one harness and resume it in the other with the same `/goal Follow docs/goals/<slug>/goal.md.` command. The new `goalbuddy resume` command discovers live boards in a repo and prints each goal's status, active task, and exact run command; the execution contract now states the handoff rule (resume from recorded state, never from chat history); and receipts may carry an optional `harness` field so a board's history shows which runtime performed each task.
-- **Mixed fleets: one board, many vendors.** A PM in any harness can dispatch a single task to a different vendor's agent — a Claude judge and a Codex worker on the same board. `goalbuddy dispatch docs/goals/<slug> --to codex` (also `claude-code`; bundled as a skill script for model-invoked use) renders the task prompt, runs the target CLI headless with role-appropriate sandboxing, extracts the returned receipt, and mechanically verifies write scope with git — worker changes must match `allowed_files`, read-only roles must change nothing. The dispatcher never touches `state.yaml`; the PM records the receipt, stamped with the harness that earned it.
-- **Field-tested workflow upgrades.** Lessons from a real multi-day GoalBuddy run are baked in: `goalbuddy init <slug>` scaffolds a valid board from the bundled templates (hand-written boards used to fail with an opaque version error, which now names the missing key), `goalbuddy receipt` applies receipt/status/`active_task` transitions atomically and fail-closed (validated by the checker, reverted on error), worker receipts gain a `deviations` field for in-scope judgment calls, worker templates treat a delivered receipt as the only valid stopping state, judges copy plan file lists into `allowed_files` verbatim, and the contracts pick up idle-race handling, full-oracle verification at boundaries, warm-worker reuse, and prep-time environment scanning.
-- **`/goal-prep` now actually surfaces as `/goal-prep` in Claude Code.** Claude Code names skills by directory, so previous installs listed the skill as `/goalbuddy` while every doc said `/goal-prep`. The skill now installs and ships as `goal-prep`; install/update migrates the legacy `~/.claude/skills/goalbuddy` directory away, and `goalbuddy doctor --target claude` reports `legacy_skill_present` until it is gone.
-- **Claude Code gets a real `/goal` command.** The plugin ships `commands/goal.md` and the CLI installs `~/.claude/commands/goal.md`, so the printed `/goal Follow docs/goals/<slug>/goal.md.` line runs a real command instead of relying on fuzzy skill matching.
-- **The skill contract is split by mode.** `SKILL.md` is now the prep contract plus the shared board model; `references/goal-execution.md` is the `/goal` runtime contract. The `/goal` command, the generated charter's PM loop, and the skill itself all point at the execution contract, and a policy test suite keeps the mode boundary clean.
-- **Execution contract closes the receipt gaps found by agent testing.** A `done` Worker receipt must list only passing commands — a red verify means `blocked`, not `done`, with the failure kept visible. New documented shapes: blocked Worker receipts with `blocked_reason`, the Judge `worker_package` slot for the exact next-Worker spec, the strict `T###` task-id format, and a named example for a correct fix whose verify is blocked by an out-of-scope cause.
-- **Local board server hardened.** Requests with unexpected Host headers and cross-site POST/PUT requests are rejected (closing DNS-rebinding reads and CSRF file writes), static serving refuses dot segments and directories, degraded YAML parses render a visible warning banner instead of silently dropping tasks, valid odd-indentation boards recover through the fallback parser, settings updates merge instead of wiping unspecified fields, and slug-collision boards report the deduplicated slug their URL uses.
-- **State checker fixed.** `check-goal-state.mjs` accepts a goal directory (the form the skill docs use) as well as the `state.yaml` path, no longer truncates quoted values containing `#`, and reports broken symlinks instead of crashing.
-- **CLI robustness.** `--target` values are validated, argument errors respect `--json`, repeated flags take the last value, missing option values exit with a clear error instead of consuming the next flag, update checks work on Windows, `~/.codex/config.toml` writes are atomic, prerelease versions order below their release, and `install-agents.mjs` no longer treats `--force` as a destination or defaults to a cwd-relative path.
-- **One canonical skill tree with a drift guard.** `goalbuddy/` is canonical; `plugins/goalbuddy/skills/goal-prep/` is a byte-exact mirror maintained by `npm run sync:plugin` and enforced by a test (the two trees had silently drifted apart in prior releases). A new CI workflow runs the full check suite on Node 18 and 24 for every push and PR.
-- **Agent-verified.** This release's contracts were exercised end to end by independent Opus and Sonnet agents (prep and execution roleplays against real boards, CLI sweep, board-server abuse probes) with an adversarial judge grading the artifacts; the findings drove the receipt-contract and CLI fixes above.
+Release: [v0.4.1](https://github.com/tolibear/goalbuddy/releases/tag/v0.4.1)
 
-## 0.3.9 — Marketplace and Board Runtime Polish (2026-06-23)
+## 0.4.0: Cross-Harness Goals (2026-07-07)
 
-- **Made Claude marketplace install discoverable.** The repo now ships a root `.claude-plugin/marketplace.json`, keeps it in the npm package allowlist, and validates marketplace install flow alongside the existing plugin manifest checks.
-- **Made `/goal-prep` install-channel agnostic.** Model-invoked board, prompt, and parallel-plan commands now use bundled skill scripts instead of assuming a global `goalbuddy` or `npx goalbuddy` binary. Update and agent guidance now points users back to their actual install channel.
-- **Stopped local-board flicker during task transitions.** The board watcher now coalesces rapid `state.yaml` writes before streaming updates, avoiding transient “more than one active task” errors during normal multi-step transitions.
-- **Let the board render valid parallel work.** The local board now renders multiple active tasks in the In Progress column instead of refusing to parse the whole board, while the stricter `check-goal-state` invariant remains available for board validation.
-- **Added exact-approval wait guidance.** GoalBuddy now has a terminal waiting shape for exact human approval gates: ask once, preserve the required reply, set `waiting_for_user_approval: true`, and stop until the user replies.
-- **Added PM-owned board health stewardship.** Goal Prep now explains the safe steward model: use the bundled checker and live board API to repair GoalBuddy control files only, without introducing an always-on implementation actor.
+![GoalBuddy 0.4.0: Cross-Harness Goals, one board, any agent](internal/assets/goalbuddy-v0.4.0-release.png)
 
-## 0.3.8 — Board Hub Guardrails (2026-05-29)
+- **Goals move between Codex and Claude Code.** The board is repo-native, `state.yaml` is the only truth, and `goalbuddy resume` discovers live boards without reconstructing state from chat history.
+- **Mixed fleets.** `goalbuddy dispatch docs/goals/<slug> --to codex|claude-code` runs one task on another harness, extracts its receipt, and verifies that Worker changes stay inside `allowed_files` while read-only roles change nothing.
+- **Field-tested workflow upgrades.** `goalbuddy init` scaffolds valid boards, `goalbuddy receipt` applies transitions atomically and fail-closed, Worker receipts record in-scope deviations, and judges copy planned file lists into `allowed_files` verbatim.
+- **Prep and execution became explicit modes.** `SKILL.md` owns Goal Prep and the shared board model; `references/goal-execution.md` owns the execution loop.
+- **Claude Code's skill name was corrected.** The install directory moved to `goal-prep`, matching `/goal-prep`, with automatic migration from the old `goalbuddy` skill directory.
+- **Claude Code received a GoalBuddy `/goal` command.** This made the documented handoff concrete at the time, but it shadowed Claude's native `/goal`. Version 0.4.3 superseded this command with `/goalbuddy`.
+- **Receipt contracts closed real failure gaps.** Done Worker receipts allow only passing commands, blocked receipts keep failing verification visible, Judge receipts can carry the next `worker_package`, and task IDs use the strict `T###` shape.
+- **Board and CLI hardening.** Host and Origin checks guard local board access, degraded YAML remains visible, odd indentation can recover, settings merge safely, goal paths validate, config writes are atomic, and CLI option parsing is stricter across platforms.
+- **Canonical skill drift guard.** `goalbuddy/` became canonical, `plugins/goalbuddy/skills/goal-prep/` became its generated byte-exact mirror, and CI began running on Node 18 and Node 24 for every push and pull request.
 
-- **Clarified multi-board hub recovery.** Unregistered board URLs now explain that a `/slug/` 404 does not mean the `41737` process is stale; agents should verify `/api/boards` and register the new goal on the same hub before stopping any process. Release checks now include the local board surface tests.
-- **Prefer the largest safe useful slice.** GoalBuddy now teaches Judge to pick whole useful slices, Worker to complete the assigned slice, and PM to reorient boards when tasks are safe-looking but outcome-light. `goalbuddy prompt` and the state checker emit non-fatal micro-slicing warnings without breaking old boards.
-- **Hardened Codex plugin-only installs.** Codex install/update now use the native plugin path, refresh the bundled Scout/Judge/Worker agents, and leave stale personal `~/.codex/skills/goalbuddy` / `goal-maker` folders out of the expected clean state.
-- **Fixed Codex doctor for plugin-only installs.** `goalbuddy doctor --target codex --goal-ready` now validates the plugin cache, bundled `$goal-prep` skill, enabled plugin config, and GoalBuddy agents instead of failing only because standalone personal skill folders are absent. The report also distinguishes native OpenAI-gated Codex `/goal` from GoalBuddy `$goal-prep` and local boards.
-- **Made mutating command help safe.** `goalbuddy plugin install --help` and `goalbuddy update --help` print help without installing, updating, or touching global Codex/Claude files.
+Release: [v0.4.0](https://github.com/tolibear/goalbuddy/releases/tag/v0.4.0)
 
-## 0.3.5 — Subgoals, Parallel Agents, and Dark Mode (2026-05-12)
+## 0.3.9: Marketplace and Board Runtime Polish (2026-06-23)
 
-- **Subgoals for bounded branching work.** Parent tasks can link to depth-1 child `state.yaml` boards under `subgoals/`, the checker validates child shape and containment, and the local board renders the child board inside the parent task detail.
-- **Parallel-agent-ready boards.** `goalbuddy parallel-plan` reports safe read-only Scout/Judge handoffs and Worker handoffs only when write scopes are known and disjoint. It does not mutate state or spawn agents.
-- **Dark mode and a sharper live board.** The local board now has readable dark mode, global viewer settings, compact mode, completed-task collapse, a site-aligned header, GitHub stars, and active-card motion with reduced-motion handling.
-- **Multi-board local hub navigation.** Multiple local boards share one readable `goalbuddy.localhost` hub with an in-header board selector, and parent boards stream updates when linked child subgoal state changes.
-- **More durable execution plumbing.** Scout/Judge/Worker contracts are stricter, `goalbuddy prompt` emits compact task prompts, Worker write-scope checks fail closed for ambiguous overlap, and source/plugin tests cover the new branching and parallel-safety surfaces.
+- **Claude marketplace discovery.** A root `.claude-plugin/marketplace.json` made the existing plugin installable through Claude Code's marketplace flow.
+- **Install-channel-neutral Goal Prep.** Model-invoked board, prompt, update, and parallel-plan operations use scripts bundled with the installed skill instead of assuming a shell-level `goalbuddy` binary.
+- **Calmer live transitions.** Board watching coalesces rapid `state.yaml` writes so ordinary task switches do not flash transient active-task errors.
+- **Parallel work stays visible.** The local board renders multiple active tasks while the stricter checker remains available for validation.
+- **Exact approval waits.** A terminal waiting shape records `waiting_for_user_approval: true` and the precise required reply.
+- **PM-owned board health.** The runtime guidance limits health repairs to GoalBuddy control files unless an active task explicitly permits product changes.
 
-## 0.3.2 — Harden Codex plugin cache updates (2026-05-11)
+Release: [v0.3.9](https://github.com/tolibear/goalbuddy/releases/tag/v0.3.9)
 
-- **Fixed Codex plugin updates when stale preserved-extension folders exist.** The updater now ignores non-version cache directories like `.goalbuddy-preserved-extend-*` while selecting the active plugin skill, so a leftover temporary folder cannot make `npx goalbuddy update` fail with `Unsupported version`.
-- **Stopped leaving empty preserved-extension folders during plugin reinstalls.** The updater only creates the temporary preservation directory when there is a custom extension to copy.
+## 0.3.8: Runtime Cleanup and Board Polish (2026-06-03)
 
-## 0.3.1 — Fix duplicate /goal-prep slash entry (2026-05-11)
+- **Multi-board hub guardrails.** A missing `/slug/` route no longer implies that port `41737` is stale. Agents check `/api/boards` and register the new goal before considering process cleanup.
+- **Readable board history.** Completed cards sort newest first, task cards use compact titles while retaining their complete objectives, and stale packaged examples were removed.
+- **Safer CLI path handling.** Relative goal paths become absolute before child processes run, while non-path option values remain unchanged.
+- **Runtime cleanup.** Codex reset removes only GoalBuddy-owned runtime surfaces, doctor distinguishes a fully removed install from residual agents, and prompt receipt schemas match the shipped agent contracts.
 
-- **Fixed duplicate `/goal-prep` in the Claude Code slash menu.** Previous installs shipped both a `name: goal-prep` skill and a `commands/goal-prep.md` slash command, so Claude Code listed `/goal-prep` twice with different descriptions. The skill is now the single canonical surface for `/goal-prep`. Existing installs with `~/.claude/commands/goal-prep.md` are migrated automatically: `npx goalbuddy` (and `install` / `update`) removes the legacy file. `goalbuddy doctor --target claude` reports `legacy_command_present` and fails until the legacy file is gone.
+Release: [v0.3.8](https://github.com/tolibear/goalbuddy/releases/tag/v0.3.8)
 
-## 0.3.0 — Claude Code and Codex targets
+## 0.3.7: Goalmaxxed (2026-05-19)
 
-GoalBuddy now installs into both **Codex** and **Claude Code** with a single `npx goalbuddy` run. The shared skill payload and `/goal` workflow are unchanged — this release adds a Claude Code target alongside the existing Codex one and reframes the project as "a /goal operating system for Codex and Claude Code."
+![GoalBuddy 0.3.7: Goalmaxxed](internal/assets/goalbuddy-v0.3.7-release.png)
 
-### Highlights
+Goalmaxxed narrowed the product to one durable loop:
 
-- **One command installs both targets.** `npx goalbuddy` installs and enables the native Codex plugin in `~/.codex/`, then installs the GoalBuddy skill, three Scout/Judge/Worker subagents, and the `/goal-prep` slash command into `~/.claude/`.
-- **Target-specific installs remain available.** Use `npx goalbuddy --target codex` or `npx goalbuddy --target claude` when you only want one side.
-- **Claude Code plugin scaffold** at `plugins/goalbuddy/.claude-plugin/plugin.json` with markdown subagents (`agents/goal-scout.md`, `agents/goal-judge.md`, `agents/goal-worker.md`) and a `/goal-prep` command (`commands/goal-prep.md`).
-- **`$goal-prep` (Codex) and `/goal-prep` (Claude Code)** are documented as sibling entry points throughout the skill, README, site, and CLI.
-- **Reframed README, site, plugin docs, package.json, and SKILL.md** to position the workflow as "a /goal operating system for Codex and Claude Code."
-- **CLI is target-aware.** New flags: `--target codex|claude`, `--claude-home <path>`. Existing `--codex-home` and `CODEX_HOME` continue to work unchanged.
-- **Update supports both targets.** `goalbuddy update` refreshes the Codex plugin and Claude Code skill/agents/command together unless `--target` narrows it.
-- **Doctor checks both targets.** Default is Codex; `goalbuddy doctor --target claude` runs the Claude Code skill/agent/command check.
-
-### Compatibility
-
-- `npx goalbuddy` with no flag now prepares Codex and Claude Code together. Existing Codex-only automation can keep using `--target codex` or `--codex-home`.
-- `npx goal-maker` continues to work as a temporary alias and prints the new command.
-- The shared `goalbuddy/SKILL.md` payload is unchanged in shape; the framing is now bilingual.
-
-### Tests
-
-- All 46 tests pass.
-- Help-text and version-arithmetic tests updated for the bilingual usage and the 0.3.0 bump.
-
-### Adding Or Updating Both
-
-Install or refresh both supported agent environments:
-
-```bash
-npx goalbuddy
-npx goalbuddy update
+```text
+Intent -> Oracle -> Surface -> Loop -> Proof
 ```
+
+- **Goal oracles became first-class.** Serious goals need an observable completion signal such as tests, a walkthrough, an artifact, a benchmark, a source-backed answer, a release check, or a final human decision.
+- **Completion requires proof.** A finished active task is not a finished goal. Final Judge or PM audit evidence must map receipts and verification back to the oracle.
+- **Larger useful slices.** Judge and Worker favor bounded, verified vertical results instead of safe-looking helper files, contracts, or proof notes that do not advance the owner outcome.
+- **The local board became core.** The board moved from the extension story into the built-in GoalBuddy surface.
+- **The extension catalog was removed.** Custom GitHub, Linear, Slack, and release integrations became ordinary repo work rather than installable GoalBuddy catalog items.
+- **Smaller public promise.** GoalBuddy prepares and pressures goal runs. It stays local, file-backed, and intentionally avoids hosted state, automatic scheduling, or UI-owned workflow truth.
+
+Release: [v0.3.7](https://github.com/tolibear/goalbuddy/releases/tag/v0.3.7)
+
+## 0.3.6: Codex Install and Runtime Hardening (2026-05-14)
+
+- Codex install and update adopted the canonical plugin-only skill path and removed stale personal GoalBuddy skills.
+- Doctor began validating plugin cache, enabled config, bundled Goal Prep, required agents, and native `/goal` readiness as separate facts.
+- Mutating commands such as `plugin install --help` and `update --help` became safe help-only operations.
+- Spawn prompts exposed exact GoalBuddy agent types.
+- Board parsing normalized legacy complete statuses and tolerated malformed deep receipt metadata without blanking the full board.
+
+Published as `goalbuddy@0.3.6`; the 0.3.5 GitHub release was updated with the patch notes.
+
+## 0.3.5: Subgoals, Parallel Agents, and Dark Mode (2026-05-12)
+
+![GoalBuddy 0.3.5: Subgoals, parallel agents, and dark mode](internal/assets/goalbuddy-v0.3.5-release.png)
+
+- **Depth-1 subgoals.** Parent tasks can link to one contained child board under `subgoals/`. The checker rejects outside-root paths, missing state, invalid child boards, and recursive nesting.
+- **Parallel-agent-ready boards.** `goalbuddy parallel-plan` reports safe read-only Scout and Judge handoffs and permits Worker parallelism only for provably disjoint write scopes. It reports recommendations without mutating state or spawning agents.
+- **Deterministic task prompts.** `goalbuddy prompt` renders compact, task-specific handoffs with scope, verification, stop conditions, reasoning hints, recommended roles, and expected receipt shape.
+- **Dark mode and viewer settings.** The local board gained system/light/dark themes, density controls, completed-column preferences, board-opening preferences, and reduced-motion support.
+- **One local multi-board hub.** Multiple boards register with `goalbuddy.localhost:41737`, use separate slug routes, and update parent views when child boards change.
+- **Sharper agent contracts.** Scout maps, Judge gates, Worker patches, receipts prove, and `state.yaml` decides.
+
+Release: [v0.3.5](https://github.com/tolibear/goalbuddy/releases/tag/v0.3.5)
+
+## 0.3.2: Harden Codex Plugin Cache Updates (2026-05-12)
+
+- Ignored non-version cache directories such as `.goalbuddy-preserved-extend-*` when resolving the active Codex plugin version.
+- Stopped creating empty preservation directories during plugin reinstall when no custom extension existed.
+
+## 0.3.1: Fix Duplicate `/goal-prep` Entry (2026-05-12)
+
+- Removed the redundant `commands/goal-prep.md` wrapper so Claude Code's skill is the single `/goal-prep` surface.
+- Install and update migrate the legacy command automatically, while doctor reports and fails on any leftover duplicate.
+
+## 0.3.0: Claude Code Support (2026-05-12)
+
+![GoalBuddy 0.3.0: Claude Code support](internal/assets/goalbuddy-v0.3.0-release.png)
+
+- **One command for both targets.** `npx goalbuddy` installs Codex and Claude Code by default, with `--target codex|claude` for a single target.
+- **Claude Code became first-class.** The package added a Claude plugin scaffold, markdown Scout/Judge/Worker agents, and `/goal-prep` beside the Codex plugin.
+- **Target-aware install, update, and doctor.** `--codex-home` and `--claude-home` allow isolated installs and diagnostics.
+- **Compatibility.** `npx goal-maker` remained as a temporary alias and existing Codex-only automation could keep using explicit Codex targeting.
+- **Verification.** The release passed 46 tests, packed 97 files, and passed the publish-version guard.
+
+Release: [v0.3.0](https://github.com/tolibear/goalbuddy/releases/tag/v0.3.0)
+
+## 0.2.22: Built-In Visual Board Payload (2026-05-11)
+
+- Bundled the visual board backends with Goal Prep, polished the public presentation, and kept agent-availability behavior explicit.
+
+## 0.2.21: Update and Escalation Guidance (2026-05-08)
+
+- Added update detection, user-facing upgrade paths, and clearer escalation guidance for unavailable agents or external dependencies.
+
+## 0.2.20: Constrain Extension Sync (2026-05-07)
+
+- Limited GitHub Projects synchronization to the GoalBuddy board view instead of allowing extension state to become broader workflow truth.
+
+## 0.2.19: Install Flow Documentation (2026-05-07)
+
+- Documented the GoalBuddy install model and aligned the package, site, and extension guidance.
+
+## 0.2.18: Install Extensions Into the Plugin Skill (2026-05-07)
+
+- Moved installed extension payloads under the plugin skill so the native plugin remained the authoritative Codex installation.
+
+## 0.2.17: Goal Prep Discovery (2026-05-07)
+
+- Made install output surface Goal Prep clearly, simplified extension discovery, and suggested optional integrations after installation.
+
+## 0.2.16: Rename the Skill to Goal Prep (2026-05-07)
+
+- Renamed the user-facing skill from GoalBuddy to Goal Prep while keeping the GoalBuddy product and plugin identity.
+
+## 0.2.15: One Plugin Install Command (2026-05-07)
+
+- Consolidated the GoalBuddy plugin installation path into one command and kept plugin internals out of composer prompts.
+
+## 0.2.14: One-Command Codex Install (2026-05-07)
+
+- Added the direct one-command Codex plugin install path and enabled GoalBuddy by default after marketplace registration.
+
+## 0.2.13: Codex Plugin Marketplace (2026-05-07)
+
+- Exposed GoalBuddy through a Codex plugin marketplace and added the first-party marketplace metadata.
+
+## 0.2.12: Strict Goal Prep Boundary (2026-05-06)
+
+- Made Goal Prep prepare the board and print the execution command without beginning implementation, browsing, research, skill loading, or asset generation.
+- Generated the temporary Goal Maker compatibility skill during install rather than packaging a duplicate payload.
+- Added regression coverage for canonical, plugin, and compatibility behavior.
+
+Release: [v0.2.12](https://github.com/tolibear/goalbuddy/releases/tag/v0.2.12)
+
+## 0.2.11: Trusted Publishing Repair (2026-05-06)
+
+- Fixed npm's trusted-publishing command and shipped a provenance-backed patch after local check, pack, and publish-version verification.
+
+Release: [v0.2.11](https://github.com/tolibear/goalbuddy/releases/tag/v0.2.11)
+
+## 0.2.10: GoalBuddy Package Launch (2026-05-06)
+
+- Rebranded the npm package from Goal Maker to GoalBuddy.
+- Added the npm publish-version guard so an already-published or older version could not be released accidentally.
+- Kept `goal-maker` as a compatibility command during migration.
+
+Release tag: [v0.2.10](https://github.com/tolibear/goalbuddy/releases/tag/v0.2.10)
+
+## Goal Maker Package History
+
+Before the GoalBuddy package launched, this repository published as `goal-maker`. These entries preserve that product's running history without maintaining a second changelog.
+
+### 0.2.10: Extension Workflows and Publish Guard (2026-05-06)
+
+- Added receipt-aligned onboarding, planning, review, recovery, release, and GitHub pull-request extension workflows.
+- Added the publish-version guard before the GoalBuddy package rebrand.
+
+### 0.2.9: Simpler Extension Output (2026-05-06)
+
+- Simplified extension command output for more readable install and discovery flows.
+
+### 0.2.8: Extension Discovery (2026-05-06)
+
+- Improved extension metadata and install-time discovery, including the GitHub pull-request workflow extension.
+
+### 0.2.7: Full-Outcome Continuation (2026-05-05)
+
+- Required Goal Maker to keep running until the original outcome, not merely the active task, was complete.
+
+### 0.2.6: Package Positioning (2026-05-05)
+
+- Refined the package positioning and public assets around local Scout/Judge/Worker boards, receipts, and verification.
+
+### 0.2.5: EXTEND (2026-05-04)
+
+- Introduced the GitHub-hosted extension catalog and `goal-maker extend` discovery, install, dry-run, and doctor commands.
+- Moved package-only implementation under `internal/` and kept the installable skill payload focused.
+- Added completed example workflows demonstrating the task-board and extension model.
+
+Release: [v0.2.5](https://github.com/tolibear/goalbuddy/releases/tag/v0.2.5)
+
+### 0.2.1: Documentation and Diagram Refresh (2026-05-03)
+
+- Refreshed the README and generated flow diagram for the task-board model.
+
+### 0.2.0: Task-Board Architecture (2026-05-03)
+
+- Rebuilt Goal Maker around a local task board with one active task, role-specific Scout/Judge/Worker work, receipts, and `state.yaml` truth.
+
+### 0.1.4: Setup-First Flow (2026-05-03)
+
+- Shifted the product into a setup-first workflow that prepares durable local state before execution.
+
+### 0.1.3: Codex Skill Invocation (2026-05-03)
+
+- Documented the Codex skill invocation contract.
+
+### 0.1.2: Install and Contribution Docs (2026-05-03)
+
+- Clarified installation and contribution guidance.
+
+### 0.1.1: Agents Installed by Default (2026-05-03)
+
+- Installed the bundled role agents by default.
+
+### 0.1.0: Initial npm Package (2026-05-03)
+
+- Prepared the first `npx goal-maker` package and normalized its executable path.
