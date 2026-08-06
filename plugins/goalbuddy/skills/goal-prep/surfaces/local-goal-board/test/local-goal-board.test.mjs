@@ -713,7 +713,7 @@ test("unregistered board paths explain hub reuse instead of stale-port cleanup",
     const server = await startBoardServer({ goalDir, host: "127.0.0.1", port: 0 });
     try {
       const baseUrl = new URL(server.url).origin;
-      const missingResponse = await fetch(`${baseUrl}/rinova-client-revision-redesign/`);
+      const missingResponse = await fetch(`${baseUrl}/unregistered-example-board/`);
       assert.equal(missingResponse.status, 404);
       const message = await missingResponse.text();
       assert.match(message, /board path is not registered/i);
