@@ -969,18 +969,31 @@ function installPlugin({ quiet = false } = {}) {
 
   const pluginManifest = JSON.parse(readFileSync(pluginManifestPath, "utf8"));
   const pluginCachePath = pluginCacheRoot(pluginManifest.version);
-  const marketplace = runCodex(["plugin", "marketplace", "add", source]);
-  if (!marketplace.ok) {
-    throw new Error(`Failed to add Codex plugin marketplace: ${firstLine(marketplace.stderr || marketplace.stdout)}`);
+  const warnings = [];
+
+  // Prefer Codex's own installer. It stages the tree into a temp directory and renames it into
+  // place, prunes superseded version directories, migrates `commands/` into skills, and writes the
+  // config enablement, none of which a plain copy does.
+  const native = installPluginWithCodexCli(source);
+  const removedStaleVersionPaths = [];
+  if (!native.ok) {
+    // Falling back to the bundled tree keeps the install working with no `codex` CLI and no network.
+    // Codex loads a plugin from its cache directory plus the `[plugins]` config, both written below,
+    // and consults the marketplace entry only to find the source again later.
+    warnings.push(`Codex CLI install unavailable (${native.reason}). Installed the bundled copy directly; \`codex plugin add\` would also migrate the plugin's commands into skills.`);
+
+    mkdirSync(dirname(pluginCachePath), { recursive: true });
+    rmSync(pluginCachePath, { recursive: true, force: true });
+    cpSync(pluginSource, pluginCachePath, { recursive: true });
+    // Prune only after the new version is in place, so a failed copy cannot leave the cache empty.
+    removedStaleVersionPaths.push(...pruneStalePluginVersions(pluginManifest.version));
   }
 
-  mkdirSync(dirname(pluginCachePath), { recursive: true });
-  rmSync(pluginCachePath, { recursive: true, force: true });
-  cpSync(pluginSource, pluginCachePath, { recursive: true });
-  // Prune only after the new version is in place, so a failed copy cannot leave the cache empty.
-  const removedStaleVersionPaths = pruneStalePluginVersions(pluginManifest.version);
   const removedLegacySkillPaths = cleanupLegacyCodexSkills();
-  const configPath = enablePluginConfig();
+  // `codex plugin add` already enables the plugin, so only write config when it is not enabled yet.
+  const configPath = join(codexHome(), "config.toml");
+  if (!pluginConfigEnabled(configPath)) enablePluginConfig();
+  // Codex plugins cannot bundle subagents, so the role files always install as loose config files.
   const agents = installAgents({ quiet: true });
 
   const report = {
@@ -989,12 +1002,14 @@ function installPlugin({ quiet = false } = {}) {
     plugin: `${pluginName}@${pluginName}`,
     version: pluginManifest.version,
     codex_home: codexHome(),
+    install_model: native.ok ? "codex-cli" : "bundled-copy",
     marketplace_source: source,
     cache_path: pluginCachePath,
     config_path: configPath,
     agents,
     removed_legacy_skill_paths: removedLegacySkillPaths,
     removed_stale_version_paths: removedStaleVersionPaths,
+    warnings,
   };
 
   if (hasFlag("--json") && !quiet) {
@@ -1005,7 +1020,7 @@ function installPlugin({ quiet = false } = {}) {
   if (quiet) return report;
 
   console.log(`Installed ${canonicalProductName} Codex plugin ${pluginManifest.version}`);
-  console.log(`Marketplace: ${source}`);
+  console.log(`Marketplace: ${report.marketplace_source}`);
   console.log(`Cache: ${pluginCachePath}`);
   console.log(`Config: ${configPath}`);
   console.log(`Agents: ${summarizeStatuses(report.agents)}`);
@@ -1119,6 +1134,26 @@ function removeTomlTable(text, header) {
 
   if (!removed) return text;
   return output.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\n*$/, "\n");
+}
+
+// Installs through the `codex` CLI so Codex owns staging, pruning, command migration, and config
+// enablement. The marketplace is the published repository, the same source the docs and the in-app
+// instructions name, so the entry written into the user's config stays portable. Returns
+// `{ ok: false, reason }` when the CLI cannot do it, so the caller can fall back to copying the
+// bundled tree.
+function installPluginWithCodexCli(source) {
+  if (!runCodex(["--version"]).ok) return { ok: false, reason: "codex CLI not found on PATH" };
+
+  const marketplace = runCodex(["plugin", "marketplace", "add", source]);
+  if (!marketplace.ok) {
+    return { ok: false, reason: firstLine(marketplace.stderr || marketplace.stdout) || "marketplace add failed" };
+  }
+
+  const added = runCodex(["plugin", "add", `${pluginName}@${pluginName}`]);
+  if (!added.ok) {
+    return { ok: false, reason: firstLine(added.stderr || added.stdout) || "plugin add failed" };
+  }
+  return { ok: true, reason: "" };
 }
 
 // Codex serves the highest version directory it finds under the plugin's cache root, so a directory

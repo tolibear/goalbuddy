@@ -42,7 +42,11 @@ function receiptContractSchema(agentPath) {
   return JSON.parse(match[1]);
 }
 
-function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
+// `nativeInstall` mirrors a real codex CLI, which can install a plugin itself: `plugin add` copies
+// the tree out of the registered marketplace, prunes superseded versions, and enables the plugin in
+// config.toml. Set it false to make `plugin add` fail so the installer takes its bundled-copy
+// fallback. The win32 stub stays minimal (CI is linux), so nativeInstall is posix-only.
+function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true, nativeInstall = true } = {}) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
   if (process.platform === "win32") {
@@ -71,8 +75,34 @@ function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
       `  echo "goals                               under development  ${goalsEnabled ? "true" : "false"}"; exit 0`,
       "fi",
       "if [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"marketplace\" ] && [ \"$3\" = \"add\" ]; then",
+      "  mkdir -p \"$CODEX_HOME\"",
+      "  printf '%s\\n' \"$4\" > \"$CODEX_HOME/.fake-marketplace-src\"",
       "  echo \"Added marketplace goalbuddy\"; exit 0",
       "fi",
+      ...(nativeInstall
+        ? [
+          "if [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"add\" ]; then",
+          "  src=$(cat \"$CODEX_HOME/.fake-marketplace-src\" 2>/dev/null)",
+          "  [ -n \"$src\" ] || exit 1",
+          // a real CLI clones the marketplace repo; stand in for that clone with this checkout
+          "  if [ -d \"$src/plugins/goalbuddy\" ]; then tree=\"$src/plugins/goalbuddy\"; else tree=\"$PWD/plugins/goalbuddy\"; fi",
+          "  [ -d \"$tree\" ] || exit 1",
+          "  ver=$(sed -n 's/.*\"version\": *\"\\([^\"]*\\)\".*/\\1/p' \"$tree/.codex-plugin/plugin.json\" | head -1)",
+          "  [ -n \"$ver\" ] || exit 1",
+          "  cacheRoot=\"$CODEX_HOME/plugins/cache/goalbuddy/goalbuddy\"",
+          "  rm -rf \"$cacheRoot/$ver\"; mkdir -p \"$cacheRoot/$ver\"",
+          "  cp -R \"$tree/.\" \"$cacheRoot/$ver/\"",
+          "  for d in \"$cacheRoot\"/*; do",
+          "    [ -d \"$d\" ] || continue",
+          "    [ \"$(basename \"$d\")\" = \"$ver\" ] || rm -rf \"$d\"",
+          "  done",
+          "  grep -q 'goalbuddy@goalbuddy' \"$CODEX_HOME/config.toml\" 2>/dev/null || printf '[plugins.\"goalbuddy@goalbuddy\"]\\nenabled = true\\n' >> \"$CODEX_HOME/config.toml\"",
+          "  echo \"Installed goalbuddy@goalbuddy\"; exit 0",
+          "fi",
+        ]
+        : [
+          "if [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"add\" ]; then echo \"plugin add unsupported\" 1>&2; exit 1; fi",
+        ]),
       "exit 2",
       "",
     ].join("\n");
@@ -1063,11 +1093,56 @@ test("plugin install ignores non-version cache directories", () => {
   }
 });
 
-test("plugin install removes a newer stale version directory", () => {
+test("plugin install uses the codex CLI and installs the bundled version", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const codexHome = join(root, "codex-home");
     const env = fakeCodexEnv(root);
+
+    const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome, "--json"], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+
+    const report = JSON.parse(install.stdout);
+    assert.equal(report.install_model, "codex-cli");
+    assert.deepEqual(report.warnings, []);
+    // the published repository, matching what the docs and the in-app instructions tell users to add
+    assert.equal(report.marketplace_source, "tolibear/goalbuddy");
+    assert.equal(report.version, packageVersion);
+    assert.equal(existsSync(join(report.cache_path, "skills", "goal-prep", "SKILL.md")), true);
+    assert.match(readFileSync(join(codexHome, "config.toml"), "utf8"), /\[plugins\."goalbuddy@goalbuddy"\]/);
+    assert.equal(existsSync(join(codexHome, "agents", "goal_scout.toml")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("plugin install falls back to the bundled copy when the codex CLI cannot install", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const env = fakeCodexEnv(root, { nativeInstall: false });
+
+    const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome, "--json"], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+
+    const report = JSON.parse(install.stdout);
+    assert.equal(report.install_model, "bundled-copy");
+    assert.match(report.warnings.join("\n"), /Codex CLI install unavailable/);
+    // the fallback still produces a loadable install: cache, config, and agents
+    assert.equal(existsSync(join(report.cache_path, "skills", "goal-prep", "SKILL.md")), true);
+    assert.match(readFileSync(join(codexHome, "config.toml"), "utf8"), /enabled = true/);
+    assert.equal(existsSync(join(codexHome, "agents", "goal_scout.toml")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the bundled-copy install removes a newer stale version directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    // Codex prunes for us on the native path, so this covers the fallback that copies the tree.
+    const env = fakeCodexEnv(root, { nativeInstall: false });
 
     const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome, "--json"], { env });
     assert.equal(install.status, 0, install.stderr || install.stdout);
@@ -1091,11 +1166,11 @@ test("plugin install removes a newer stale version directory", () => {
   }
 });
 
-test("plugin install leaves directories that are not plugin versions alone", () => {
+test("the bundled-copy install leaves directories that are not plugin versions alone", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {
     const codexHome = join(root, "codex-home");
-    const env = fakeCodexEnv(root);
+    const env = fakeCodexEnv(root, { nativeInstall: false });
 
     const install = runGoalMaker(["plugin", "install", "--codex-home", codexHome, "--json"], { env });
     assert.equal(install.status, 0, install.stderr || install.stdout);
